@@ -4,63 +4,83 @@ import sqlite3
 import pathlib
 from datetime import date, timedelta
 
-# Correctly navigate up three levels to the project root
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 DB_PATH = PROJECT_ROOT / "config/students.db"
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
-def get_monday_anchor():
-    """Returns the date of the most recent Monday."""
+def get_monday_anchor() -> str:
     today = date.today()
     monday = today - timedelta(days=today.weekday())
     return monday.strftime("%Y-%m-%d")
 
+def safe_load_json(s: str):
+    try:
+        return json.loads(s) if s else {}
+    except Exception:
+        return {}
+
 def insert_grades():
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
+    print(f"DB: {DB_PATH}")
+    print(f"Input: {JSONL_PATH}")
 
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH) as conn, open(JSONL_PATH, "r", encoding="utf-8") as f:
             conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cur = conn.cursor()
 
-            with open(JSONL_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    data = json.loads(line)
-                    student_id = data.get("db_id")
-                    grades = data.get("grades", {}).get("parsed_grades")
+            for raw in f:
+                raw = raw.strip()
+                if not raw:
+                    continue
 
-                    if not student_id or not isinstance(grades, dict):
-                        print(f"Skipping line due to missing data or incorrect format: {line.strip()}")
-                        continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    print(f"Skipping non-JSON line: {raw[:120]}…")
+                    continue
 
-                    # First, get the student's current WeeklyData
-                    cursor.execute("SELECT WeeklyData FROM Student WHERE ID = ?", (student_id,))
-                    row = cursor.fetchone()
+                # Skip error payloads
+                if "error" in data:
+                    print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
+                    continue
 
-                    if not row:
-                        print(f"Student with ID '{student_id}' not found in the database.")
-                        continue
+                # Accept both NEW and OLD shapes:
+                # NEW: {"db_id": 1, "id": "...", "parsed_grades": {...}}
+                # OLD: {"db_id": 1, "id": "...", "grades": {"parsed_grades": {...}}}
+                student_id = data.get("db_id")
+                grades = data.get("parsed_grades")
+                if grades is None and isinstance(data.get("grades"), dict):
+                    grades = data["grades"].get("parsed_grades")
 
-                    weekly_data_json = row["WeeklyData"]
-                    weekly_data = json.loads(weekly_data_json)
+                if not student_id or not isinstance(grades, dict) or not grades:
+                    print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
+                    continue
 
-                    # Update the dictionary for the current week
-                    weekly_data[monday_anchor] = grades
+                # Fetch existing WeeklyData
+                cur.execute("SELECT WeeklyData FROM Student WHERE ID = ?", (student_id,))
+                row = cur.fetchone()
+                if not row:
+                    print(f"Student with ID '{student_id}' not found.")
+                    continue
 
-                    # Write the updated JSON back to the database
-                    cursor.execute(
-                        "UPDATE Student SET WeeklyData = ? WHERE ID = ?",
-                        (json.dumps(weekly_data), student_id)
-                    )
-                    print(f"Successfully updated grades for student ID {student_id} for the week of {monday_anchor}.")
-            
+                weekly_data = safe_load_json(row["WeeklyData"])
+
+                # Update current week's bucket
+                weekly_data[monday_anchor] = grades
+
+                # Persist
+                cur.execute(
+                    "UPDATE Student SET WeeklyData = ? WHERE ID = ?",
+                    (json.dumps(weekly_data, ensure_ascii=False), student_id)
+                )
+                print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
+
             conn.commit()
 
     except FileNotFoundError:
         print(f"Error: Output file not found at {JSONL_PATH}")
-    except json.JSONDecodeError:
-        print(f"Error: Could not decode JSON from {JSONL_PATH}")
     except sqlite3.Error as e:
         print(f"Database error: {e}")
 

@@ -1,254 +1,180 @@
-"""
-Infinite Campus scraper for Gilbert Public Schools (parent portal).
-
-This engine logs into the Gilbert, AZ Infinite Campus parent portal,
-optionally selects a specific student (based on first name), fetches
-semester grades, and supports logging out.  It accommodates both the
-modern Angular component layout (`<app-student-summary-button>`) and
-older anchor‑based layouts for choosing a student.  Use this engine
-with the engine key ``infinite_campus_parent_gilbert``.
-
-Usage example::
-
-    from scraper.portals import get_portal
-    Engine = get_portal("infinite_campus_parent_gilbert")
-    scraper = Engine(page, username, password, student_name="Nikolas")
-    await scraper.login()       # will auto‑select Nikolas
-    grades = await scraper.fetch_grades()
-    await scraper.logout()
-
-The ``student_name`` passed at construction (via the base
-``PortalEngine``) is used automatically; you may also override
-selection via ``login(first_name=...)``.
-"""
-
 from __future__ import annotations
+import re
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, Tuple, List
 
-from typing import Any, Dict, Optional
-
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-from playwright.async_api import Page
-
-from .base import PortalEngine
-from . import register_portal
-
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+from bs4 import BeautifulSoup  # type: ignore
+from scraper.portals.base import PortalEngine  # type: ignore
+from scraper.portals import register_portal  # type: ignore
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
 @register_portal("infinite_campus_parent_gilbert")
 class InfiniteCampus(PortalEngine):
-    """Scraper implementation for the Gilbert, AZ Infinite Campus parent portal."""
-
-    LOGIN: str = "https://gilbertaz.infinitecampus.org/campus/gilbert.jsp"
-    GRADEBOOK: str = (
-        "https://gilbertaz.infinitecampus.org/campus/nav-wrapper/parent/portal/parent/grades?appName=gilbert"
+    LOGIN = "https://gilbertaz.infinitecampus.org/campus/gilbert.jsp"
+    HOME_WRAPPER = (
+        "https://gilbertaz.infinitecampus.org/"
+        "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
     )
-    LOGOFF: str = (
-        "https://gilbertaz.infinitecampus.org/campus/portal/parents/gilbert.jsp?status=logoff"
+    LOGOFF = (
+        "https://gilbertaz.infinitecampus.org/campus/"
+        "portal/parents/gilbert.jsp?status=logoff"
     )
 
+    # ---------------------- LOGIN (home only) ----------------------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(Exception),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        """Log into the Infinite Campus portal.
-
-        Args:
-            first_name: Optional override for the student’s first name.  If
-                omitted, ``self.student_name`` provided at instantiation is
-                used when selecting a student on the home page.
-        """
-        await self.page.context.tracing.start(screenshots=True, snapshots=True)
+        """Only log in and arrive on the parent/home shell."""
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
         await self.page.fill("input#username", self.sid)
         await self.page.fill("input#password", self.pw)
-        await self.page.wait_for_timeout(200)
-        await self.page.click('button[type="submit"]')
-        await self.page.wait_for_url(lambda url: "home" in url, timeout=15_000)
-        await self.page.wait_for_timeout(5_000)
-        # Use explicit first_name if provided; otherwise use student_name from the base class
-        target_name: Optional[str] = first_name or getattr(self, "student_name", None)
-        if target_name:
-            await self._select_student_by_first_name(target_name)
-        # Save the page HTML for debugging (optional)
-        with open("gilbert_parent_portal.html", "w", encoding="utf-8") as f:
-            f.write(await self.page.content())
+        await self.page.click("button:has-text('Log In')")
+        await self.page.wait_for_url(lambda u: "parent/home" in u or "nav-wrapper" in u, timeout=15_000)
+        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
+        print("[IC] Logged in and on parent/home.")
 
-    async def _select_student_by_first_name(self, first_name: str) -> None:
-        """Select a student on the home page by clicking the appropriate card.
-
-        This method supports both modern (`app-student-summary-button`) and
-        older anchor‑based layouts.  It attempts to locate a student
-        whose displayed name contains ``first_name`` (case‑insensitive) and
-        then clicks the corresponding summary button or link to load that
-        student’s profile (causing the URL to include ``personID=``).
-
-        Args:
-            first_name: The first name to search for within the student’s
-                displayed name.
-
-        Raises:
-            RuntimeError: If no matching student button or link is found.
-        """
-        # Wait for either summary buttons or anchor links to appear
-        await self.page.wait_for_selector(
-            "app-student-summary-button, a[href*='personID=']",
-            timeout=15_000,
-        )
-
-        # --- Modern layout: app-student-summary-button ---
-        summary_buttons = self.page.locator("app-student-summary-button")
-        summary_count = await summary_buttons.count()
-        for idx in range(summary_count):
-            btn = summary_buttons.nth(idx)
-            # Each summary button contains an element with class "studentSummary__student-name"
-            name_locator = btn.locator(".studentSummary__student-name")
-            if await name_locator.count() > 0:
-                try:
-                    text = (await name_locator.inner_text()).strip()
-                except Exception:
-                    continue
-                # Do a substring match rather than prefix match
-                if first_name.lower() in text.lower():
-                    # Click the button's inner clickable element if it exists; otherwise click the component itself
-                    click_target = btn.locator(".studentSummary__button")
-                    if await click_target.count() > 0:
-                        await click_target.click()
-                    else:
-                        await btn.click()
-                    # Wait until the URL updates to include personID (indicates student is selected)
-                    await self.page.wait_for_url(
-                        lambda url: "personID=" in url, timeout=10_000
-                    )
-                    return
-
-        # --- Older layout: anchor tags with personID query ---
-        student_links = self.page.locator("a[href*='personID=']")
-        count = await student_links.count()
-        for idx in range(count):
-            link = student_links.nth(idx)
-            try:
-                text = (await link.inner_text()).strip()
-            except Exception:
-                continue
-            # Substring match on the anchor's text
-            if first_name.lower() in text.lower():
-                href = await link.get_attribute("href")
-                if href:
-                    full_url = urljoin("https://gilbertaz.infinitecampus.org", href)
-                    await self.page.goto(full_url, wait_until="domcontentloaded")
-                    await self.page.wait_for_load_state("networkidle")
-                    return
-                else:
-                    await link.click()
-                    await self.page.wait_for_url(
-                        lambda url: "personID=" in url, timeout=10_000
-                    )
-                    return
-
-        # --- Final fallback: parse the static HTML (rarely needed) ---
-        html = await self.page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        for anchor in soup.find_all("a", href=True):
-            if "personID=" not in anchor["href"]:
-                continue
-            text = anchor.get_text(strip=True)
-            if first_name.lower() in text.lower():
-                full_url = urljoin("https://gilbertaz.infinitecampus.org", anchor["href"])
-                await self.page.goto(full_url, wait_until="domcontentloaded")
-                await self.page.wait_for_load_state("networkidle")
-                return
-        raise RuntimeError(
-            f"Student with first name '{first_name}' not found on home page"
-        )
-
+    # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(Exception),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
-        """Fetch semester grades for the currently selected student."""
-        await self.page.goto(self.GRADEBOOK, wait_until="domcontentloaded")
-        # Allow some time for dynamic content to load
-        await self.page.wait_for_timeout(3_000)
-        # Wait for the gradebook iframe and confirm it points to /apps/portal/parent/grades
-        await self.page.wait_for_selector("iframe#main-workspace", timeout=15_000)
-        await self.page.wait_for_function(
-            """() => {
-                const f = document.querySelector('iframe#main-workspace');
-                return f && f.src && f.src.includes('/apps/portal/parent/grades');
-            }""",
-            timeout=15_000,
-        )
-        frame = self.page.frame(url=lambda u: "/apps/portal/parent/grades" in u)
-        if not frame:
-            raise RuntimeError("Grade iframe never loaded")
-        await frame.wait_for_load_state("networkidle")
-        # Extract the HTML from the gradebook iframe
-        html_dump = await frame.content()
-        parsed = self._parse_semester_grades(html_dump)
+        """
+        Stay on HOME and scrape notifications. Return latest Semester Grade per subject
+        filtered by first_name (like match). Payload shaped for DB insert.
+        """
+        # Ensure we're on home
+        if "parent/home" not in self.page.url:
+            await self.page.goto(
+                self.HOME_WRAPPER,
+                wait_until="domcontentloaded",
+            )
+        await self.page.wait_for_timeout(1200)
+        await self.page.wait_for_load_state("networkidle")
+
+        html = await self.page.content()
+
+        # Optional debug dump
+        out_dir = Path(__file__).resolve().parents[2] / "output" / "debug"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dump = out_dir / f"home-notifications-{datetime.now().strftime('%Y%m%d-%H%M%S')}.html"
+        dump.write_text(html, encoding="utf-8")
+        print(f"[IC] Wrote notifications HTML → {dump}")
+
+        like_name = (getattr(self, "student_name", None) or "").strip()
+        parsed_dict = self._parse_semester_from_notifications(html, first_name=like_name)
+        # ^ parsed_dict is already {"Course": 93.4 or "A", ...}
+
+        # Shape exactly as requested
         return {
-            "parsed_grades": parsed,
+            "parsed_grades": parsed_dict
         }
 
-    def _parse_semester_grades(self, html: str) -> Dict[str, Any]:
-        """Extract semester grades into a dictionary keyed by course name."""
-        soup = BeautifulSoup(html, "html.parser")
-        courses: Dict[str, Any] = {}
-        for card in soup.select("div.collapsible-card.grades__card"):
-            course_name_tag = card.select_one("h4 a")
-            if not course_name_tag:
-                continue
-            course_name = course_name_tag.get_text(strip=True)
-            grade_value: Optional[Any] = None
-            letter_grade: Optional[str] = None
-            percentage: Optional[float] = None
-            # Find the list item specifically for "Semester Grade"
-            semester_li = None
-            for li in card.select("li"):
-                if "Semester Grade" in li.get_text():
-                    semester_li = li
-                    break
-            if semester_li:
-                score_container = semester_li.select_one(
-                    "tl-grading-score .grading-score"
-                )
-                if score_container:
-                    # Extract letter grade and percentage if present
-                    letter_grade_tag = score_container.find("div", recursive=False)
-                    if letter_grade_tag:
-                        letter_grade = letter_grade_tag.get_text(strip=True)
-                    percentage_tag = score_container.find(
-                        "div",
-                        string=lambda text: text and "%" in text,
-                    )
-                    if percentage_tag:
-                        try:
-                            percent_text = (
-                                percentage_tag.get_text(strip=True).strip("()%")
-                            )
-                            percentage = float(percent_text)
-                        except (ValueError, TypeError):
-                            pass
-            # Prioritize percentage over letter grade
-            if percentage is not None:
-                grade_value = percentage
-            elif letter_grade is not None:
-                grade_value = letter_grade
-            courses[course_name] = grade_value
-        return courses
+    # ---------------------- PARSER ------------------------------------------
+    def _parse_semester_from_notifications(self, html: str, first_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Parse 'Semester Grade' updates from notifications on HOME.
 
+        Example text:
+          "Theodor has an updated grade of D (61.90%) in ALGEBRA II: Semester Grade"
+        Becomes:
+          {"ALGEBRA II": 61.90}
+
+        Rules:
+          - Filter by first_name (substring/like, case-insensitive) if provided.
+          - Prefer percentage (float, no %) over letter.
+          - Keep the LATEST notification per subject based on the date label.
+            Handles "Today, 9:14 AM", "Yesterday, 11:45 AM", and "Fri, 8/1/25".
+        """
+        soup = BeautifulSoup(html or "", "html.parser")
+        ul = soup.select_one("ul.notifications-dropdown__body")
+        if not ul:
+            print("[IC] No notifications list found.")
+            return {}
+
+        name_like = (first_name or "").strip().lower()
+
+        # Regex for: has an updated grade of <letter?> (<pct?>) in SUBJECT: Semester Grade
+        pat = re.compile(
+            r"has an updated grade of\s+"
+            r"(?:(?P<letter>[A-F][+-]?)\s*)?"
+            r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
+            r"in\s+(?P<subject>.+?):\s*Semester Grade",
+            re.IGNORECASE,
+        )
+
+        def parse_notif_dt(txt: str) -> Optional[datetime]:
+            s = txt.strip()
+            now = datetime.now()
+            # Today/Yesterday with optional time
+            m_time = re.search(r"(\d{1,2}:\d{2}\s*(AM|PM))", s, re.IGNORECASE)
+            if s.lower().startswith("today"):
+                t = datetime.strptime(m_time.group(1), "%I:%M %p").time() if m_time else datetime.strptime("12:00 PM", "%I:%M %p").time()
+                return datetime.combine(now.date(), t)
+            if s.lower().startswith("yesterday"):
+                t = datetime.strptime(m_time.group(1), "%I:%M %p").time() if m_time else datetime.strptime("12:00 PM", "%I:%M %p").time()
+                return datetime.combine((now - timedelta(days=1)).date(), t)
+            # Weekday formats like "Fri, 8/1/25" or just "8/1/25"
+            for fmt in ("%a, %m/%d/%y", "%m/%d/%y"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
+                    continue
+            return None
+
+        latest: Dict[str, Tuple[datetime, Any]] = {}
+
+        for li in ul.select("li.notification__container"):
+            a = li.select_one("a.notification__text")
+            d = li.select_one("p.notification__date")
+            if not a or not d:
+                continue
+
+            text = " ".join(a.get_text(" ", strip=True).split())
+            date_str = d.get_text(" ", strip=True)
+
+            # Like-filter by first name if provided (e.g., "theo" matches "Theodor")
+            if name_like and name_like not in text.lower():
+                continue
+
+            m = pat.search(text)
+            if not m:
+                continue
+
+            dt = parse_notif_dt(date_str) or datetime.min
+            subject = m.group("subject").strip()
+            letter = (m.group("letter") or "").strip() or None
+            pct = m.group("pct")  # string or None
+
+            # Prefer % if present, else letter
+            if pct is not None:
+                try:
+                    value: Any = float(pct)
+                except ValueError:
+                    value = pct  # raw string fallback (unlikely)
+            elif letter:
+                value = letter
+            else:
+                continue
+
+            # Keep the latest per subject
+            if subject not in latest or dt > latest[subject][0]:
+                latest[subject] = (dt, value)
+
+        result = {subj: val for subj, (dt, val) in latest.items()}
+        print(f"[IC] Parsed {len(result)} semester-grade notifications (filtered by {first_name!r}).")
+        if result:
+            print("[IC] Sample:", list(result.items())[:3])
+        return result
+
+    # ---------------------- LOGOUT ----------------------
     async def logout(self) -> None:
-        """Log out of the Infinite Campus portal and close the page."""
         await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)
-        await self.page.close()
