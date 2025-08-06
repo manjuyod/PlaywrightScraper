@@ -10,16 +10,14 @@ from scraper.portals import register_portal  # type: ignore
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_parent_gilbert")
+@register_portal("infinite_campus_parent_alac")
 class InfiniteCampus(PortalEngine):
-    LOGIN = "https://gilbertaz.infinitecampus.org/campus/gilbert.jsp"
+    LOGIN = "https://alaaz.infinitecampus.org/campus/portal/parents/ala.jsp"
     HOME_WRAPPER = (
-        "https://gilbertaz.infinitecampus.org/"
-        "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
+        "https://alaaz.infinitecampus.org/campus/nav-wrapper/parent/portal/parent/home?appName=ala"
     )
     LOGOFF = (
-        "https://gilbertaz.infinitecampus.org/campus/"
-        "portal/parents/gilbert.jsp?status=logoff"
+        "https://alaaz.infinitecampus.org/campus/portal/parents/ala.jsp?status=logoff"
     )
 
     # ---------------------- LOGIN (home only) ----------------------

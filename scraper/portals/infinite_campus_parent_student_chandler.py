@@ -10,16 +10,14 @@ from scraper.portals import register_portal  # type: ignore
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_parent_gilbert")
+@register_portal("infinite_campus_parent_alac")
 class InfiniteCampus(PortalEngine):
-    LOGIN = "https://gilbertaz.infinitecampus.org/campus/gilbert.jsp"
+    LOGIN = "https://chandleraz.infinitecampus.org/campus/portal/students/chandler.jsp"
     HOME_WRAPPER = (
-        "https://gilbertaz.infinitecampus.org/"
-        "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
+        "https://chandleraz.infinitecampus.org/campus/nav-wrapper/student/portal/student/home?appName=chandler"
     )
     LOGOFF = (
-        "https://gilbertaz.infinitecampus.org/campus/"
-        "portal/parents/gilbert.jsp?status=logoff"
+        "https://chandleraz.infinitecampus.org/campus/portal/students/chandler.jsp?status=logoff"
     )
 
     # ---------------------- LOGIN (home only) ----------------------
@@ -34,10 +32,10 @@ class InfiniteCampus(PortalEngine):
         await self.page.fill("input#username", self.sid)
         await self.page.fill("input#password", self.pw)
         await self.page.click("button:has-text('Log In')")
-        await self.page.wait_for_url(lambda u: "parent/home" in u or "nav-wrapper" in u, timeout=15_000)
+        await self.page.wait_for_url(lambda u: "student/home" in u or "nav-wrapper" in u, timeout=15_000)
         await self.page.wait_for_load_state("networkidle")
         await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
-        print("[IC] Logged in and on parent/home.")
+        print("[IC] Logged in and on student/home.")
 
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
@@ -51,7 +49,7 @@ class InfiniteCampus(PortalEngine):
         filtered by first_name (like match). Payload shaped for DB insert.
         """
         # Ensure we're on home
-        if "parent/home" not in self.page.url:
+        if "student/home" not in self.page.url:
             await self.page.goto(
                 self.HOME_WRAPPER,
                 wait_until="domcontentloaded",
