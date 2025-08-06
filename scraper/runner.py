@@ -43,6 +43,7 @@ def get_students_from_db(franchise_id: int | None = None):
                 FROM Student
             """
             conditions = [
+                "PasswordGood = 1",
                 "(YearStart IS NULL OR date(YearStart) <= date('now'))",
                 "(YearEnd   IS NULL OR date('now') <= date(YearEnd))",
             ]
