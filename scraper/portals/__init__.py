@@ -18,4 +18,4 @@ def get_portal(key: str) -> Type[PortalEngine]:
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
 # Import engines so they register.
-from . import infinite_campus_student_ccsd, infinite_campus_parent_ccsd, infinite_campus_parent_gilbert, infinite_campus_parent_alac
+from . import infinite_campus_student_ccsd, infinite_campus_parent_ccsd, infinite_campus_parent_gilbert, infinite_campus_parent_alac, parentvue_husd
