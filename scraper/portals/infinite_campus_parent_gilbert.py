@@ -62,11 +62,11 @@ class InfiniteCampus(PortalEngine):
         html = await self.page.content()
 
         # Optional debug dump
-        out_dir = Path(__file__).resolve().parents[2] / "output" / "debug"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        dump = out_dir / f"home-notifications-{datetime.now().strftime('%Y%m%d-%H%M%S')}.html"
-        dump.write_text(html, encoding="utf-8")
-        print(f"[IC] Wrote notifications HTML → {dump}")
+        #out_dir = Path(__file__).resolve().parents[2] / "output" / "debug"
+        #out_dir.mkdir(parents=True, exist_ok=True)
+        #dump = out_dir / f"home-notifications-{datetime.now().strftime('%Y%m%d-%H%M%S')}.html"
+        #dump.write_text(html, encoding="utf-8")
+        #print(f"[IC] Wrote notifications HTML → {dump}")
 
         like_name = (getattr(self, "student_name", None) or "").strip()
         parsed_dict = self._parse_semester_from_notifications(html, first_name=like_name)
