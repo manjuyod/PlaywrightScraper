@@ -21,7 +21,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
     """
     students_list = []
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH) as conn:  
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
 
@@ -142,15 +142,25 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     success_count += 1
                     print(f"SUCCESS: {student['id']}")
                 except Exception as e:
+                    # mark this student’s password as bad
+                    with sqlite3.connect(DB_PATH) as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
+                            (student["db_id"],)
+                        )
+                        conn.commit()
+                    print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
+
+                    # record the error in the JSONL for auditing
                     error_result = {
                         "student_id": student["id"],
                         "error": f"{type(e).__name__}: {e}",
-                        "traceback": format_exception_only(type(e), e),
+                        "traceback": format_exception_only(type(e), e)
                     }
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
-                    print(f"ERROR: {student['id']} (details in grades.jsonl)")
-
+                    print(f"ERROR: {student['id']} (PasswordGood flipped, details in grades.jsonl)")
     print(f"\nScraping complete! Results saved to {out_file}")
     print(f"Successfully processed {success_count} students")
     print(f"Errors encountered: {error_count}")
