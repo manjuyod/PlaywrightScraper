@@ -3,30 +3,17 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
+
+# Virtual Environment
 .venv/
 
-# Database
-*.db
-*.sqlite3
+# Logs
+logs/
+*.log
 
-# Config files with secrets
-config/students.db
+# Local configs
+config/students.db*
+sheet_mod_grades.json
 
-# Output & Temporary files
-output/
+# Other
 captcha.png
-gilbert_parent_portal.html
-*.jsonl
-
-# IDE / Editor
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS-specific
-.DS_Store
-Thumbs.db
