@@ -1,2 +1,19 @@
-# Ignore the Google Service Account key file
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+
+# Logs
+logs/
+*.log
+
+# Local configs
+config/students.db*
 sheet_mod_grades.json
+
+# Other
+captcha.png
