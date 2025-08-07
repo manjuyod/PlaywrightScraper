@@ -11,8 +11,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 #TODO: Parse and implement functionality
 
 @register_portal("microsoftportal")
-class InfiniteCampus(PortalEngine):
-    """Parent portal scraper for Microsoft portals.
+class Microsoft(PortalEngine):
+    """Portal scraper for Microsoft portals.
 
     The class uses Playwright to automate login and extract quarter grades
     for each course.  Grades are returned as a list of course/grade

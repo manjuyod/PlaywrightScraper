@@ -12,19 +12,19 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 #TODO: Parse and implement functionality
 
 @register_portal("gpsportal")
-class InfiniteCampus(PortalEngine):
-    """Parent portal scraper for Gilbert Public Schools' portal.
+class GPS(PortalEngine):
+    """Portal scraper for Gilbert Public Schools' portal.
 
     The class uses Playwright to automate login and extract quarter grades
     for each course.  Grades are returned as a list of course/grade
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://campus.ccsd.net/campus/portal/parents/clark.jsp"
+    LOGIN = "https://gpsportal.gilberted.net/"
     GRADEBOOK = (
-        "https://campus.ccsd.net/campus/nav-wrapper/parent/portal/parent/grades?appName=clark"
+        ""
     )
-    LOGOFF = "https://campus.ccsd.net/campus/portal/parents/clark.jsp?status=logoff"
+    LOGOFF = ""
 
     @retry(
         stop=stop_after_attempt(3),
@@ -32,11 +32,11 @@ class InfiniteCampus(PortalEngine):
         retry=retry_if_exception_type(Exception),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        """Authenticate the user on the CCSD parent portal.
+        """Authenticate the user on the GPS parent portal.
 
         Args:
             first_name: An optional first name for selecting a specific
-                student profile after login.  The CCSD parent portal
+                student profile after login.  The GPS parent portal
                 currently does not expose multiple profiles per login,
                 so this argument is ignored, but it is accepted for
                 compatibility with the ``PortalEngine`` interface.
@@ -44,10 +44,14 @@ class InfiniteCampus(PortalEngine):
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
         # Fill username and password
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        # Short pause to ensure fields are recognized
+        await self.page.fill("input#identification", self.sid)
+        # Short pause to ensure field is recognized
         await self.page.wait_for_timeout(200)
+        #Click Go
+        await self.page.click("button#authn-go-button")
+        
+        
+        await self.page.fill("input#password", self.pw)
         # Press Enter in password field to submit the form
         await self.page.locator('.form-group input[name="password"]').press("Enter")
         # Wait until the URL contains "home" indicating successful login
