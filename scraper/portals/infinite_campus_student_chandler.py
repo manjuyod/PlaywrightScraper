@@ -10,7 +10,7 @@ from scraper.portals import register_portal  # type: ignore
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_parent_alac")
+@register_portal("infinite_campus_student_chandler")
 class InfiniteCampus(PortalEngine):
     LOGIN = "https://chandleraz.infinitecampus.org/campus/portal/students/chandler.jsp"
     HOME_WRAPPER = (
@@ -29,9 +29,10 @@ class InfiniteCampus(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        await self.page.click("button:has-text('Log In')")
+        await self.page.wait_for_selector('form#login input[type="submit"][value="Log In"]', timeout=10_000)
+        await self.page.fill("input[name='username']", self.sid)
+        await self.page.fill("input[name='pw'], input[name='password']", self.pw)
+        await self.page.evaluate("() => document.querySelector('form#login').submit()") 
         await self.page.wait_for_url(lambda u: "student/home" in u or "nav-wrapper" in u, timeout=15_000)
         await self.page.wait_for_load_state("networkidle")
         await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach

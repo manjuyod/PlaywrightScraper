@@ -29,9 +29,9 @@ class InfiniteCampus(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        await self.page.click("button:has-text('Log In')")
+        await self.page.fill("input[name='username']", self.sid)
+        await self.page.fill("input[name='pw'], input[name='password']", self.pw)
+        await self.page.evaluate("() => document.querySelector('form#login').submit()")
         await self.page.wait_for_url(lambda u: "parent/home" in u or "nav-wrapper" in u, timeout=15_000)
         await self.page.wait_for_load_state("networkidle")
         await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
