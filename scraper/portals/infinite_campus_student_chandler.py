@@ -102,13 +102,12 @@ class InfiniteCampus(PortalEngine):
 
         # Regex for: has an updated grade of <letter?> (<pct?>) in SUBJECT: Semester Grade
         pat = re.compile(
-            r"has an updated grade of\s+"
-            r"(?:(?P<letter>[A-F][+-]?)\s*)?"
-            r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
-            r"in\s+(?P<subject>.+?):\s*Semester Grade",
+            r"(?:has an updated grade of|received a new grade of)\s+"         # phrase variants
+            r"(?:(?P<letter>[A-F][+-]?)\s*)?"                                 # optional letter grade
+            r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"                        # optional percentage
+            r"in\s+(?P<subject>.+?):\s*SEMESTER\s+CUMULATIVE",                # force SEMESTER CUMULATIVE
             re.IGNORECASE,
         )
-
         def parse_notif_dt(txt: str) -> Optional[datetime]:
             s = txt.strip()
             now = datetime.now()
