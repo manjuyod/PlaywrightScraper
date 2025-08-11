@@ -92,9 +92,43 @@ def _query_students(conn: sqlite3.Connection) -> pd.DataFrame:
     """
     return pd.read_sql_query(sql, conn)
 
-
+def _extract_subjects(wdata: dict) -> List[str]:
+    """Union of subject names across weeks (robust to dict or list week payloads)."""
+    names = set()
+    for _, val in wdata.items():
+        if isinstance(val, dict):
+            names.update(val.keys())
+        elif isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict):
+                    s = item.get("subject") or item.get("name") or item.get("course")
+                    if s:
+                        names.add(s)
+    return sorted(names)
 # ────────────────────────────────────────────────────────────────────────────────
 # Data‑frame builders
+
+def _build_legend_rows(weeks: List[str]) -> pd.DataFrame:
+    """
+    Build:
+      Row 0: A1 left blank (entire first row blank)
+      Row 1: B2: '<= 69% (needs meeting)'
+      Row 2: B3: '70-80% (text parents)' and C3..: week keys
+      Row 3: B4: '80-90%'
+      Row 4: B5: '>90%'
+      Row 5: B6: 'Already had Meeting'
+    """
+    rows = [
+        {"Field": "", "Value": ""},  # row index 0 — full row blank keeps A1 empty
+
+        {"Field": "", "Value": "<= 69% (needs meeting)"},
+        dict({"Field": "", "Value": "70-80% (text parents)"} | {w: w for w in weeks}),
+        {"Field": "", "Value": "80-90%"},
+        {"Field": "", "Value": ">90%"},
+        {"Field": "", "Value": "Already had Meeting"},
+    ]
+    # IMPORTANT: columns are positional: A="Field", B="Value", C..="weeks"
+    return pd.DataFrame(rows, columns=["Field", "Value", *weeks])
 
 def _build_student_block(row: pd.Series, weeks: List[str]) -> pd.DataFrame:
     """Return one student’s block (meta + blank + pivot)."""
@@ -119,42 +153,57 @@ def _build_student_block(row: pd.Series, weeks: List[str]) -> pd.DataFrame:
                 {"Field": "", "Value": ""},
             ]
         )
-        block = pd.concat([meta, err], ignore_index=True)
-        block.insert(0, "StudentID", row["ID"])
-        return block
+        # keep A/B-only rows; no StudentID
+        return pd.concat([meta, err], ignore_index=True)
+
 
     # 3) pivot rows
     wdata = json.loads(row["WeeklyData"])
-    subjects = sorted(set(itertools.chain.from_iterable(wdata[w].keys() for w in wdata)))
+    subjects = _extract_subjects(wdata)
 
     pivots: List[Dict[str, str | float]] = []
     for idx, subj in enumerate(subjects, 1):
         d: Dict[str, str | float] = {"Field": f"Subject{idx}", "Value": subj}
         for week in weeks:
-            raw = wdata.get(week, {}).get(subj)
-            if isinstance(raw, dict):
-                raw = raw.get("percentage") or raw.get("letter_grade") or ""
-            if raw is None or (isinstance(raw, float) and math.isnan(raw)):
-                raw = ""
-            d[week] = raw
+            entry = wdata.get(week, {}).get(subj)
+            val = ""
+            if isinstance(entry, dict):
+                # Prefer numeric percentage if present, else letter_grade, else blank
+                pct = entry.get("percentage")
+                if pct is not None and not (isinstance(pct, float) and math.isnan(pct)):
+                    val = pct
+                else:
+                    lg = entry.get("letter_grade")
+                    val = lg if lg is not None else ""
+            elif entry is not None and not (isinstance(entry, float) and math.isnan(entry)):
+                # If your JSON sometimes stores a scalar directly
+                val = entry
+            d[week] = val
+
+        # 👇 This line is currently missing
         pivots.append(d)
 
     pivot_df = pd.DataFrame(pivots, columns=["Field", "Value", *weeks])
 
-    block = pd.concat([meta, blank, pivot_df], ignore_index=True)
-    block.insert(0, "StudentID", row["ID"])
+    block = pd.concat([meta, pivot_df, blank], ignore_index=True)
+    # No StudentID column in the export — keep positional A/B/C.. layout
     return block
 
 
 def _build_dataframe_for_franchise(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate blocks for every student in one franchise."""
     all_weeks: set[str] = set()
     for wd_json in df["WeeklyData"]:
         all_weeks.update(json.loads(wd_json).keys())
-    weeks = sorted(all_weeks)
+    weeks = sorted(all_weeks)  # Monday-anchored keys sort fine as YYYY-MM-DD
+
+    # Prepend top rows:
+    #  - A1 blank
+    #  - B2..B6 ledger (row index 1..5)
+    #  - row index 2 carries C.. week labels
+    legend = _build_legend_rows(weeks)
 
     frames = [_build_student_block(row, weeks) for _, row in df.iterrows()]
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat([legend, *frames], ignore_index=True)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -190,10 +239,23 @@ def main() -> None:
 
         print(f"Processing FranchiseID {fid} (students: {len(grp)})")
         export_df = _build_dataframe_for_franchise(grp)
+
+        # ─────────────── Debug: Local Excel Export ───────────────
+        # Uncomment these lines to debug without uploading to Google Sheets
+        #excel_path = ROOT / f"debug_BMaster_F{fid}.xlsx"
+        #export_df.to_excel(excel_path, index=False, header=False)
+        #print(f"  ✓ Exported locally to {excel_path}")
+        #continue  # Skip Google Sheets upload during local debugging
+        # ─────────────────────────────────────────────────────────
+
+        # ─────────────── Debug Option: Turn off dataframe push ───
+        # Comment these lines out While testing local ONLY
         _push_dataframe(sheet_map[fid], export_df)
         print("  ✓ Uploaded")
+        # ─────────────────────────────────────────────────────────
 
     conn.close()
+
 
 
 if __name__ == "__main__":

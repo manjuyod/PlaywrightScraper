@@ -19,6 +19,20 @@ def safe_load_json(s: str):
     except Exception:
         return {}
 
+def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
+    """
+    Delete the grades.jsonl file if it exists.
+    Never raises; logs outcome for visibility.
+    """
+    try:
+        if path.exists():
+            path.unlink()
+            print(f"Deleted input file: {path}")
+        else:
+            print(f"No input file to delete at: {path}")
+    except Exception as e:
+        print(f"Warning: could not delete {path}: {e}")
+
 def insert_grades():
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
@@ -85,4 +99,7 @@ def insert_grades():
         print(f"Database error: {e}")
 
 if __name__ == "__main__":
-    insert_grades()
+    try:
+        insert_grades()
+    finally:
+        clear_grades_jsonl()
