@@ -26,7 +26,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             cur = conn.cursor()
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd
+                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd, GPSPortalImage1, GPSPortalImage2, GPSPortalImage3
                 FROM Student
             """
             conditions = [
@@ -53,6 +53,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "id": row["P1Username"],
                         "password": row["P1Password"],
                         "portal": row["portal"],
+                        "auth_images": [row["GPSPortalImage1"], row["GPSPortalImage2"], row["GPSPortalImage3"]]
                     }
                 )
     except sqlite3.Error as e:
@@ -87,6 +88,7 @@ async def scrape_one(pw, student: dict):
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
+        auth_images=student.get("auth_images")
     )
 
     try:

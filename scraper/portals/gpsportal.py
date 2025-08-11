@@ -5,11 +5,11 @@ from typing import List, Dict, Any, Optional
 from bs4 import BeautifulSoup  # type: ignore
 from playwright.async_api import Page  # type: ignore
 from .base import PortalEngine
-from . import register_portal  # helper we'll create in __init__.py
+from . import register_portal, infinite_campus_parent_gilbert  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-#TODO: Implement 2FA Handling (Select pictures)
-#TODO: Parse and implement functionality
+from time import sleep
+#TODO: USES INFINITE CAMPUS GILBERT AS THEIR PORTAL CAN WE SKIP THIS STEP
+#TODO in progress: Implement 2FA Handling (Select pictures)
 
 @register_portal("gpsportal")
 class GPS(PortalEngine):
@@ -21,17 +21,23 @@ class GPS(PortalEngine):
     """
 
     LOGIN = "https://gpsportal.gilberted.net/"
-    GRADEBOOK = (
-        ""
+    HOME_WRAPPER = (
+        "https://gilbertaz.infinitecampus.org/"
+        "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
     )
-    LOGOFF = ""
+    LOGOFF = (
+        "https://gilbertaz.infinitecampus.org/campus/"
+        "portal/parents/gilbert.jsp?status=logoff"
+    )
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(Exception),
+        reraise=True
     )
     async def login(self, first_name: Optional[str] = None) -> None:
+        # print("HELLO LOGGING IN DO MY PRINT STATEMENTS WORK AT ALL\n\n\n\n\n\n")
         """Authenticate the user on the GPS parent portal.
 
         Args:
@@ -43,101 +49,171 @@ class GPS(PortalEngine):
         """
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        # Fill username and password
+        # Fill username
         await self.page.fill("input#identification", self.sid)
         # Short pause to ensure field is recognized
         await self.page.wait_for_timeout(200)
-        #Click Go
+        # Click Go
         await self.page.click("button#authn-go-button")
-        
-        
-        await self.page.fill("input#password", self.pw)
-        # Press Enter in password field to submit the form
-        await self.page.locator('.form-group input[name="password"]').press("Enter")
-        # Wait until the URL contains "home" indicating successful login
-        await self.page.wait_for_url(lambda url: "home" in url, timeout=15_000)
-        # Wait for network to be idle to ensure the home page is fully loaded
+        # Fill Password
+        await self.page.fill("input#ember534", self.pw)
+        await self.page.wait_for_timeout(2000)
+        await self.page.locator("#authn-go-button").evaluate("btn => btn.click()")
+        await self.page.wait_for_url(lambda url: "pictograph" in url, timeout=15_000)
         await self.page.wait_for_load_state("networkidle")
+        print("trying pictograph\n")
+        # Must authenticate for this page using the GPSPortalImage field contained in the database
+        # Collect the image options on the screen
+        for _ in range(0, 3): # three images to select
+            images_alts = await self.page.eval_on_selector_all(
+                ".pictograph-list img.tile-icon",
+                "imgs => imgs.map(img => img.alt)"
+            )
+            assert self.auth_images is not None # auth images should never be null for this portal
+            user_match = next((image for image in self.auth_images if image in images_alts), None)
+            await self.page.locator(f".pictograph-list img.tile-icon[alt='{user_match}']").click()
+            await self.page.wait_for_timeout(2000)
+        # finally nav to the gilbert infinite campus portal
+        await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
+        await self.page.wait_for_timeout(200)
+        await self.page.wait_for_load_state('networkidle')
 
+    # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    async def fetch_grades(self) -> dict:
-        """Navigate to the gradebook and return a dict of parsed grades."""
-        await self.page.goto(self.GRADEBOOK, wait_until="domcontentloaded")
-        # Allow some time for dynamic content to load
-        await self.page.wait_for_timeout(3_000)
-        html_dump: Optional[str] = None
-        frame = None
-        # Attempt to find the legacy iframe
-        try:
-            await self.page.wait_for_selector("iframe#main-workspace", timeout=10_000)
-            frame = self.page.frame(
-                url=lambda u: "/apps/portal/parent/grades" in u if u else False
+    async def fetch_grades(self) -> Dict[str, Any]:
+        """
+        Stay on HOME and scrape notifications. Return latest Semester Grade per subject
+        filtered by first_name (like match). Payload shaped for DB insert.
+        """
+        # Ensure we're on home
+        if "/home" not in self.page.url:
+            await self.page.goto(
+                self.HOME_WRAPPER,
+                wait_until="domcontentloaded",
             )
-        except Exception:
-            frame = None
-        if frame:
-            # Wait for network idle inside the iframe and capture its content
-            await frame.wait_for_load_state("networkidle")
-            html_dump = await frame.content()
-        else:
-            # No iframe present – grades are in the top‑level page.  Wait for
-            # grade cards to appear and for the network to be idle before
-            # collecting the HTML.
-            await self.page.wait_for_selector(
-                "div.collapsible-card.grades__card, div.collapsible-card, div.card",
-                timeout=30_000,
-            )
-            await self.page.wait_for_load_state("networkidle")
-            html_dump = await self.page.content()
-        parsed = self._parse_quarter_grades(html_dump or "")
-        return {"parsed_grades": parsed}
+        await self.page.wait_for_timeout(1200)
+        await self.page.wait_for_load_state("networkidle")
 
-    # Grade Parser Function
-    def _parse_quarter_grades(self, html: str) -> List[Dict[str, Any]]:
-        """Extract quarter grades (letter + percentage) from grade-page HTML."""
-        soup = BeautifulSoup(html, "html.parser")
-        courses: List[Dict[str, Any]] = []
-        # course cards
-        for card in soup.select("div.collapsible-card.grades__card"):
-            header = card.find("tl-grading-section-header")
-            if not header:
-                continue
-            # course name (link or h4 fallback)
-            name_tag = header.find("a") or header.find("h4")
-            if not name_tag:
-                continue
-            course_name = name_tag.get_text(strip=True)
-            task_list = card.find("tl-grading-task-list")
-            if not task_list:
-                continue
-            quarter_grade = None
-            for li in task_list.find_all("li"):
-                grade_type = li.find("span", class_="ng-star-inserted")
-                if not grade_type or "Quarter Grade" not in grade_type.text:
+        html = await self.page.content()
+
+        # Optional debug dump
+        #out_dir = Path(__file__).resolve().parents[2] / "output" / "debug"
+        #out_dir.mkdir(parents=True, exist_ok=True)
+        #dump = out_dir / f"home-notifications-{datetime.now().strftime('%Y%m%d-%H%M%S')}.html"
+        #dump.write_text(html, encoding="utf-8")
+        #print(f"[IC] Wrote notifications HTML → {dump}")
+
+        like_name = (getattr(self, "student_name", None) or "").strip()
+        parsed_dict = self._parse_semester_from_notifications(html, first_name=like_name)
+        # ^ parsed_dict is already {"Course": 93.4 or "A", ...}
+
+        # Shape exactly as requested
+        return {
+            "parsed_grades": parsed_dict
+        }
+
+    # ---------------------- PARSER ------------------------------------------
+    def _parse_semester_from_notifications(self, html: str, first_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Parse 'Semester Grade' updates from notifications on HOME.
+
+        Example text:
+          "Theodor has an updated grade of D (61.90%) in ALGEBRA II: Semester Grade"
+        Becomes:
+          {"ALGEBRA II": 61.90}
+
+        Rules:
+          - Filter by first_name (substring/like, case-insensitive) if provided.
+          - Prefer percentage (float, no %) over letter.
+          - Keep the LATEST notification per subject based on the date label.
+            Handles "Today, 9:14 AM", "Yesterday, 11:45 AM", and "Fri, 8/1/25".
+        """
+        soup = BeautifulSoup(html or "", "html.parser")
+        ul = soup.select_one("ul.notifications-dropdown__body")
+        if not ul:
+            print("[IC] No notifications list found.")
+            return {}
+
+        name_like = (first_name or "").strip().lower()
+
+        # Regex for: has an updated grade of <letter?> (<pct?>) in SUBJECT: Semester Grade
+        pat = re.compile(
+            r"has an updated grade of\s+"
+            r"(?:(?P<letter>[A-F][+-]?)\s*)?"
+            r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
+            r"in\s+(?P<subject>.+?):\s*Semester Grade",
+            re.IGNORECASE,
+        )
+
+        def parse_notif_dt(txt: str) -> Optional[datetime]:
+            s = txt.strip()
+            now = datetime.now()
+            # Today/Yesterday with optional time
+            m_time = re.search(r"(\d{1,2}:\d{2}\s*(AM|PM))", s, re.IGNORECASE)
+            if s.lower().startswith("today"):
+                t = datetime.strptime(m_time.group(1), "%I:%M %p").time() if m_time else datetime.strptime("12:00 PM", "%I:%M %p").time()
+                return datetime.combine(now.date(), t)
+            if s.lower().startswith("yesterday"):
+                t = datetime.strptime(m_time.group(1), "%I:%M %p").time() if m_time else datetime.strptime("12:00 PM", "%I:%M %p").time()
+                return datetime.combine((now - timedelta(days=1)).date(), t)
+            # Weekday formats like "Fri, 8/1/25" or just "8/1/25"
+            for fmt in ("%a, %m/%d/%y", "%m/%d/%y"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except ValueError:
                     continue
-                score_span = li.find("tl-grading-score")
-                if not score_span:
-                    continue
-                grade_data: Dict[str, Any] = {"type": grade_type.text.strip()}
-                # first → letter grade
-                letter_b = score_span.find("b")
-                if letter_b:
-                    grade_data["letter_grade"] = letter_b.text.strip()
-                # any (xx.x%) → percentage
-                for b in score_span.find_all("b"):
-                    txt = b.text.strip()
-                    if txt.startswith("(") and "%" in txt:
-                        try:
-                            grade_data["percentage"] = float(txt.strip("()%"))
-                        except ValueError:
-                            grade_data["percentage_raw"] = txt
-                        break
-                quarter_grade = grade_data
-                break  # only one per course
-            if quarter_grade:
-                courses.append({"course_name": course_name, "quarter_grade": quarter_grade})
-        return courses
+            return None
+
+        latest: Dict[str, Tuple[datetime, Any]] = {}
+
+        for li in ul.select("li.notification__container"):
+            a = li.select_one("a.notification__text")
+            d = li.select_one("p.notification__date")
+            if not a or not d:
+                continue
+
+            text = " ".join(a.get_text(" ", strip=True).split())
+            date_str = d.get_text(" ", strip=True)
+
+            # Like-filter by first name if provided (e.g., "theo" matches "Theodor")
+            if name_like and name_like not in text.lower():
+                continue
+
+            m = pat.search(text)
+            if not m:
+                continue
+
+            dt = parse_notif_dt(date_str) or datetime.min
+            subject = m.group("subject").strip()
+            letter = (m.group("letter") or "").strip() or None
+            pct = m.group("pct")  # string or None
+
+            # Prefer % if present, else letter
+            if pct is not None:
+                try:
+                    value: Any = float(pct)
+                except ValueError:
+                    value = pct  # raw string fallback (unlikely)
+            elif letter:
+                value = letter
+            else:
+                continue
+
+            # Keep the latest per subject
+            if subject not in latest or dt > latest[subject][0]:
+                latest[subject] = (dt, value)
+
+        result = {subj: val for subj, (dt, val) in latest.items()}
+        print(f"[IC] Parsed {len(result)} semester-grade notifications (filtered by {first_name!r}).")
+        if result:
+            print("[IC] Sample:", list(result.items())[:3])
+        return result
+
+    # ---------------------- LOGOUT ----------------------
+    async def logout(self) -> None:
+        await self.page.goto(self.LOGOFF)
+        await self.page.wait_for_timeout(500)

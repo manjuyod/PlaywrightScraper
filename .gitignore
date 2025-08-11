@@ -13,7 +13,8 @@ venv/
 *.sqlite3
 
 # Config files with secrets
-config/students.db
+# config/students.*
+# config/students.db.*
 
 # Output & Temporary files
 output/
