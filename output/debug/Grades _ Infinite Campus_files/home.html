@@ -1,0 +1,2400 @@
+<!DOCTYPE html>
+<!-- saved from url=(0014)about:internet -->
+<html lang="en" data-critters-container="">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+  <title>Infinite Campus</title>
+  <!--<base href="https://alaaz.infinitecampus.org/campus/apps/portal/">-->
+  <base href=".">
+
+  <!--
+      Remove portal pages from google indexing (specifically for public pages such as the Help page)
+      allow it to follow external pages that may be linked to the page (i.e. campus website or district specific pages)
+    -->
+  <meta name="robots" content="noindex">
+
+  <meta name="viewport" content="width=device-width, initial-scale = 1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="icon" type="image/x-icon" href="https://alaaz.infinitecampus.org/campus/apps/portal/favicon.ico">
+  <!--
+      WARNING: These are inline styles used to display a spinner upon immediate load of index.html before angular has bootstrapped.
+      This should not be added to unless you SPECIFICALLY request pre-bootstrap critical CSS
+    -->
+  <style type="text/css">
+    .loading-container {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 10000;
+      height: 100%;
+      width: 100%;
+      background-color: rgba(255, 255, 255, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .loading {
+      display: inline;
+      text-align: center;
+    }
+
+    .loading>div {
+      width: 18px;
+      height: 18px;
+      background: #92c83e;
+      border-radius: 50%;
+      display: inline-block;
+      animation: sk-bouncedelay 1s infinite ease-in-out both;
+    }
+
+    .loading .bounce1 {
+      animation-delay: -0.32s;
+    }
+
+    .loading .bounce2 {
+      animation-delay: -0.16s;
+    }
+
+    .loading .bounce3 {
+      animation-delay: 0;
+    }
+
+    @keyframes sk-bouncedelay {
+
+      0%,
+      80%,
+      100% {
+        transform: scale(0);
+      }
+
+      40% {
+        transform: scale(1);
+      }
+    }
+  </style>
+  <style>
+    @charset "UTF-8";
+    @import"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css";
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAX-k2Qn.woff2) format("woff2");
+      unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAz-k2Qn.woff2) format("woff2");
+      unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAT-k2Qn.woff2) format("woff2");
+      unicode-range: U+1F00-1FFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAv-k2Qn.woff2) format("woff2");
+      unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuHT-k2Qn.woff2) format("woff2");
+      unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuGb-k2Qn.woff2) format("woff2");
+      unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAf-k2Qn.woff2) format("woff2");
+      unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAb-k2Qn.woff2) format("woff2");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: italic;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQuAj-kw.woff2) format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3GUBGEe.woff2) format("woff2");
+      unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3iUBGEe.woff2) format("woff2");
+      unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3CUBGEe.woff2) format("woff2");
+      unicode-range: U+1F00-1FFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3-UBGEe.woff2) format("woff2");
+      unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMawCUBGEe.woff2) format("woff2");
+      unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMaxKUBGEe.woff2) format("woff2");
+      unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3OUBGEe.woff2) format("woff2");
+      unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3KUBGEe.woff2) format("woff2");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 300;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2) format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3GUBGEe.woff2) format("woff2");
+      unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3iUBGEe.woff2) format("woff2");
+      unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3CUBGEe.woff2) format("woff2");
+      unicode-range: U+1F00-1FFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3-UBGEe.woff2) format("woff2");
+      unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMawCUBGEe.woff2) format("woff2");
+      unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMaxKUBGEe.woff2) format("woff2");
+      unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3OUBGEe.woff2) format("woff2");
+      unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3KUBGEe.woff2) format("woff2");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 400;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2) format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3GUBGEe.woff2) format("woff2");
+      unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3iUBGEe.woff2) format("woff2");
+      unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3CUBGEe.woff2) format("woff2");
+      unicode-range: U+1F00-1FFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3-UBGEe.woff2) format("woff2");
+      unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMawCUBGEe.woff2) format("woff2");
+      unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMaxKUBGEe.woff2) format("woff2");
+      unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3OUBGEe.woff2) format("woff2");
+      unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3KUBGEe.woff2) format("woff2");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 500;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2) format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3GUBGEe.woff2) format("woff2");
+      unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3iUBGEe.woff2) format("woff2");
+      unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3CUBGEe.woff2) format("woff2");
+      unicode-range: U+1F00-1FFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3-UBGEe.woff2) format("woff2");
+      unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMawCUBGEe.woff2) format("woff2");
+      unicode-range: U+0302-0303, U+0305, U+0307-0308, U+0310, U+0312, U+0315, U+031A, U+0326-0327, U+032C, U+032F-0330, U+0332-0333, U+0338, U+033A, U+0346, U+034D, U+0391-03A1, U+03A3-03A9, U+03B1-03C9, U+03D1, U+03D5-03D6, U+03F0-03F1, U+03F4-03F5, U+2016-2017, U+2034-2038, U+203C, U+2040, U+2043, U+2047, U+2050, U+2057, U+205F, U+2070-2071, U+2074-208E, U+2090-209C, U+20D0-20DC, U+20E1, U+20E5-20EF, U+2100-2112, U+2114-2115, U+2117-2121, U+2123-214F, U+2190, U+2192, U+2194-21AE, U+21B0-21E5, U+21F1-21F2, U+21F4-2211, U+2213-2214, U+2216-22FF, U+2308-230B, U+2310, U+2319, U+231C-2321, U+2336-237A, U+237C, U+2395, U+239B-23B7, U+23D0, U+23DC-23E1, U+2474-2475, U+25AF, U+25B3, U+25B7, U+25BD, U+25C1, U+25CA, U+25CC, U+25FB, U+266D-266F, U+27C0-27FF, U+2900-2AFF, U+2B0E-2B11, U+2B30-2B4C, U+2BFE, U+3030, U+FF5B, U+FF5D, U+1D400-1D7FF, U+1EE00-1EEFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMaxKUBGEe.woff2) format("woff2");
+      unicode-range: U+0001-000C, U+000E-001F, U+007F-009F, U+20DD-20E0, U+20E2-20E4, U+2150-218F, U+2190, U+2192, U+2194-2199, U+21AF, U+21E6-21F0, U+21F3, U+2218-2219, U+2299, U+22C4-22C6, U+2300-243F, U+2440-244A, U+2460-24FF, U+25A0-27BF, U+2800-28FF, U+2921-2922, U+2981, U+29BF, U+29EB, U+2B00-2BFF, U+4DC0-4DFF, U+FFF9-FFFB, U+10140-1018E, U+10190-1019C, U+101A0, U+101D0-101FD, U+102E0-102FB, U+10E60-10E7E, U+1D2C0-1D2D3, U+1D2E0-1D37F, U+1F000-1F0FF, U+1F100-1F1AD, U+1F1E6-1F1FF, U+1F30D-1F30F, U+1F315, U+1F31C, U+1F31E, U+1F320-1F32C, U+1F336, U+1F378, U+1F37D, U+1F382, U+1F393-1F39F, U+1F3A7-1F3A8, U+1F3AC-1F3AF, U+1F3C2, U+1F3C4-1F3C6, U+1F3CA-1F3CE, U+1F3D4-1F3E0, U+1F3ED, U+1F3F1-1F3F3, U+1F3F5-1F3F7, U+1F408, U+1F415, U+1F41F, U+1F426, U+1F43F, U+1F441-1F442, U+1F444, U+1F446-1F449, U+1F44C-1F44E, U+1F453, U+1F46A, U+1F47D, U+1F4A3, U+1F4B0, U+1F4B3, U+1F4B9, U+1F4BB, U+1F4BF, U+1F4C8-1F4CB, U+1F4D6, U+1F4DA, U+1F4DF, U+1F4E3-1F4E6, U+1F4EA-1F4ED, U+1F4F7, U+1F4F9-1F4FB, U+1F4FD-1F4FE, U+1F503, U+1F507-1F50B, U+1F50D, U+1F512-1F513, U+1F53E-1F54A, U+1F54F-1F5FA, U+1F610, U+1F650-1F67F, U+1F687, U+1F68D, U+1F691, U+1F694, U+1F698, U+1F6AD, U+1F6B2, U+1F6B9-1F6BA, U+1F6BC, U+1F6C6-1F6CF, U+1F6D3-1F6D7, U+1F6E0-1F6EA, U+1F6F0-1F6F3, U+1F6F7-1F6FC, U+1F700-1F7FF, U+1F800-1F80B, U+1F810-1F847, U+1F850-1F859, U+1F860-1F887, U+1F890-1F8AD, U+1F8B0-1F8BB, U+1F8C0-1F8C1, U+1F900-1F90B, U+1F93B, U+1F946, U+1F984, U+1F996, U+1F9E9, U+1FA00-1FA6F, U+1FA70-1FA7C, U+1FA80-1FA89, U+1FA8F-1FAC6, U+1FACE-1FADC, U+1FADF-1FAE9, U+1FAF0-1FAF8, U+1FB00-1FBFF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3OUBGEe.woff2) format("woff2");
+      unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3KUBGEe.woff2) format("woff2");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF
+    }
+
+    @font-face {
+      font-family: Roboto;
+      font-style: normal;
+      font-weight: 700;
+      font-stretch: 100%;
+      font-display: swap;
+      src: url(https://fonts.gstatic.com/s/roboto/v48/KFO7CnqEu92Fr1ME7kSn66aGLdTylUAMa3yUBA.woff2) format("woff2");
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+    }
+
+    *,
+    :after,
+    :before {
+      box-sizing: border-box;
+      border-width: 0;
+      border-style: solid;
+      border-color: #e1e1e1
+    }
+
+    :after,
+    :before {
+      --tw-content: ""
+    }
+
+    html {
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+      -moz-tab-size: 4;
+      -o-tab-size: 4;
+      tab-size: 4;
+      font-family: Roboto, Helvetica Neue, Helvetica, arial, sans-serif;
+      font-feature-settings: normal;
+      font-variation-settings: normal;
+      -webkit-tap-highlight-color: transparent
+    }
+
+    body {
+      margin: 0;
+      line-height: inherit
+    }
+
+    *,
+    :after,
+    :before {
+      --tw-border-spacing-x: 0;
+      --tw-border-spacing-y: 0;
+      --tw-translate-x: 0;
+      --tw-translate-y: 0;
+      --tw-rotate: 0;
+      --tw-skew-x: 0;
+      --tw-skew-y: 0;
+      --tw-scale-x: 1;
+      --tw-scale-y: 1;
+      --tw-scroll-snap-strictness: proximity;
+      --tw-ring-offset-width: 0px;
+      --tw-ring-offset-color: #fff;
+      --tw-ring-color: rgb(59 130 246 / .5);
+      --tw-ring-offset-shadow: 0 0 #0000;
+      --tw-ring-shadow: 0 0 #0000;
+      --tw-shadow: 0 0 #0000;
+      --tw-shadow-colored: 0 0 #0000
+    }
+
+    html {
+      height: 100%;
+      width: 100%;
+      -webkit-text-size-adjust: 100%;
+      -moz-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      background: #efefef;
+      font-size: 16px;
+      line-height: 1.15
+    }
+
+    body {
+      margin: 0;
+      font-family: Roboto, Helvetica Neue, Helvetica, arial, sans-serif;
+      font-size: 14px;
+      color: #252525
+    }
+
+    .loading-container {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 10000;
+      height: 100%;
+      width: 100%;
+      background-color: #ffffff80;
+      display: flex;
+      justify-content: center;
+      align-items: center
+    }
+
+    .loading {
+      display: inline;
+      text-align: center
+    }
+
+    .loading>div {
+      width: 18px;
+      height: 18px;
+      background: #92c83e;
+      border-radius: 50%;
+      display: inline-block;
+      animation: sk-bouncedelay 1s infinite ease-in-out both
+    }
+
+    .loading .bounce1 {
+      animation-delay: -.32s
+    }
+
+    .loading .bounce2 {
+      animation-delay: -.16s
+    }
+
+    .loading .bounce3 {
+      animation-delay: 0
+    }
+
+    @keyframes sk-bouncedelay {
+
+      0%,
+      to,
+      80% {
+        transform: scale(0)
+      }
+
+      40% {
+        transform: scale(1)
+      }
+    }
+
+    .workspace {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden
+    }
+
+    :root {
+      --kendo-color-app-surface: #fff;
+      --kendo-color-on-app-surface: #252525;
+      --kendo-color-subtle: #666666;
+      --kendo-color-surface: #fff;
+      --kendo-color-surface-alt: #ffffff;
+      --kendo-color-border: #808080;
+      --kendo-color-border-alt: rgba(0, 0, 0, .16);
+      --kendo-color-base-subtle: whitesmoke;
+      --kendo-color-base-subtle-hover: #ebebeb;
+      --kendo-color-base-subtle-active: #dedede;
+      --kendo-color-base: #fff;
+      --kendo-color-base-hover: #e1e1e1;
+      --kendo-color-base-active: #c4dbed;
+      --kendo-color-base-emphasis: #c9c9c9;
+      --kendo-color-base-on-subtle: #404040;
+      --kendo-color-on-base: #252525;
+      --kendo-color-base-on-surface: #404040;
+      --kendo-color-primary-subtle: #d0e3f1;
+      --kendo-color-primary-subtle-hover: #accde7;
+      --kendo-color-primary-subtle-active: #89b8dc;
+      --kendo-color-primary: #1371b9;
+      --kendo-color-primary-hover: #126cb2;
+      --kendo-color-primary-active: #1163a3;
+      --kendo-color-primary-emphasis: #4e95cb;
+      --kendo-color-primary-on-subtle: #072841;
+      --kendo-color-on-primary: #fff;
+      --kendo-color-primary-on-surface: #0e558b;
+      --kendo-color-secondary-subtle: #fafafa;
+      --kendo-color-secondary-subtle-hover: #f5f5f5;
+      --kendo-color-secondary-subtle-active: #ebebeb;
+      --kendo-color-secondary: #666666;
+      --kendo-color-secondary-hover: #525252;
+      --kendo-color-secondary-active: #3d3d3d;
+      --kendo-color-secondary-emphasis: #e0e0e0;
+      --kendo-color-secondary-on-subtle: #141414;
+      --kendo-color-on-secondary: #ffffff;
+      --kendo-color-secondary-on-surface: #292929;
+      --kendo-color-tertiary-subtle: #d8f1fd;
+      --kendo-color-tertiary-subtle-hover: #c5eafc;
+      --kendo-color-tertiary-subtle-active: #a3dffb;
+      --kendo-color-tertiary: #03a9f4;
+      --kendo-color-tertiary-hover: #039ae0;
+      --kendo-color-tertiary-active: #028ccb;
+      --kendo-color-tertiary-emphasis: #61c9f9;
+      --kendo-color-tertiary-on-subtle: #023f5c;
+      --kendo-color-on-tertiary: #ffffff;
+      --kendo-color-tertiary-on-surface: #028ccb;
+      --kendo-color-info-subtle: #d2e2fb;
+      --kendo-color-info-subtle-hover: #bdd4f8;
+      --kendo-color-info-subtle-active: #80acf4;
+      --kendo-color-info: #0058e9;
+      --kendo-color-info-hover: #0052d6;
+      --kendo-color-info-active: #004ac2;
+      --kendo-color-info-emphasis: #6098f2;
+      --kendo-color-info-on-subtle: #002259;
+      --kendo-color-on-info: #ffffff;
+      --kendo-color-info-on-surface: #004ac2;
+      --kendo-color-success-subtle: #dcf0d3;
+      --kendo-color-success-subtle-hover: #cbe9bf;
+      --kendo-color-success-subtle-active: #b7e1a5;
+      --kendo-color-success: #37b400;
+      --kendo-color-success-hover: #32a500;
+      --kendo-color-success-active: #2d9600;
+      --kendo-color-success-emphasis: #81d15f;
+      --kendo-color-success-on-subtle: #1c5a00;
+      --kendo-color-on-success: #ffffff;
+      --kendo-color-success-on-surface: #2d9600;
+      --kendo-color-warning-subtle: #fff4d3;
+      --kendo-color-warning-subtle-hover: #ffeebd;
+      --kendo-color-warning-subtle-active: #ffe79e;
+      --kendo-color-warning: #ffc000;
+      --kendo-color-warning-hover: #eaaf00;
+      --kendo-color-warning-active: #d49f00;
+      --kendo-color-warning-emphasis: #ffd760;
+      --kendo-color-warning-on-subtle: #5e4700;
+      --kendo-color-on-warning: #3d3d3d;
+      --kendo-color-warning-on-surface: #ffc000;
+      --kendo-color-error-subtle: #fcddda;
+      --kendo-color-error-subtle-hover: #fbc8c3;
+      --kendo-color-error-subtle-active: #f98b80;
+      --kendo-color-error: #cb242b;
+      --kendo-color-error-hover: #df1600;
+      --kendo-color-error-active: #ca1400;
+      --kendo-color-error-emphasis: #f76f60;
+      --kendo-color-error-on-subtle: #7a0c00;
+      --kendo-color-on-error: #ffffff;
+      --kendo-color-error-on-surface: #ca1400;
+      --kendo-color-light-subtle: #fafafa;
+      --kendo-color-light-subtle-hover: #f5f5f5;
+      --kendo-color-light-subtle-active: #ebebeb;
+      --kendo-color-light: #ebebeb;
+      --kendo-color-light-hover: #e0e0e0;
+      --kendo-color-light-active: #d6d6d6;
+      --kendo-color-light-emphasis: #d6d6d6;
+      --kendo-color-light-on-subtle: #141414;
+      --kendo-color-on-light: #000000;
+      --kendo-color-light-on-surface: #e0e0e0;
+      --kendo-color-dark-subtle: #c2c2c2;
+      --kendo-color-dark-subtle-hover: #adadad;
+      --kendo-color-dark-subtle-active: #999999;
+      --kendo-color-dark: #3d3d3d;
+      --kendo-color-dark-hover: #292929;
+      --kendo-color-dark-active: #1f1f1f;
+      --kendo-color-dark-emphasis: #666666;
+      --kendo-color-dark-on-subtle: #1f1f1f;
+      --kendo-color-on-dark: #ffffff;
+      --kendo-color-dark-on-surface: #141414;
+      --kendo-color-inverse-subtle: #c2c2c2;
+      --kendo-color-inverse-subtle-hover: #adadad;
+      --kendo-color-inverse-subtle-active: #999999;
+      --kendo-color-inverse: #3d3d3d;
+      --kendo-color-inverse-hover: #292929;
+      --kendo-color-inverse-active: #1f1f1f;
+      --kendo-color-inverse-emphasis: #666666;
+      --kendo-color-inverse-on-subtle: #1f1f1f;
+      --kendo-color-on-inverse: #ffffff;
+      --kendo-color-inverse-on-surface: #141414;
+      --kendo-color-series-a: #ff6358;
+      --kendo-color-series-a-bold: #bf4a42;
+      --kendo-color-series-a-bolder: #80322c;
+      --kendo-color-series-a-subtle: #ffb1ac;
+      --kendo-color-series-a-subtler: #ff8a82;
+      --kendo-color-series-b: #ffe162;
+      --kendo-color-series-b-bold: #bfa94a;
+      --kendo-color-series-b-bolder: #807131;
+      --kendo-color-series-b-subtle: #fff0b1;
+      --kendo-color-series-b-subtler: #ffe989;
+      --kendo-color-series-c: #4cd180;
+      --kendo-color-series-c-bold: #399d60;
+      --kendo-color-series-c-bolder: #266940;
+      --kendo-color-series-c-subtle: #a6e8c0;
+      --kendo-color-series-c-subtler: #79dda0;
+      --kendo-color-series-d: #4b5ffa;
+      --kendo-color-series-d-bold: #3847bc;
+      --kendo-color-series-d-bolder: #26307d;
+      --kendo-color-series-d-subtle: #a5affd;
+      --kendo-color-series-d-subtler: #7887fb;
+      --kendo-color-series-e: #ac58ff;
+      --kendo-color-series-e-bold: #8142bf;
+      --kendo-color-series-e-bolder: #562c80;
+      --kendo-color-series-e-subtle: #d6acff;
+      --kendo-color-series-e-subtler: #c182ff;
+      --kendo-color-series-f: #ff5892;
+      --kendo-color-series-f-bold: #bf426e;
+      --kendo-color-series-f-bolder: #802c49;
+      --kendo-color-series-f-subtle: #ffacc9;
+      --kendo-color-series-f-subtler: #ff82ae
+    }
+
+    script {
+      display: none !important
+    }
+
+    :root {
+      --kendo-elevation-1: 0 2px 3px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-2: 0 4px 6px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-3: 0 6px 8px rgba(0, 0, 0, .08), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-4: 0 8px 10px rgba(0, 0, 0, .12), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-5: 0 10px 12px rgba(0, 0, 0, .16), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-6: 0 12px 14px rgba(0, 0, 0, .2), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-7: 0 14px 16px rgba(0, 0, 0, .24), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-8: 0 16px 18px rgba(0, 0, 0, .28), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-elevation-9: 0 32px 34px rgba(0, 0, 0, .32), 0 4px 16px rgba(0, 0, 0, .12);
+      --kendo-font-family: inherit;
+      --kendo-font-size: 14px;
+      --kendo-line-height: 1.4285714286;
+      --kendo-font-weight: 400;
+      --kendo-font-size-xxs: .5rem;
+      --kendo-font-size-xs: .625rem;
+      --kendo-font-size-sm: .75rem;
+      --kendo-font-size-md: 14px;
+      --kendo-font-size-lg: 1rem;
+      --kendo-font-size-xl: 1.25rem;
+      --kendo-line-height-xs: 1;
+      --kendo-line-height-sm: 1.25;
+      --kendo-line-height-md: 1.4285714286;
+      --kendo-line-height-lg: 1.5;
+      --kendo-font-weight-thin: 100;
+      --kendo-font-weight-extra-light: 200;
+      --kendo-font-weight-light: 300;
+      --kendo-font-weight-normal: 400;
+      --kendo-font-weight-medium: 500;
+      --kendo-font-weight-semibold: 600;
+      --kendo-font-weight-bold: 700;
+      --kendo-letter-spacing-tightest: -.15px;
+      --kendo-letter-spacing-tighter: -.1px;
+      --kendo-letter-spacing-tight: -.5px;
+      --kendo-letter-spacing-normal: 0px;
+      --kendo-letter-spacing-wide: .5px;
+      --kendo-letter-spacing-wider: .1px;
+      --kendo-letter-spacing-widest: .15px;
+      --kendo-font-family-sans: Arial, Verdana, Tahoma, Trebuchet MS, Helvetica, Impact, Gill Sans;
+      --kendo-font-family-serif: Times New Roman, Georgia, Garamond, Palatino, Baskerville;
+      --kendo-font-family-sans-serif: system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Noto Sans, Liberation Sans, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+      --kendo-font-family-monospace: SFMono-Regular, Menlo, Monaco, Consolas, Roboto Mono, Ubuntu Mono, Lucida Console, Courier New, monospace;
+      --kendo-spacing-0: 0px;
+      --kendo-spacing-1px: 1px;
+      --kendo-spacing-0\.5: .125rem;
+      --kendo-spacing-1: .25rem;
+      --kendo-spacing-1\.5: .375rem;
+      --kendo-spacing-2: .5rem;
+      --kendo-spacing-2\.5: .625rem;
+      --kendo-spacing-3: .75rem;
+      --kendo-spacing-3\.5: .875rem;
+      --kendo-spacing-4: 1rem;
+      --kendo-spacing-4\.5: 1.125rem;
+      --kendo-spacing-5: 1.25rem;
+      --kendo-spacing-5\.5: 1.375rem;
+      --kendo-spacing-6: 1.5rem;
+      --kendo-spacing-6\.5: 1.625rem;
+      --kendo-spacing-7: 1.75rem;
+      --kendo-spacing-7\.5: 1.875rem;
+      --kendo-spacing-8: 2rem;
+      --kendo-spacing-9: 2.25rem;
+      --kendo-spacing-10: 2.5rem;
+      --kendo-spacing-11: 2.75rem;
+      --kendo-spacing-12: 3rem;
+      --kendo-spacing-13: 3.25rem;
+      --kendo-spacing-14: 3.5rem;
+      --kendo-spacing-15: 3.75rem;
+      --kendo-spacing-16: 4rem;
+      --kendo-spacing-17: 4.25rem;
+      --kendo-spacing-18: 4.5rem;
+      --kendo-spacing-19: 4.75rem;
+      --kendo-spacing-20: 5rem;
+      --kendo-spacing-21: 5.25rem;
+      --kendo-spacing-22: 5.5rem;
+      --kendo-spacing-23: 5.75rem;
+      --kendo-spacing-24: 6rem;
+      --kendo-spacing-25: 7rem;
+      --kendo-spacing-26: 8rem;
+      --kendo-spacing-27: 9rem;
+      --kendo-spacing-28: 10rem;
+      --kendo-spacing-29: 11rem;
+      --kendo-spacing-30: 12rem;
+      --kendo-border-radius-none: 0px;
+      --kendo-border-radius-xs: 1px;
+      --kendo-border-radius-sm: .125rem;
+      --kendo-border-radius-md: .25rem;
+      --kendo-border-radius-lg: .375rem;
+      --kendo-border-radius-xl: .5rem;
+      --kendo-border-radius-xxl: .75rem;
+      --kendo-border-radius-xxxl: 1rem;
+      --kendo-border-radius-full: 9999px
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0
+    }
+
+    :root {
+      --fa-style-family-classic: "Font Awesome 6 Pro";
+      --fa-font-solid: normal 900 1em/1 "Font Awesome 6 Pro"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Pro";
+      font-style: normal;
+      font-weight: 900;
+      font-display: block;
+      src: url("./media/fa-solid-900-IFKGJ6XA.woff2") format("woff2"), url("./media/fa-solid-900-YC2JC4VE.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-classic: "Font Awesome 6 Pro";
+      --fa-font-regular: normal 400 1em/1 "Font Awesome 6 Pro"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Pro";
+      font-style: normal;
+      font-weight: 400;
+      font-display: block;
+      src: url("./media/fa-regular-400-M64KPLJB.woff2") format("woff2"), url("./media/fa-regular-400-FBDAEM7F.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-duotone: "Font Awesome 6 Duotone";
+      --fa-font-duotone: normal 900 1em/1 "Font Awesome 6 Duotone"
+    }
+
+    :root {
+      --fa-style-family-classic: "Font Awesome 6 Pro";
+      --fa-font-light: normal 300 1em/1 "Font Awesome 6 Pro"
+    }
+
+    :root {
+      --fa-style-family-sharp: "Font Awesome 6 Sharp";
+      --fa-font-sharp-light: normal 300 1em/1 "Font Awesome 6 Sharp"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Sharp";
+      font-style: normal;
+      font-weight: 300;
+      font-display: block;
+      src: url("./media/fa-sharp-light-300-UBI35OJX.woff2") format("woff2"), url("./media/fa-sharp-light-300-MQ673TZU.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-sharp: "Font Awesome 6 Sharp";
+      --fa-font-sharp-regular: normal 400 1em/1 "Font Awesome 6 Sharp"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Sharp";
+      font-style: normal;
+      font-weight: 400;
+      font-display: block;
+      src: url("./media/fa-sharp-regular-400-QDLZ5ROQ.woff2") format("woff2"), url("./media/fa-sharp-regular-400-2XFZ3ROO.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-sharp: "Font Awesome 6 Sharp";
+      --fa-font-sharp-solid: normal 900 1em/1 "Font Awesome 6 Sharp"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Sharp";
+      font-style: normal;
+      font-weight: 900;
+      font-display: block;
+      src: url("./media/fa-sharp-solid-900-CMN7434S.woff2") format("woff2"), url("./media/fa-sharp-solid-900-KSE35BKC.ttf") format("truetype")
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0
+    }
+
+    :root {
+      --fa-style-family-brands: "Font Awesome 6 Brands";
+      --fa-font-brands: normal 400 1em/1 "Font Awesome 6 Brands"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Brands";
+      font-style: normal;
+      font-weight: 400;
+      font-display: block;
+      src: url("./media/fa-brands-400-OCTMA7TL.woff2") format("woff2"), url("./media/fa-brands-400-Y7B5GURS.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-classic: "Font Awesome 6 Pro";
+      --fa-font-light: normal 300 1em/1 "Font Awesome 6 Pro"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Pro";
+      font-style: normal;
+      font-weight: 300;
+      font-display: block;
+      src: url("./media/fa-light-300-RGQQSHIQ.woff2") format("woff2"), url("./media/fa-light-300-ZKTH36H2.ttf") format("truetype")
+    }
+
+    :root {
+      --fa-style-family-duotone: "Font Awesome 6 Duotone";
+      --fa-font-duotone: normal 900 1em/1 "Font Awesome 6 Duotone"
+    }
+
+    @font-face {
+      font-family: "Font Awesome 6 Duotone";
+      font-style: normal;
+      font-weight: 900;
+      font-display: block;
+      src: url("./media/fa-duotone-900-CMHR2FH2.woff2") format("woff2"), url("./media/fa-duotone-900-NTWCZJKZ.ttf") format("truetype")
+    }
+  </style>
+  <link rel="stylesheet" href="./styles-3XLNOHR5.css" media="all" onload="this.media=&#39;all&#39;"><noscript>
+    <link rel="stylesheet" href="styles-3XLNOHR5.css">
+  </noscript>
+  <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" as="style">
+  <style type="text/css"></style>
+  <style>
+    .workspace-content--with-toolbar[_ngcontent-ng-c981407853] {
+      height: calc(100% - 54px)
+    }
+
+    .workspace-content--scroll-lock[_ngcontent-ng-c981407853] {
+      overflow-y: hidden
+    }
+
+    .scroll-top-button[_ngcontent-ng-c981407853] {
+      position: absolute;
+      bottom: 25px;
+      right: 25px;
+      z-index: 20;
+      transition: opacity .2s ease-in-out;
+      opacity: 1
+    }
+
+    .scroll-top-button--hidden[_ngcontent-ng-c981407853] {
+      opacity: 0;
+      pointer-events: none
+    }
+
+    .scroll-top-button[_ngcontent-ng-c981407853]:hover {
+      background: #fff
+    }
+
+    .toolbar__header[portalpageheader] {
+      word-break: break-word;
+      padding: 0;
+      margin: 0
+    }
+
+    .toolbar__header[_ngcontent-ng-c981407853] {
+      word-break: break-word;
+      padding: 0;
+      margin: 0
+    }
+
+    .toolbar[_ngcontent-ng-c981407853] {
+      display: flex;
+      padding-top: 0;
+      padding-bottom: 0;
+      padding-right: 0;
+      align-items: center;
+      overflow: visible
+    }
+
+    .toolbar[_ngcontent-ng-c981407853]:before,
+    .toolbar[_ngcontent-ng-c981407853]:after {
+      content: none
+    }
+
+    @media print {
+      .toolbar[_ngcontent-ng-c981407853] {
+        display: none !important
+      }
+    }
+  </style>
+  <style>
+    .toolbar--student-selector[_ngcontent-ng-c4163322034] {
+      justify-content: space-between;
+      display: flex;
+      padding-top: 0;
+      padding-bottom: 0;
+      padding-right: 0;
+      align-items: center;
+      overflow: visible
+    }
+
+    .toolbar--student-selector[_ngcontent-ng-c4163322034]:before,
+    .toolbar--student-selector[_ngcontent-ng-c4163322034]:after {
+      content: none
+    }
+
+    @media only screen and (max-width: 520px) {
+      .toolbar--student-selector-tiny[_ngcontent-ng-c4163322034] {
+        height: 38px
+      }
+
+      .toolbar--student-selector-tiny[_ngcontent-ng-c4163322034] .option-container[_ngcontent-ng-c4163322034] {
+        top: 38px
+      }
+
+      .toolbar--student-selector-tiny[_ngcontent-ng-c4163322034] .option[_ngcontent-ng-c4163322034] {
+        min-height: 38px
+      }
+    }
+
+    .toolbar--student-selector[_ngcontent-ng-c4163322034] .toolbar__header {
+      word-break: break-word;
+      padding: 0;
+      margin: 0
+    }
+
+    .classroom-toolbar[_ngcontent-ng-c4163322034] {
+      height: 42px
+    }
+  </style>
+  <style>
+    div.card__header[_ngcontent-ng-c3898317980] {
+      display: flex !important
+    }
+
+    .tl-button--disabled[_ngcontent-ng-c3898317980] {
+      opacity: .5;
+      pointer-events: none
+    }
+
+    .tl-word-break[_ngcontent-ng-c3898317980] {
+      word-break: break-word
+    }
+
+    .tl-grid-col--min-supported-width[_ngcontent-ng-c3898317980] {
+      min-width: 300px
+    }
+
+    .max-w-none[_ngcontent-ng-c3898317980] {
+      max-width: none
+    }
+
+    .placeholder-selected[_ngcontent-ng-c3898317980] .k-input-value-text[_ngcontent-ng-c3898317980] {
+      color: #ababab
+    }
+
+    .tl-icon-number[_ngcontent-ng-c3898317980] {
+      padding: 2px 6px;
+      background: #1371b9;
+      color: #fff;
+      border-radius: 100%
+    }
+
+    .k-list-container[_ngcontent-ng-c3898317980]>.k-list-filter[_ngcontent-ng-c3898317980]>.k-searchbox[_ngcontent-ng-c3898317980] {
+      align-items: center
+    }
+
+    .router-link-reset[_ngcontent-ng-c3898317980],
+    .tl-clickable-row[_ngcontent-ng-c3898317980] a[_ngcontent-ng-c3898317980],
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980] a[_ngcontent-ng-c3898317980] {
+      color: #252525
+    }
+
+    .router-link-reset[_ngcontent-ng-c3898317980]:hover,
+    .tl-clickable-row[_ngcontent-ng-c3898317980] a[_ngcontent-ng-c3898317980]:hover,
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980] a[_ngcontent-ng-c3898317980]:hover {
+      text-decoration: none
+    }
+
+    .clickable[_ngcontent-ng-c3898317980],
+    .tl-clickable-row[_ngcontent-ng-c3898317980],
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980] {
+      cursor: pointer
+    }
+
+    .clickable[_ngcontent-ng-c3898317980]:hover,
+    .tl-clickable-row[_ngcontent-ng-c3898317980]:hover,
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980]:hover {
+      background-color: #f2f2f2
+    }
+
+    .tl-clickable-row--noborder[_ngcontent-ng-c3898317980]:active {
+      box-shadow: none !important
+    }
+
+    .tl-clickable-row[_ngcontent-ng-c3898317980]:active,
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980]:active {
+      box-shadow: inset 0 0 0 2px #1371b9, inset 0 0 0 4px #fff
+    }
+
+    .tl-clickable-row[_ngcontent-ng-c3898317980]:active a[_ngcontent-ng-c3898317980]:focus {
+      box-shadow: none
+    }
+
+    ul.tl-link-list[_ngcontent-ng-c3898317980] {
+      margin: -1rem;
+      list-style: none;
+      padding: 0
+    }
+
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980] .tl-clickable-row[_ngcontent-ng-c3898317980] {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .5rem 1rem
+    }
+
+    ul.tl-link-list[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980]+li[_ngcontent-ng-c3898317980] {
+      border-top: 1px solid #e1e1e1
+    }
+
+    .focus-inset[_ngcontent-ng-c3898317980]:focus,
+    .option[_ngcontent-ng-c3898317980]:focus,
+    .focus-inset-tr[_ngcontent-ng-c3898317980]:focus {
+      box-shadow: inset 0 0 0 2px #1371b9, inset 0 0 0 4px #fff
+    }
+
+    .focus-inset-tr[_ngcontent-ng-c3898317980]:focus {
+      z-index: 50;
+      position: relative;
+      outline: 2px solid transparent;
+      outline-offset: 2px
+    }
+
+    .focus-border[_ngcontent-ng-c3898317980]:focus {
+      border-radius: 2px;
+      box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1371b9, 0 0 0 6px #fff;
+      outline: 2px solid transparent
+    }
+
+    .tl-space[_ngcontent-ng-c3898317980] {
+      display: inline-block;
+      width: .175rem
+    }
+
+    .tl-label--today[_ngcontent-ng-c3898317980] {
+      margin-left: 5px
+    }
+
+    .tl-assignment__container[_ngcontent-ng-c3898317980] {
+      margin: -1rem
+    }
+
+    .tl-virtual-alert[_ngcontent-ng-c3898317980] {
+      font-size: .788rem;
+      font-weight: 500;
+      line-height: 1.313rem;
+      color: #252525;
+      border-left: 8px solid #f5af06;
+      padding: 1pt .5rem;
+      background: #fcebc1;
+      border-color: #f5af06
+    }
+
+    .tl-list-reset[_ngcontent-ng-c3898317980] {
+      list-style: none;
+      padding: 0;
+      margin: 0
+    }
+
+    .tl-comment-bubble[_ngcontent-ng-c3898317980] {
+      padding-top: 5px;
+      padding-right: 5px
+    }
+
+    .cdk-drop-list-dragging[_ngcontent-ng-c3898317980] .cdk-drag[_ngcontent-ng-c3898317980] {
+      transition: transform .25s cubic-bezier(0, 0, .2, 1)
+    }
+
+    .cdk-drag-preview[_ngcontent-ng-c3898317980] {
+      z-index: 2001 !important
+    }
+
+    .cdk-drag-animating[_ngcontent-ng-c3898317980] {
+      transition: transform .25s cubic-bezier(0, 0, .2, 1)
+    }
+
+    .cdk-drag-placeholder[_ngcontent-ng-c3898317980] {
+      visibility: hidden
+    }
+
+    .k-list[_ngcontent-ng-c3898317980]:has(> .k-list-group-sticky-header)[_ngcontent-ng-c3898317980] .k-list-group-item[_ngcontent-ng-c3898317980]:first-child {
+      display: none
+    }
+
+    .k-popup.k-dropdownlist-popup[_ngcontent-ng-c3898317980] .k-list-item.k-selected[_ngcontent-ng-c3898317980] .label[_ngcontent-ng-c3898317980] {
+      color: inherit !important;
+      border-color: inherit !important
+    }
+
+    [_nghost-ng-c3898317980] {
+      height: 100%;
+      min-width: fit-content
+    }
+
+    .student-selector[_ngcontent-ng-c3898317980] {
+      position: relative;
+      padding: 0 10px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      min-width: 0
+    }
+
+    @media only screen and (max-width: 520px) {
+      .student-selector[_ngcontent-ng-c3898317980] {
+        max-width: 150px
+      }
+    }
+
+    .student-selector--clickable[_ngcontent-ng-c3898317980] {
+      cursor: pointer
+    }
+
+    .student-selector--clickable[_ngcontent-ng-c3898317980]:hover,
+    .student-selector--active[_ngcontent-ng-c3898317980] {
+      background-color: #f7f8f8
+    }
+
+    .student-selector__icon[_ngcontent-ng-c3898317980] {
+      padding-left: 5px
+    }
+
+    .student-selector__selected[_ngcontent-ng-c3898317980] {
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .student-selector__image[_ngcontent-ng-c3898317980] {
+      max-height: 42px;
+      padding-left: 5px
+    }
+
+    @media only screen and (max-width: 520px) {
+      .student-selector__image-tiny[_ngcontent-ng-c3898317980] {
+        max-height: 32px
+      }
+    }
+
+    .student-selector--border[_ngcontent-ng-c3898317980] {
+      border-left: 1px solid #e1e1e1;
+      display: flex;
+      align-items: center
+    }
+
+    .option-container[_ngcontent-ng-c3898317980] {
+      position: fixed;
+      top: 54px;
+      right: 0;
+      box-shadow: 0 5px 25px #0000001a;
+      border-radius: 0 0 4px 4px;
+      border: 1px solid #e1e1e1;
+      border-top: none;
+      overflow: auto;
+      max-height: calc(100% - 49px);
+      display: flex;
+      flex-direction: column
+    }
+
+    .option-container.classroom-student-selector[_ngcontent-ng-c3898317980] {
+      top: 42px
+    }
+
+    .option-container[_ngcontent-ng-c3898317980] li[_ngcontent-ng-c3898317980]+li[_ngcontent-ng-c3898317980] {
+      border-top: 1px solid #e1e1e1
+    }
+
+    .remove-student__button[_ngcontent-ng-c3898317980] {
+      padding: 4px 8px;
+      height: 26px;
+      margin-left: .5rem
+    }
+
+    .option[_ngcontent-ng-c3898317980] {
+      min-height: 54px;
+      width: 100%;
+      background: #fff;
+      padding: .5rem 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      outline: none
+    }
+
+    .option[_ngcontent-ng-c3898317980]:hover {
+      background: #f7f8f8
+    }
+
+    .option[_ngcontent-ng-c3898317980]:last-child {
+      border-radius: 0 0 4px 4px
+    }
+
+    .option--active[_ngcontent-ng-c3898317980] {
+      background-color: #f7f8f8
+    }
+
+    .option--show-student-picture[_ngcontent-ng-c3898317980] {
+      padding: .5rem
+    }
+
+    .option__text-box[_ngcontent-ng-c3898317980] {
+      text-align: left;
+      word-wrap: break-word;
+      min-width: 200px;
+      max-width: 320px
+    }
+
+    .option__text-box--show-student-picture[_ngcontent-ng-c3898317980] {
+      min-width: 180px
+    }
+  </style>
+  <style>
+    .enrollment-picker[_ngcontent-ng-c347621648] {
+      margin-bottom: 1rem
+    }
+
+    @media only screen and (max-width: 520px) {
+      .enrollment-picker[_ngcontent-ng-c347621648] {
+        margin-left: 1rem;
+        margin-top: 1rem;
+        margin-right: 1rem
+      }
+    }
+
+    .enrollment-picker__droplist[_ngcontent-ng-c347621648] {
+      min-width: 20rem;
+      width: auto
+    }
+
+    @media only screen and (max-width: 520px) {
+      .enrollment-picker__droplist[_ngcontent-ng-c347621648] {
+        min-width: 0;
+        width: 100%
+      }
+    }
+
+    .enrollment-picker[_ngcontent-ng-c347621648] .k-input-value-text {
+      display: flex
+    }
+
+    @media only screen and (max-width: 520px) {
+      .enrollment-picker-name[_ngcontent-ng-c347621648] {
+        margin-top: 1rem
+      }
+    }
+
+    .school-name--padding[_ngcontent-ng-c347621648] {
+      padding: .25rem .5rem
+    }
+
+    .school-name--text-secondary[_ngcontent-ng-c347621648] {
+      color: #666
+    }
+  </style>
+  <style>
+    .grades__card--last[_ngcontent-ng-c1820947635] {
+      margin-bottom: 0
+    }
+
+    .grades__card-header[_ngcontent-ng-c1820947635] {
+      width: 100%;
+      top: 0;
+      z-index: 1
+    }
+
+    @supports (-ms-ime-align: auto) {
+      .grades__card-header[_ngcontent-ng-c1820947635] {
+        position: relative
+      }
+    }
+
+    .grades__card-header--small[_ngcontent-ng-c1820947635] {
+      font-size: .875rem;
+      font-weight: 500;
+      letter-spacing: .2px;
+      min-height: 32px;
+      padding: .25rem 1rem;
+      height: unset
+    }
+
+    .task__row[_ngcontent-ng-c1820947635]+.task__row[_ngcontent-ng-c1820947635] {
+      border-top: 1px solid #e1e1e1
+    }
+
+    .divider__header--title[_ngcontent-ng-c1820947635] {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      width: 95%
+    }
+
+    .divider__header--title[_ngcontent-ng-c1820947635] span[_ngcontent-ng-c1820947635]:first-child {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .divider__header--title[_ngcontent-ng-c1820947635] .label[_ngcontent-ng-c1820947635] {
+      margin-left: auto
+    }
+
+    .divider__header--title[_ngcontent-ng-c1820947635] span[_ngcontent-ng-c1820947635] {
+      margin: 3px 5px 3px 0
+    }
+  </style>
+  <style>
+    .term-picker[_ngcontent-ng-c3919549807] {
+      width: 100%;
+      margin-bottom: 1rem
+    }
+
+    .term-picker__wrapper[_ngcontent-ng-c3919549807] {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: baseline
+    }
+
+    @media only screen and (max-width: 520px) {
+      .term-picker__wrapper[_ngcontent-ng-c3919549807]>div[_ngcontent-ng-c3919549807] {
+        width: 100%
+      }
+    }
+
+    .term-picker__header[_ngcontent-ng-c3919549807] {
+      display: flex;
+      justify-content: space-between
+    }
+
+    .term-picker__sub-header[_ngcontent-ng-c3919549807] {
+      display: flex;
+      justify-content: space-between;
+      align-items: center
+    }
+
+    @media only screen and (max-width: 520px) {
+      .term-picker__sub-header[_ngcontent-ng-c3919549807] {
+        width: 100%
+      }
+    }
+
+    .term-picker__sub-header-text[_ngcontent-ng-c3919549807] {
+      display: inline-block;
+      margin: 0;
+      font-size: .8em
+    }
+
+    .term-picker__button-container[_ngcontent-ng-c3919549807] {
+      flex: 1;
+      overflow-x: auto;
+      margin-bottom: 10px
+    }
+
+    .term-picker__settings-button[_ngcontent-ng-c3919549807] {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      margin-left: auto;
+      white-space: nowrap
+    }
+  </style>
+  <style>
+    .gpa__card-header[_ngcontent-ng-c1766706913] {
+      width: 100%;
+      top: 0;
+      z-index: 1
+    }
+
+    @supports (-ms-ime-align: auto) {
+      .gpa__card-header[_ngcontent-ng-c1766706913] {
+        position: relative
+      }
+    }
+  </style>
+  <style>
+    .grading-task-list[_ngcontent-ng-c149478664] {
+      margin: -1rem;
+      list-style: none;
+      padding: 0
+    }
+
+    .grading-task-list[_ngcontent-ng-c149478664] li[_ngcontent-ng-c149478664]+li[_ngcontent-ng-c149478664] {
+      border-top: 1px solid #e1e1e1
+    }
+  </style>
+  <style>
+    .grades__header-cell[_ngcontent-ng-c149478664] {
+      padding-right: 10px;
+      padding-left: 10px;
+      width: 110px;
+      min-width: 110px;
+      max-width: 110px
+    }
+
+    .grades__cell[_ngcontent-ng-c149478664]+.grades__cell[_ngcontent-ng-c149478664] {
+      border-left: 1px solid #c6c6c6;
+      background-clip: padding-box
+    }
+
+    .grades__cell--score[_ngcontent-ng-c149478664] {
+      position: relative;
+      text-align: center;
+      padding: 0;
+      height: inherit
+    }
+
+    .grades__cell--masked[_ngcontent-ng-c149478664] {
+      background: #f4f4f4
+    }
+
+    .grades__cell--notClickable[_ngcontent-ng-c149478664]:hover {
+      background-color: #f2f2f2
+    }
+
+    .grades__cell--inProgress[_ngcontent-ng-c149478664] {
+      background-color: #fcebc1
+    }
+
+    .grades__cell--inProgress[_ngcontent-ng-c149478664]:hover {
+      background-color: #fbe3a9
+    }
+
+    .grades__cell--posted[_ngcontent-ng-c149478664] {
+      background-color: #c4dbed
+    }
+
+    .grades__cell--posted[_ngcontent-ng-c149478664]:hover {
+      background-color: #b0cfe7
+    }
+  </style>
+  <style>
+    .grades__row[_ngcontent-ng-c3642775906] {
+      padding: .25rem 1rem;
+      display: flex;
+      flex-direction: column
+    }
+
+    .grades__row--shaded[_ngcontent-ng-c3642775906] {
+      background: #f4f4f4
+    }
+
+    .grades__flex-row--nowrap[_ngcontent-ng-c3642775906] {
+      display: flex;
+      flex-wrap: nowrap;
+      min-height: 40px;
+      align-items: center
+    }
+
+    .grades__flex-row__item[_ngcontent-ng-c3642775906] {
+      margin: 5px 0;
+      min-width: 70px
+    }
+
+    .grades__flex-row__item--left[_ngcontent-ng-c3642775906] {
+      padding-right: 50px;
+      flex: 1
+    }
+
+    @media only screen and (max-width: 520px) {
+      .grades__flex-row__item--left[_ngcontent-ng-c3642775906] {
+        padding-right: 1rem
+      }
+    }
+
+    .grades__flex-row__item--right[_ngcontent-ng-c3642775906] {
+      text-align: center;
+      margin-left: auto;
+      margin-right: 10px;
+      min-width: 60px
+    }
+
+    .grades__comment[_ngcontent-ng-c3642775906] {
+      padding: 5px 100px 5px 0
+    }
+
+    @media only screen and (max-width: 520px) {
+      .grades__comment[_ngcontent-ng-c3642775906] {
+        padding-right: 10px
+      }
+    }
+
+    .grades__comment-bubble[_ngcontent-ng-c3642775906] {
+      padding-top: 5px;
+      padding-right: 5px
+    }
+
+    .grades-detail__highlight[_ngcontent-ng-c3642775906] {
+      animation: _ngcontent-ng-c3642775906_highlightFadeOut 3s
+    }
+
+    @keyframes _ngcontent-ng-c3642775906_highlightFadeOut {
+      0% {
+        background: #c4dbed
+      }
+
+      to {
+        background: #f4f4f4
+      }
+    }
+  </style>
+  <style>
+    .grading-score[_ngcontent-ng-c2131042790] {
+      width: 100%;
+      line-height: .7rem;
+      padding: 5px 3px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center
+    }
+
+    .grading-score__icon-container[_ngcontent-ng-c2131042790] {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: absolute;
+      bottom: 3px;
+      left: 3px;
+      width: 93%
+    }
+
+    .grading-score__icon-container-top[_ngcontent-ng-c2131042790] {
+      display: flex;
+      left: 3px
+    }
+
+    .grading-score__icon-right[_ngcontent-ng-c2131042790] {
+      margin-left: auto
+    }
+
+    .grading-score__icon[_ngcontent-ng-c2131042790] {
+      font-size: 9pt;
+      padding: 2px
+    }
+
+    .grading-score__icon-asterisk[_ngcontent-ng-c2131042790] {
+      font-size: 8pt
+    }
+
+    .grading-score__row-spacing[_ngcontent-ng-c2131042790] {
+      margin-top: 3px
+    }
+  </style>
+</head>
+
+<body class="workspace">
+  <app-root ng-version="18.2.2"><router-outlet></router-outlet><ng-component class="ng-star-inserted"><router-outlet
+        class="ng-star-inserted"></router-outlet><app-grades class="ng-star-inserted"><app-portal-page
+          titletext="Grades" _nghost-ng-c981407853=""><!----><tl-student-selector-toolbar _ngcontent-ng-c981407853=""
+            _nghost-ng-c4163322034="" class="ng-star-inserted">
+            <div _ngcontent-ng-c4163322034="" role="region" aria-label="toolbar"
+              class="toolbar toolbar--student-selector">
+              <div _ngcontent-ng-c981407853="" id="toolbar__header"
+                class="toolbar__header outline-none flex flex-nowrap items-center ng-star-inserted"><!---->
+                <h1 _ngcontent-ng-c981407853="" tabindex="-1"
+                  class="text-[1.166rem] font-normal tracking-normal ng-star-inserted"> Grades </h1><!---->
+              </div><!----><!----><!----><tl-student-selector-dropdown _ngcontent-ng-c4163322034=""
+                _nghost-ng-c3898317980="">
+                <div _ngcontent-ng-c3898317980="" class="h-full student-selector--border" tabindex="0"><span
+                    _ngcontent-ng-c3898317980="" class="sr-only"> Selected student: Eliza Banaszewski
+                  </span><!----><button _ngcontent-ng-c3898317980=""
+                    class="student-selector button border-0 focus-inset cursor-auto ng-star-inserted"
+                    id="studentSelectorValue" disabled="" aria-label="Student selector dropdown Eliza Banaszewski"
+                    aria-hidden="true">
+                    <div _ngcontent-ng-c3898317980="" class="student-selector__selected"><!----><span
+                        _ngcontent-ng-c3898317980="">Eliza </span><span _ngcontent-ng-c3898317980="" class="hide-tiny">
+                        Banaszewski </span></div><!----><img _ngcontent-ng-c3898317980="" alt=""
+                      class="student-selector__image pb-px ng-star-inserted" src="./58324.jpg"><!----><!---->
+                  </button><!----></div><!---->
+              </tl-student-selector-dropdown>
+            </div>
+          </tl-student-selector-toolbar><!----><!----><!---->
+          <div _ngcontent-ng-c981407853="" class="workspace-content relative workspace-content--with-toolbar">
+            <div class="grid ng-star-inserted"><!---->
+              <div class="grid__col--large-3 grid__col--small-4 grid__col--tiny-4 ng-star-inserted">
+                <tl-enrollment-picker _nghost-ng-c347621648=""><!---->
+                  <h2 _ngcontent-ng-c347621648="" class="font-normal text-sm mb-0 tracking-normal ng-star-inserted">
+                    <div _ngcontent-ng-c347621648=""
+                      class="flex items-baseline school-name--padding school-name--text-secondary enrollment-picker-name ng-star-inserted">
+                      <div _ngcontent-ng-c347621648="" class="flex items-center" style="min-width: 8rem;">
+                        <div _ngcontent-ng-c347621648="" class="selcat-school-name truncate"> 25-26 ALA Gilbert North JH
+                        </div><!---->
+                      </div><!----><!---->
+                    </div><!---->
+                  </h2><!----><!----><!----><!---->
+                </tl-enrollment-picker><!----><app-grades-card _nghost-ng-c1820947635="">
+                  <div _ngcontent-ng-c1820947635="" class="card ng-star-inserted"><tl-app-term-picker
+                      _ngcontent-ng-c1820947635="" _nghost-ng-c3919549807="" class="ng-star-inserted">
+                      <div _ngcontent-ng-c3919549807="" class="term-picker">
+                        <div _ngcontent-ng-c3919549807="" class="term-picker__wrapper">
+                          <div _ngcontent-ng-c3919549807="">
+                            <div _ngcontent-ng-c3919549807="" class="term-picker__header ng-star-inserted">
+                              <div _ngcontent-ng-c3919549807="" class="term-picker__button-container"><kendo-buttongroup
+                                  _ngcontent-ng-c3919549807="" selection="single"
+                                  class="pill-button-group k-button-group" aria-label="Term Filter list with 3 items"
+                                  role="group" dir="ltr"><button _ngcontent-ng-c3919549807="" kendobutton=""
+                                    style="min-width: 60px;" aria-pressed="false" aria-disabled="false" dir="ltr"
+                                    class="k-button k-toggle-button k-button-md k-rounded-md k-button-solid-base k-button-solid k-group-start ng-star-inserted"><!----><!----><!----><span
+                                      class="k-button-text"> All Terms </span><!----><!----></button><!----><button
+                                    _ngcontent-ng-c3919549807="" kendobutton="" style="min-width: 60px;"
+                                    aria-pressed="true" aria-disabled="false" dir="ltr"
+                                    class="k-button k-toggle-button k-selected k-button-md k-rounded-md k-button-solid-base k-button-solid ng-star-inserted"><!----><!----><!----><span
+                                      class="k-button-text"> S1 </span><!----><!----></button><button
+                                    _ngcontent-ng-c3919549807="" kendobutton="" style="min-width: 60px;"
+                                    aria-pressed="false" aria-disabled="false" dir="ltr"
+                                    class="k-button k-toggle-button k-button-md k-rounded-md k-button-solid-base k-button-solid k-group-end ng-star-inserted"><!----><!----><!----><span
+                                      class="k-button-text"> S2
+                                    </span><!----><!----></button><!----></kendo-buttongroup></div>
+                            </div><!---->
+                            <div _ngcontent-ng-c3919549807="" class="term-picker__sub-header"><!---->
+                              <h3 _ngcontent-ng-c3919549807=""
+                                class="font-normal text-sm mb-0 tracking-normal ng-star-inserted"><span
+                                  _ngcontent-ng-c3919549807="" class="header-text">Term<!----><!----> S1 </span><span
+                                  _ngcontent-ng-c3919549807=""
+                                  class="card__sub-header term-picker__sub-header-text">(07/30/2025 - 12/19/2025)</span>
+                              </h3><!----><button _ngcontent-ng-c3919549807="" aria-controls="gradeSettingsComponent"
+                                class="term-picker__settings-button focus-border hide-until-tiny ng-star-inserted"
+                                aria-expanded="false"><span _ngcontent-ng-c3919549807="" class="mr-2">Settings</span><i
+                                  _ngcontent-ng-c3919549807="" aria-hidden="true"
+                                  class="fa-chevron-down fas"></i></button><!---->
+                            </div>
+                          </div><button _ngcontent-ng-c3919549807="" aria-controls="gradeSettingsComponent"
+                            class="term-picker__settings-button focus-border hide-tiny ng-star-inserted"
+                            aria-expanded="false"><span _ngcontent-ng-c3919549807="" class="mr-2">Settings</span><i
+                              _ngcontent-ng-c3919549807="" aria-hidden="true"
+                              class="fa-chevron-down fas"></i></button><!---->
+                        </div>
+                      </div>
+                    </tl-app-term-picker><!----><!----><!----><tl-gpa-card _ngcontent-ng-c1820947635=""
+                      _nghost-ng-c1766706913="" class="ng-star-inserted">
+                      <div _ngcontent-ng-c1766706913="" class="collapsible-card gpa__card" style="overflow: visible;">
+                        <div _ngcontent-ng-c1766706913=""
+                          class="collapsible-card__header sticky gpa__card-header collapsible-card__header--selcat-gpa-list">
+                          <h4 _ngcontent-ng-c1766706913="">GPA</h4><i _ngcontent-ng-c1766706913="" tabindex="0"
+                            role="button" aria-controls="gpaList"
+                            class="fa collapsible-card__icon ml-4 focus-border fa-plus" aria-expanded="false"
+                            aria-label="Toggle GPA"></i>
+                        </div><!---->
+                      </div>
+                    </tl-gpa-card><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->English 7 - A</a><!----><!----></h4>
+                                <!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle English 7 - A" aria-controls="gradingTaskTable:55161-677841"></i>
+                            </div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55161-677841"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4472598"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">A</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(100%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->History 7-A</a><!----><!----></h4>
+                                <!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle History 7-A" aria-controls="gradingTaskTable:55074-677566"></i></div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55074-677566"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4431442"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">B-</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(80.71%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->JR High Art I - A</a><!----><!---->
+                                </h4><!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle JR High Art I - A" aria-controls="gradingTaskTable:55036-677516"></i>
+                            </div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55036-677516"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4418195"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">C-</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(72.02%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->JR High Dance I - A</a><!----><!---->
+                                </h4><!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle JR High Dance I - A"
+                                aria-controls="gradingTaskTable:55116-677712"></i></div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55116-677712"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4408845"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">A</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(97.8%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->JR High Technology I -
+                                    A</a><!----><!----></h4><!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle JR High Technology I - A"
+                                aria-controls="gradingTaskTable:55156-677817"></i></div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55156-677817"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4415248"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">A</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(100%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635="" class="collapsible-card grades__card ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->JR Science 7-A</a><!----><!----></h4>
+                                <!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle JR Science 7-A" aria-controls="gradingTaskTable:55129-677779"></i>
+                            </div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55129-677779"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4458890"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">A</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(99.28%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!---->
+                    <div _ngcontent-ng-c1820947635=""
+                      class="collapsible-card grades__card grades__card--last ng-star-inserted"
+                      style="overflow: visible;">
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__header sticky grades__card-header collapsible-card__header--selcat-task-list collapsible-card__header--open">
+                        <tl-grading-section-header _ngcontent-ng-c1820947635="" class="w-full">
+                          <div class="flex justify-between items-center">
+                            <div class="flex flex-wrap pr-2 min-w-0">
+                              <div class="flex w-full">
+                                <h4 class="truncate -m-2 p-2"><a href="javascript:void(0);" kendotooltip=""
+                                    showon="none" class="ng-star-inserted"><!---->Math 7 - A</a><!----><!----></h4>
+                                <!----><!----><!---->
+                              </div><!---->
+                            </div>
+                            <div class="flex items-center"><!----><i tabindex="0" role="button"
+                                class="fa collapsible-card__icon ml-4 focus-border fa-minus" aria-expanded="true"
+                                aria-label="Toggle Math 7 - A" aria-controls="gradingTaskTable:55096-677632"></i></div>
+                          </div>
+                        </tl-grading-section-header></div>
+                      <div _ngcontent-ng-c1820947635=""
+                        class="collapsible-card__content overflow-x-auto ng-star-inserted"
+                        id="gradingTaskTable:55096-677632"><tl-grading-task-list _ngcontent-ng-c1820947635=""
+                          _nghost-ng-c149478664="">
+                          <ul _ngcontent-ng-c149478664="" class="grading-task-list ng-star-inserted">
+                            <li _ngcontent-ng-c149478664="" class="ng-star-inserted">
+                              <div _ngcontent-ng-c149478664="" tl-grading-task="" _nghost-ng-c3642775906=""
+                                class="ng-star-inserted">
+                                <div _ngcontent-ng-c3642775906="" role="group" aria-label="item"
+                                  class="grades__row tl-clickable-row">
+                                  <div _ngcontent-ng-c3642775906="" class="grades__flex-row--nowrap ng-star-inserted">
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--left">
+                                      <!----><tl-grading-task-header _ngcontent-ng-c3642775906=""
+                                        _nghost-ng-c2841090266=""><tl-heading _ngcontent-ng-c2841090266=""
+                                          class="ng-star-inserted"><!----><!----><!----><!---->
+                                          <h5 class="ng-star-inserted"><a _ngcontent-ng-c2841090266=""
+                                              href="javascript:void(0)" class="router-link-reset ng-star-inserted"
+                                              id="grades-4478892"><!----><span _ngcontent-ng-c3642775906=""
+                                                class="ng-star-inserted">Semester
+                                                Grade</span><!----><!----></a><!----><!----><!----><!----><!----></h5>
+                                          <!----><!----><!----><!---->
+                                        </tl-heading><!----><!----><!----><!----></tl-grading-task-header><!----><!----><!---->
+                                    </div>
+                                    <div _ngcontent-ng-c3642775906=""
+                                      class="grades__flex-row__item grades__flex-row__item--right"><tl-grading-score
+                                        _ngcontent-ng-c3642775906="" _nghost-ng-c2131042790="" class="ng-star-inserted">
+                                        <div _ngcontent-ng-c2131042790=""
+                                          class="flex justify-items-stretch h-full w-full relative items-center"><!---->
+                                          <div _ngcontent-ng-c2131042790="" class="grading-score ng-star-inserted">
+                                            <div _ngcontent-ng-c2131042790="" class="ng-star-inserted">F</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted">(0%)</div><!---->
+                                            <div _ngcontent-ng-c2131042790=""
+                                              class="grading-score__row-spacing ng-star-inserted"><small
+                                                _ngcontent-ng-c2131042790="">In-progress</small></div>
+                                            <!----><!----><!----><!----><!---->
+                                          </div><!----><!---->
+                                        </div>
+                                      </tl-grading-score><!----></div>
+                                    <div _ngcontent-ng-c3642775906="" style="width: 10px;"><i
+                                        _ngcontent-ng-c3642775906="" aria-hidden="true"
+                                        class="fa fa-chevron-right text-gray-darkest ng-star-inserted"></i><!----><!---->
+                                    </div>
+                                  </div><!----><!----><!---->
+                                </div><!----><!---->
+                              </div><!---->
+                            </li><!---->
+                          </ul><!----><!----><!----><!----><!----><!----><!----><!----><!---->
+                        </tl-grading-task-list></div><!---->
+                    </div><!----><!----><!----><!----><!---->
+                  </div><!----><!---->
+                </app-grades-card></div><!----><!---->
+            </div><!---->
+          </div><button _ngcontent-ng-c981407853="" aria-label="Scroll to top"
+            class="button scroll-top-button ng-star-inserted scroll-top-button--hidden" tabindex="-1"
+            aria-hidden="true"><i _ngcontent-ng-c981407853="" aria-hidden="true"
+              class="fas fa-arrow-up"></i></button><!---->
+        </app-portal-page></app-grades><!----><!----><!----></ng-component><!----><router-outlet
+      name="secondaryRouteOutlet"></router-outlet><!----><router-outlet
+      name="tertiaryRouteOutlet"></router-outlet><!----><ic-side-panel-overlay>
+      <div></div>
+    </ic-side-panel-overlay><tl-app-loading-icon><ic-loading class="ng-tns-c543333061-0">
+        <div role="status" class="sr-only ng-tns-c543333061-0"><!----></div><!---->
+      </ic-loading></tl-app-loading-icon><span id="connectionErrorToastMessage" class="translation">Connection error!
+      Please try again later.</span><span id="errorModalTitle" class="translation">Error</span><span
+      id="errorModalCloseButton" class="translation">Close</span>
+    <div kendodialogcontainer=""></div><!----><!---->
+  </app-root>
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-ZFJDVSGG.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-YZ2MCNIE.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-PQPPNHSO.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-JNHS77JK.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-QGQUO4WR.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-IMJP2ZR3.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-KWO2Q55W.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-2QOB3VKG.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-AECC37ZO.js">
+  <link rel="modulepreload" href="https://alaaz.infinitecampus.org/campus/apps/portal/chunk-KWZ4G54Z.js">
+  <script src="./polyfills-APIHTAAL.js.download" type="module"></script>
+  <script src="./scripts-ZFTDHRRS.js.download" defer=""></script>
+  <script src="./main-XQRCYLV3.js.download" type="module"></script>
+
+
+  <div class="cdk-live-announcer-element cdk-visually-hidden" aria-atomic="true" aria-live="polite"
+    id="cdk-live-announcer-0"></div>
+</body>
+
+</html>
