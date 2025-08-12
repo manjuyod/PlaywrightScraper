@@ -2,24 +2,21 @@
 """
 update_sheets.py · PlaywrightScraper/work_flows
 
-Build a franchise‑specific “BMaster” worksheet each week:
-  1. Read every student from config/students.db.
-  2. For each franchise, assemble a DataFrame with:
-       • meta rows (Name → P2Password)
-       • two blank rows
-       • one row per subject (Subject1…SubjectN) with grades across all Monday‑anchor weeks
-       • if PasswordGood = 0 → replace pivot with a single error row
-  3. Look up the franchise’s Google Sheet from the Spreadsheets table.
-  4. Overwrite (or create) the tab named "BMaster" with the DataFrame, no formatting.
+Build 4 tabs per franchise:
+  • LoginMaster  – flat login control (one row per student)
+  • HS           – grade blocks for HS/College students (PasswordGood=1)
+  • MS           – grade blocks for MS students (PasswordGood=1)
+  • Error        – grade blocks for students with PasswordGood=0
 
-Requirements
-–––––––––––––
-• gspread ≥ 6, google‑auth
-• service_account.json (or your renamed JSON key) at repo root.
+Notes
+–––––
+• Reuses the BMaster-style layout for HS/MS/Error: legend rows + meta → spacer → subject rows with week columns.
+• Weeks are computed per franchise (union of that franchise’s student weeks) so the columns line up across HS/MS/Error.
+• Writes local Excel (one file per franchise) with four sheets. Google Sheets upload is included but commented out.
 """
+
 from __future__ import annotations
 
-import itertools
 import json
 import math
 import pathlib
@@ -35,7 +32,7 @@ from google.oauth2.service_account import Credentials
 # Paths & constants
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # repo root
 DB_PATH = ROOT / "config" / "students.db"
-KEY_PATH = ROOT / "sheet_mod_grades.json"  # ← change if your key has a different name
+KEY_PATH = ROOT / "sheet_mod_grades.json"  # change if your key has a different name
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -53,6 +50,10 @@ META_FIELDS = [
     ("P2Password", "P2Password"),
 ]
 
+# HS/MS detection helpers
+HS_TOKENS = {"9", "9th", "10", "10th", "11", "11th", "12", "12th", "college"}
+HS_WORDS = {"freshman", "sophomore", "junior", "senior"}
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Helpers
 
@@ -61,52 +62,118 @@ def _connect_db() -> sqlite3.Connection:
 
 
 def _load_sheet_map(conn: sqlite3.Connection) -> Dict[int, str]:
-    """Return {FranchiseID: <spreadsheet‑id>} extracted from URL."""
+    """Return {FranchiseID: <spreadsheet-id>} extracted from URL."""
     cur = conn.cursor()
     cur.execute("SELECT FranchiseID, spreadsheet FROM Spreadsheets")
     mapping: Dict[int, str] = {}
     for fid, url in cur.fetchall():
-        m = re.search(r"/d/([A-Za-z0-9_-]+)", url)
+        m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
         if m:
             mapping[fid] = m.group(1)
     return mapping
 
 
 def _query_students(conn: sqlite3.Connection) -> pd.DataFrame:
-    """Return a DataFrame of all students, ordered for stable output."""
+    """Return a DataFrame with student rows + WeeklyData used for grade blocks."""
     sql = """
-        SELECT ID,
-               FranchiseID,
-               FirstName || ' ' || LastName AS StudentName,
-               Grade,
-               Portal1,
-               P1Username,
-               P1Password,
-               Portal2,
-               P2Username,
-               P2Password,
-               WeeklyData,
-               PasswordGood
-        FROM   Student
-        ORDER  BY FirstName ASC, Grade ASC
+        SELECT
+            ID,
+            FranchiseID,
+            FirstName || ' ' || LastName AS StudentName,
+            Grade,
+            Portal1,
+            P1Username,
+            P1Password,
+            Portal2,
+            P2Username,
+            P2Password,
+            WeeklyData,
+            PasswordGood
+        FROM Student
+        ORDER BY FirstName ASC, Grade ASC
     """
     return pd.read_sql_query(sql, conn)
 
+
+def _query_login_master(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Raw login control data for LoginMaster tab."""
+    sql = """
+        SELECT
+            ID,
+            FranchiseID,
+            FirstName,
+            LastName,
+            Grade,
+            Portal1,
+            P1Username,
+            P1Password,
+            Portal2,
+            P2Username,
+            P2Password,
+            PasswordGood
+        FROM Student
+        ORDER BY LastName ASC, FirstName ASC
+    """
+    return pd.read_sql_query(sql, conn)
+
+
+def _is_hs_grade(grade: str | None) -> bool:
+    if grade is None:
+        return False
+    s = str(grade).strip().lower()
+    if any(w in s for w in HS_WORDS) or "college" in s:
+        return True
+    m = re.search(r"\b(\d{1,2})\b", s)
+    if m:
+        n = int(m.group(1))
+        return n >= 9  # 9–12 treated as HS
+    if any(tok in s for tok in HS_TOKENS):
+        return True
+    return False
+
+
+def _safe_json_loads(s: str | None) -> dict:
+    if not s:
+        return {}
+    try:
+        v = json.loads(s)
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+
+def _coerce_str(x) -> str:
+    return "" if x is None or (isinstance(x, float) and math.isnan(x)) else str(x)
+
+
 def _extract_subjects(wdata: dict) -> List[str]:
-    """Union of subject names across weeks (robust to dict or list week payloads)."""
+    """Union of subject names across weeks for ONE student."""
     names = set()
-    for _, val in wdata.items():
-        if isinstance(val, dict):
-            names.update(val.keys())
-        elif isinstance(val, list):
-            for item in val:
-                if isinstance(item, dict):
-                    s = item.get("subject") or item.get("name") or item.get("course")
-                    if s:
-                        names.add(s)
+    for week_payload in wdata.values():
+        if isinstance(week_payload, dict):
+            names.update(week_payload.keys())
     return sorted(names)
+
+def _load_known_franchise_ids(conn: sqlite3.Connection) -> set[int]:
+    """
+    Only allow FranchiseIDs that are present in Spreadsheets.
+    (Optionally require a non-empty spreadsheet URL.)
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT DISTINCT FranchiseID
+            FROM Spreadsheets
+            WHERE FranchiseID IS NOT NULL
+              AND COALESCE(spreadsheet, '') <> ''   -- comment out this line if URL shouldn't be required
+        """)
+        return {int(r[0]) for r in cur.fetchall() if r[0] is not None}
+    except sqlite3.Error as e:
+        print(f"[WARN] Could not load FranchiseIDs from Spreadsheets: {e}")
+        return set()
+    
 # ────────────────────────────────────────────────────────────────────────────────
-# Data‑frame builders
+# Data-frame builders (legend + per-student blocks)
 
 def _build_legend_rows(weeks: List[str]) -> pd.DataFrame:
     """
@@ -120,30 +187,29 @@ def _build_legend_rows(weeks: List[str]) -> pd.DataFrame:
     """
     rows = [
         {"Field": "", "Value": ""},  # row index 0 — full row blank keeps A1 empty
-
         {"Field": "", "Value": "<= 69% (needs meeting)"},
         dict({"Field": "", "Value": "70-80% (text parents)"} | {w: w for w in weeks}),
         {"Field": "", "Value": "80-90%"},
         {"Field": "", "Value": ">90%"},
         {"Field": "", "Value": "Already had Meeting"},
     ]
-    # IMPORTANT: columns are positional: A="Field", B="Value", C..="weeks"
     return pd.DataFrame(rows, columns=["Field", "Value", *weeks])
 
-def _build_student_block(row: pd.Series, weeks: List[str]) -> pd.DataFrame:
-    """Return one student’s block (meta + blank + pivot)."""
+
+def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
+    """
+    Return one student’s block:
+     meta rows (A/B only) → two blanks → subject rows with week columns.
+    We align each student’s block to the franchise-wide weeks after computing per-student data.
+    """
     good_pw = row["PasswordGood"] == 1
 
-    # 1) meta rows
-    meta = pd.DataFrame(
-        {
-            "Field": [lbl for lbl, _ in META_FIELDS],
-            "Value": [row[src] for _, src in META_FIELDS],
-        }
-    )
+    # 1) meta rows (explicit strings, no NaN bleed)
+    meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
+    meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
 
     # 2) two blank spacer rows
-    blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2)
+    blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
 
     if not good_pw:
         err = pd.DataFrame(
@@ -151,77 +217,110 @@ def _build_student_block(row: pd.Series, weeks: List[str]) -> pd.DataFrame:
                 {"Field": "Error", "Value": "invalid entry, check credentials"},
                 {"Field": "", "Value": ""},
                 {"Field": "", "Value": ""},
-            ]
+            ],
+            columns=["Field", "Value"],
         )
-        # keep A/B-only rows; no StudentID
         return pd.concat([meta, err], ignore_index=True)
 
-
-    # 3) pivot rows
-    wdata = json.loads(row["WeeklyData"])
+    # 3) subject → grades for this student only
+    wdata = _safe_json_loads(row["WeeklyData"])
     subjects = _extract_subjects(wdata)
+    weeks_for_student = sorted([w for w in wdata.keys() if w in weeks_all])
 
-    pivots: List[Dict[str, str | float]] = []
-    for idx, subj in enumerate(subjects, 1):
-        d: Dict[str, str | float] = {"Field": f"Subject{idx}", "Value": subj}
-        for week in weeks:
-            entry = wdata.get(week, {}).get(subj)
-            val = ""
+    pivots: List[dict] = []
+    for idx, subj in enumerate(subjects, start=1):
+        d: dict[str, str | float] = {"Field": f"Subject{idx}", "Value": subj}
+        for w in weeks_for_student:
+            entry = wdata.get(w, {}).get(subj)
+            val: str | float = ""
             if isinstance(entry, dict):
-                # Prefer numeric percentage if present, else letter_grade, else blank
                 pct = entry.get("percentage")
                 if pct is not None and not (isinstance(pct, float) and math.isnan(pct)):
                     val = pct
                 else:
                     lg = entry.get("letter_grade")
-                    val = lg if lg is not None else ""
+                    val = _coerce_str(lg) if lg is not None else ""
             elif entry is not None and not (isinstance(entry, float) and math.isnan(entry)):
-                # If your JSON sometimes stores a scalar directly
-                val = entry
-            d[week] = val
-
-        # 👇 This line is currently missing
+                val = entry  # scalar fallback
+            d[w] = val
         pivots.append(d)
 
-    pivot_df = pd.DataFrame(pivots, columns=["Field", "Value", *weeks])
+    pivot_df = pd.DataFrame(pivots) if pivots else pd.DataFrame(columns=["Field", "Value"])
+    if pivot_df.empty:
+        pivot_df = pd.DataFrame(columns=["Field", "Value"])
+    if "Field" not in pivot_df.columns:
+        pivot_df["Field"] = []
+    if "Value" not in pivot_df.columns:
+        pivot_df["Value"] = []
 
-    block = pd.concat([meta, pivot_df, blank], ignore_index=True)
-    # No StudentID column in the export — keep positional A/B/C.. layout
-    return block
+    # Reindex to franchise-wide weeks so columns line up across students
+    pivot_df = pivot_df.reindex(columns=["Field", "Value", *weeks_all], fill_value="")
+
+    # Final block for this student
+    return pd.concat([meta, pivot_df, blank], ignore_index=True)
 
 
-def _build_dataframe_for_franchise(df: pd.DataFrame) -> pd.DataFrame:
-    all_weeks: set[str] = set()
+def _collect_weeks(df: pd.DataFrame) -> List[str]:
+    weeks: set[str] = set()
     for wd_json in df["WeeklyData"]:
-        all_weeks.update(json.loads(wd_json).keys())
-    weeks = sorted(all_weeks)  # Monday-anchored keys sort fine as YYYY-MM-DD
+        try:
+            weeks.update(json.loads(wd_json).keys())
+        except Exception:
+            pass
+    return sorted(weeks)
 
-    # Prepend top rows:
-    #  - A1 blank
-    #  - B2..B6 ledger (row index 1..5)
-    #  - row index 2 carries C.. week labels
+
+def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str]) -> pd.DataFrame:
+    """Legend + all student blocks in df_sub, aligned to the provided weeks."""
     legend = _build_legend_rows(weeks)
-
-    frames = [_build_student_block(row, weeks) for _, row in df.iterrows()]
+    if df_sub.empty:
+        note = pd.DataFrame([{"Field": "", "Value": "(no students)"}])
+        return pd.concat([legend, note], ignore_index=True)
+    frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
     return pd.concat([legend, *frames], ignore_index=True)
 
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Google Sheets uploader
+# Exporters
 
-def _push_dataframe(sheet_id: str, df: pd.DataFrame, tab: str = "BMaster") -> None:
+def _export_excel_multi(frames: dict[str, tuple[pd.DataFrame, bool]], path: pathlib.Path) -> None:
+    """
+    frames: {sheet_name: (df, header_bool)}
+      • For grade-block sheets (HS/MS/Error) use header=False.
+      • For LoginMaster use header=True.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for name, (df, header_flag) in frames.items():
+            clean = df.where(pd.notna(df), "")
+            clean.to_excel(writer, sheet_name=name, index=False, header=header_flag)
+
+
+def _ensure_ws(sh, title: str, rows: int = 2000, cols: int = 100):
+    try:
+        return sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        return sh.add_worksheet(title=title, rows=str(rows), cols=str(cols))
+
+
+def _push_multi_sheets(sheet_id: str, frames: dict[str, tuple[pd.DataFrame, bool]]) -> None:
+    """
+    Push multiple tabs to an existing Google Sheet.
+    Header handling mirrors Excel export: grade sheets have header=False (no header row),
+    LoginMaster has header=True.
+    """
     creds = Credentials.from_service_account_file(KEY_PATH, scopes=SCOPES)
     gc = gspread.Client(auth=creds)
-
     sh = gc.open_by_key(sheet_id)
-    try:
-        ws = sh.worksheet(tab)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=tab, rows="100", cols="30")
 
-    ws.clear()
-    clean_df = df.where(pd.notna(df), "")
-    ws.update(clean_df.values.tolist(), "A1", value_input_option="USER_ENTERED")
+    for title, (df, header_flag) in frames.items():
+        ws = _ensure_ws(sh, title)
+        ws.clear()
+        clean = df.where(pd.notna(df), "")
+        values = clean.values.tolist()
+        if header_flag:
+            values = [list(clean.columns)] + values
+        ws.update(values, "A1", value_input_option="USER_ENTERED")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -230,33 +329,89 @@ def _push_dataframe(sheet_id: str, df: pd.DataFrame, tab: str = "BMaster") -> No
 def main() -> None:
     conn = _connect_db()
     sheet_map = _load_sheet_map(conn)
-    df_all = _query_students(conn)
-
+    df_all = _query_students(conn)       # has WeeklyData for grade blocks
+    df_login_all = _query_login_master(conn)  # flat login rows
+    known_fids = _load_known_franchise_ids(conn)
+    
+    # hard gate: only keep rows for franchises that exist
+    df_all = df_all[df_all["FranchiseID"].isin(known_fids)].copy()
+    df_login_all = df_login_all[df_login_all["FranchiseID"].isin(known_fids)].copy()
+    
     for fid, grp in df_all.groupby("FranchiseID"):
-        if fid not in sheet_map:
-            print(f"[SKIP] No sheet configured for FranchiseID {fid}")
+        if fid not in known_fids:
+            print(f"[SKIP] FranchiseID {fid} not found in Franchise table; no workbook/Sheet created.")
             continue
 
         print(f"Processing FranchiseID {fid} (students: {len(grp)})")
-        export_df = _build_dataframe_for_franchise(grp)
 
-        # ─────────────── Debug: Local Excel Export ───────────────
-        # Uncomment these lines to debug without uploading to Google Sheets
-        #excel_path = ROOT / f"debug_BMaster_F{fid}.xlsx"
-        #export_df.to_excel(excel_path, index=False, header=False)
-        #print(f"  ✓ Exported locally to {excel_path}")
-        #continue  # Skip Google Sheets upload during local debugging
-        # ─────────────────────────────────────────────────────────
+        # Canonical weeks list for this franchise
+        weeks = _collect_weeks(grp)
 
-        # ─────────────── Debug Option: Turn off dataframe push ───
-        # Comment these lines out While testing local ONLY
-        _push_dataframe(sheet_map[fid], export_df)
-        print("  ✓ Uploaded")
-        # ─────────────────────────────────────────────────────────
+        # ---- LoginMaster (flat)
+        login_master = (
+            df_login_all[df_login_all["FranchiseID"] == fid]
+            .loc[:, [
+                "FirstName", "LastName", "Grade",
+                "Portal1", "P1Username", "P1Password",
+                "Portal2", "P2Username", "P2Password", "PasswordGood"
+            ]]
+            .sort_values(["LastName", "FirstName"])
+            .reset_index(drop=True)
+        )
+
+        # Build ID sets for HS / MS / Error from LoginMaster (authoritative for Grade/PasswordGood)
+        login_f = df_login_all[df_login_all["FranchiseID"] == fid].copy()
+        good = login_f["PasswordGood"] == 1
+        is_hs = login_f["Grade"].apply(_is_hs_grade)
+
+        hs_ids  = set(login_f.loc[good & is_hs,  "ID"].tolist())
+        ms_ids  = set(login_f.loc[good & ~is_hs, "ID"].tolist())
+        err_ids = set(login_f.loc[~good,         "ID"].tolist())
+
+        # Slice the grade-pivot source to those students
+        grp_hs  = grp[grp["ID"].isin(hs_ids)]
+        grp_ms  = grp[grp["ID"].isin(ms_ids)]
+        grp_err = grp[grp["ID"].isin(err_ids)]
+
+        # Build the 3 grade tabs using the SAME weeks list
+        hs_df  = _build_dataframe_for_group(grp_hs,  weeks)
+        ms_df  = _build_dataframe_for_group(grp_ms,  weeks)
+        err_df = _build_dataframe_for_group(grp_err, weeks)
+
+        # Assemble sheets with header flags
+        frames = {
+            "LoginMaster": (login_master, True),  # header row visible
+            "HS":          (hs_df, False),        # BMaster-style (no header)
+            "MS":          (ms_df, False),
+            "Error":       (err_df, False),
+        }
+
+        # ---- Local Excel (debug)
+        #out_path = ROOT / f"debug_Franchise_{fid}.xlsx"
+        #_export_excel_multi(
+        #    {
+        #        "LoginMaster": (login_master, True),
+        #        "HS": (hs_df, False),
+        #        "MS": (ms_df, False),
+        #        "Error": (err_df, False),
+        #    },
+        #    out_path,
+        #)
+        #print(f"  ✓ Wrote {out_path}")
+
+        # (Optional) push to Google Sheets only if you also have a mapping:
+        if fid in sheet_map:
+            _push_multi_sheets(sheet_map[fid], {
+                "LoginMaster": (login_master, True),
+                "HS": (hs_df, False),
+                "MS": (ms_df, False),
+                "Error": (err_df, False),
+            })
+            print(f"  ✓ Uploaded to spreadsheet {sheet_map[fid]}")
+        else:
+            print(f"  [SKIP] No spreadsheet configured for FranchiseID {fid}")
 
     conn.close()
-
-
 
 if __name__ == "__main__":
     main()
