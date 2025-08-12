@@ -1,0 +1,31 @@
+.cs-login-logo {
+    background-image: url("https://gpsportal.us001-rapididentity.com/files/GPSLogoGWebTech.png");
+}
+.cs-header {
+    background-color: #002d62;
+    color: #fffffb;
+}
+.cs-login-logo {
+ 	
+  width: 330px;
+  height: 50px;
+  background: url("https://gpsportal.us001-rapididentity.com/files/GPSLogoDIGITALsmall.png") 0px 0px no-repeat;
+  background-size: 110px 40px;
+  background-position: center; 
+  
+}
+
+.duo-iframe {
+  height: 500px;
+}
+
+.duo-iframe iframe{
+  border:none;
+  height:500px;
+  max-width:620px;
+  min-width:304px;
+  width:100%}
+
+iframe {
+  height: 500px;
+}
