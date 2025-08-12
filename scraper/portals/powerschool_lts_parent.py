@@ -2,12 +2,25 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
+import unicodedata
 import re
 
 from scraper.portals.base import PortalEngine
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
+
+def canonicalize_course(text: str) -> str:
+    """
+    Normalize Unicode, convert NBSP to space, unify dashes to '-',
+    collapse whitespace. Does NOT drop prefixes/suffixes.
+    """
+    t = unicodedata.normalize("NFKC", text)
+    t = t.replace("\xa0", " ")
+    t = re.sub(DASHES, "-", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
 @register_portal("powerschool_lts_parent")
 class PowerSchoolLTSParent(PortalEngine):
@@ -53,41 +66,29 @@ class PowerSchoolLTSParent(PortalEngine):
 
         # Select each student row by id starting with ccid_
         for tr in soup.select("tr[id^=ccid_]"):
-            # 1) Course cell has class-element text
             course_td = tr.select_one("td.table-element-text-align-start")
             if not course_td:
                 continue
-            
-            # raw like "SC 08 - Science  Email Costa, Tai – Rm: 231"
-            course_raw = course_td.get_text(" ", strip=True)
-            # remove any "Email ... – Rm: ..." or similar suffix
-            course = re.sub(r"\sEmail\s.*?$", "", course_raw)
-            # also strip off any numeric code prefix (e.g. "SC 08 - ")
-            # strip any prefix code "SC 08 - "
-            course = re.sub(r"^[A-Z0-9 ]+-\s*", "", course_raw)
 
-            # 2) Find all <a class="bold">…</a> – term links
+            # get raw text, then SANITIZE once
+            course_raw = course_td.get_text(" ", strip=True)
+            course = canonicalize_course(course_raw)   # <-- use sanitized
+
             bold_links = tr.select("a.bold")
             if not bold_links:
-                # maybe N/A or missing → record empty
                 results[course] = ""
                 continue
 
-            # take the last one (usually S1 / current term)
             link = bold_links[-1]
-            text = link.get_text("\n", strip=True)  # e.g. "B\n87"
+            text = link.get_text("\n", strip=True)
             parts = text.splitlines()
-            # look for percentage numeric part
+
             value: Any = ""
-            if len(parts) >= 2 and parts[1].isdigit():
-                # parts[1] is e.g. '87'
-                try:
-                    value = float(parts[1])
-                except ValueError:
-                    value = parts[1]
+            if len(parts) >= 2:
+                m = re.search(r"\d+(?:\.\d+)?", parts[1])  # handles 87 / 87.5 / 87%
+                value = float(m.group(0)) if m else ("" if parts[0].upper() in ("N/A", "-", "") else parts[0])
             else:
-                # fallback to letter or raw
-                letter = parts[0].strip()
+                letter = parts[0].strip() if parts else ""
                 value = "" if letter.upper() in ("N/A", "-", "") else letter
 
             results[course] = value

@@ -2,7 +2,6 @@
 import asyncio
 import argparse
 import json
-import re
 import pathlib
 import random
 import sqlite3
@@ -14,30 +13,6 @@ from scraper.portals import get_portal  # type: ignore
 
 DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
 
-def _parse_id_list(raw: str | None) -> list[int]:
-    """Accepts '1,2,3', '[1,2,3]', ' 1 | 2 | 3 ', etc. → [1,2,3]."""
-    if not raw:
-        return []
-    s = raw.strip()
-    # JSON array?
-    try:
-        v = json.loads(s)
-        if isinstance(v, list):
-            return [int(x) for x in v if str(x).strip().isdigit()]
-    except Exception:
-        pass
-    # Fallback: grab all integer tokens
-    return [int(x) for x in re.findall(r"\d+", s)]
-
-def _load_picture_map(conn: sqlite3.Connection) -> dict[int, str]:
-    """
-    Returns {ID -> PictureID/alt text} from GPSPortalAuth.
-    Adjust column names here if your schema differs.
-    """
-    cur = conn.cursor()
-    # Common schema: ID (int primary key), PictureID (text alt like "cat", "tree", "car")
-    cur.execute("SELECT ID, PictureID FROM GPSPortalAuth")
-    return {int(r[0]): str(r[1]) for r in cur.fetchall()}
 
 def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None):
     """Return a list of student dicts to scrape.
@@ -46,15 +21,12 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
     """
     students_list = []
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        with sqlite3.connect(DB_PATH) as conn:  
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
 
-            # load the picture map once per connection
-            picture_map = _load_picture_map(conn)
-
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd, GPSAuthList
+                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd
                 FROM Student
             """
             conditions = [
@@ -73,13 +45,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
 
             query = base + " WHERE " + " AND ".join(conditions)
             cur.execute(query, params)
-
             for row in cur.fetchall():
-                raw = row["GPSAuthList"]
-                id_list = _parse_id_list(raw)  # e.g., [1,3,5]
-                # map to picture alts; silently skip unknown IDs
-                auth_images = [picture_map[i] for i in id_list if i in picture_map]
-
                 students_list.append(
                     {
                         "db_id": row["ID"],
@@ -87,14 +53,13 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "id": row["P1Username"],
                         "password": row["P1Password"],
                         "portal": row["portal"],
-                        "auth_images": auth_images,  # <- what the engine expects
                     }
                 )
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
         sys.exit(1)
-
     return students_list
+
 
 def students(franchise_id: int | None = None, student_id: int | None = None):
     return get_students_from_db(franchise_id=franchise_id, student_id=student_id)
@@ -122,7 +87,6 @@ async def scrape_one(pw, student: dict):
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
-        auth_images=student.get("auth_images")
     )
 
     try:
@@ -179,13 +143,13 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     print(f"SUCCESS: {student['id']}")
                 except Exception as e:
                     # mark this student’s password as bad
-                    with sqlite3.connect(DB_PATH) as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
-                            (student["db_id"],)
-                        )
-                        conn.commit()
+                    #with sqlite3.connect(DB_PATH) as conn:
+                    #    cur = conn.cursor()
+                    #    cur.execute(
+                    #        "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
+                    #        (student["db_id"],)
+                    #    )
+                    #    conn.commit()
                     print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
 
                     # record the error in the JSONL for auditing
