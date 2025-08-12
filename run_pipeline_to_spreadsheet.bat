@@ -1,6 +1,6 @@
 @echo off
 echo [1/3] Running Scraper...
-uv run -m scraper.runner --franshise_id 57
+uv run -m scraper.runner --franshise-id 57
 
 echo.
 echo [2/3] Updating db...
