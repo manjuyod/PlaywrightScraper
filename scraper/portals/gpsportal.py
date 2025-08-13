@@ -1,18 +1,26 @@
 from __future__ import annotations
-import re
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Tuple, List
+
+from typing import List, Dict, Any, Optional
 
 from bs4 import BeautifulSoup  # type: ignore
-from scraper.portals.base import PortalEngine  # type: ignore
-from scraper.portals import register_portal  # type: ignore
+from playwright.async_api import Page  # type: ignore
+from .base import PortalEngine
+from . import register_portal, infinite_campus_parent_gilbert  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from time import sleep
+#TODO: USES INFINITE CAMPUS GILBERT AS THEIR PORTAL CAN WE SKIP THIS STEP
+#TODO in progress: Implement 2FA Handling (Select pictures)
 
+@register_portal("gpsportal")
+class GPS(PortalEngine):
+    """Portal scraper for Gilbert Public Schools' portal.
 
-@register_portal("infinite_campus_parent_gilbert")
-class InfiniteCampus(PortalEngine):
-    LOGIN = "https://gilbertaz.infinitecampus.org/campus/gilbert.jsp"
+    The class uses Playwright to automate login and extract quarter grades
+    for each course.  Grades are returned as a list of course/grade
+    dictionaries under the ``parsed_grades`` key.
+    """
+
+    LOGIN = "https://gpsportal.gilberted.net/"
     HOME_WRAPPER = (
         "https://gilbertaz.infinitecampus.org/"
         "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
@@ -22,22 +30,53 @@ class InfiniteCampus(PortalEngine):
         "portal/parents/gilbert.jsp?status=logoff"
     )
 
-    # ---------------------- LOGIN (home only) ----------------------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(Exception),
+        reraise=True
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        """Only log in and arrive on the parent/home shell."""
+        # print("HELLO LOGGING IN DO MY PRINT STATEMENTS WORK AT ALL\n\n\n\n\n\n")
+        """Authenticate the user on the GPS parent portal.
+
+        Args:
+            first_name: An optional first name for selecting a specific
+                student profile after login.  The GPS parent portal
+                currently does not expose multiple profiles per login,
+                so this argument is ignored, but it is accepted for
+                compatibility with the ``PortalEngine`` interface.
+        """
+        await self.page.context.tracing.start(screenshots=True, snapshots=True)
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        await self.page.click("button:has-text('Log In')")
-        await self.page.wait_for_url(lambda u: "parent/home" in u or "nav-wrapper" in u, timeout=15_000)
+        # Fill username
+        await self.page.fill("input#identification", self.sid)
+        # Short pause to ensure field is recognized
+        await self.page.wait_for_timeout(200)
+        # Click Go
+        await self.page.click("button#authn-go-button")
+        # Fill Password
+        await self.page.fill("input#ember534", self.pw)
+        await self.page.wait_for_timeout(2000)
+        await self.page.locator("#authn-go-button").evaluate("btn => btn.click()")
+        await self.page.wait_for_url(lambda url: "pictograph" in url, timeout=15_000)
         await self.page.wait_for_load_state("networkidle")
-        await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
-        print("[IC] Logged in and on parent/home.")
+        print("trying pictograph\n")
+        # Must authenticate for this page using the GPSPortalImage field contained in the database
+        # Collect the image options on the screen
+        for _ in range(0, 3): # three images to select
+            images_alts = await self.page.eval_on_selector_all(
+                ".pictograph-list img.tile-icon",
+                "imgs => imgs.map(img => img.alt)"
+            )
+            assert self.auth_images is not None # auth images should never be null for this portal
+            user_match = next((image for image in self.auth_images if image in images_alts), None)
+            await self.page.locator(f".pictograph-list img.tile-icon[alt='{user_match}']").click()
+            await self.page.wait_for_timeout(2000)
+        # finally nav to the gilbert infinite campus portal
+        await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
+        await self.page.wait_for_timeout(200)
+        await self.page.wait_for_load_state('networkidle')
 
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
