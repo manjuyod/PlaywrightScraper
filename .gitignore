@@ -12,7 +12,7 @@ venv/
 
 # Config files with secrets
 # config/students.*
-# config/students.db.*
+config/students.*
 
 # Logs
 logs/
