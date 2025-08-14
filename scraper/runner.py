@@ -14,31 +14,22 @@ from scraper.portals import get_portal  # type: ignore
 
 DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
 
-def _parse_id_list(raw: str | None) -> list[int]:
-    """Accepts '1,2,3', '[1,2,3]', ' 1 | 2 | 3 ', etc. → [1,2,3]."""
-    if not raw:
-        return []
-    s = raw.strip()
-    # JSON array?
-    try:
-        v = json.loads(s)
-        if isinstance(v, list):
-            return [int(x) for x in v if str(x).strip().isdigit()]
-    except Exception:
-        pass
-    # Fallback: grab all integer tokens
-    return [int(x) for x in re.findall(r"\d+", s)]
-
-def _load_picture_map(conn: sqlite3.Connection) -> dict[int, str]:
+def _load_student_auth_map(conn: sqlite3.Connection) -> dict[int, list[str]]:
     """
-    Returns {ID -> PictureID/alt text} from GPSPortalAuth.
+    Returns {StudentID -> list(Answers)} from student_auth.
     Adjust column names here if your schema differs.
     """
     cur = conn.cursor()
-    # Common schema: ID (int primary key), PictureID (text alt like "cat", "tree", "car")
-    cur.execute("SELECT ID, PictureID FROM GPSPortalAuth")
-    return {int(r[0]): str(r[1]) for r in cur.fetchall()}
-
+    # Common schema:
+    cur.execute("SELECT StudentID, Answer FROM student_auth")
+    map: dict[int, list[str]] = {}
+    for row in cur.fetchall():
+        id = row[0]
+        answer = row[1]
+        if id not in map.keys():
+            map[id] = []
+        map[id].append(answer)
+    return map
 def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None):
     """Return a list of student dicts to scrape.
 
@@ -51,10 +42,10 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             cur = conn.cursor()
 
             # load the picture map once per connection
-            picture_map = _load_picture_map(conn)
+            student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd, GPSAuthList
+                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd, Auth
                 FROM Student
             """
             conditions = [
@@ -75,11 +66,11 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             cur.execute(query, params)
 
             for row in cur.fetchall():
-                raw = row["GPSAuthList"]
-                id_list = _parse_id_list(raw)  # e.g., [1,3,5]
-                # map to picture alts; silently skip unknown IDs
-                auth_images = [picture_map[i] for i in id_list if i in picture_map]
-
+                auth_required = row["Auth"] is not None
+                auth_answers = None
+                if auth_required:
+                    auth_answers = student_auth_map.get(row["ID"])
+                    assert auth_answers is not None # auth required but no auth answers
                 students_list.append(
                     {
                         "db_id": row["ID"],
@@ -87,7 +78,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "id": row["P1Username"],
                         "password": row["P1Password"],
                         "portal": row["portal"],
-                        "auth_images": auth_images,  # <- what the engine expects
+                        "auth_images": auth_answers,  # <- what the engine expects
                     }
                 )
     except sqlite3.Error as e:
