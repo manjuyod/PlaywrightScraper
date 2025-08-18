@@ -8,28 +8,32 @@ import random
 import sqlite3
 import sys
 from traceback import format_exception_only
+from typing import Dict, List
 
 from playwright.async_api import async_playwright  # type: ignore
 from scraper.portals import get_portal  # type: ignore
 
 DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
 
-def _load_student_auth_map(conn: sqlite3.Connection) -> dict[int, list[str]]:
+def _load_student_auth_map(conn: sqlite3.Connection) -> Dict[int, dict]:
     """
-    Returns {StudentID -> list(Answers)} from student_auth.
-    Adjust column names here if your schema differs.
+    Returns {StudentID -> {"type": AuthType, "answers": list[str]}}
+    from student_auth where each row stores JSON in Answers.
     """
     cur = conn.cursor()
-    # Common schema:
-    cur.execute("SELECT StudentID, Answer FROM student_auth")
-    map: dict[int, list[str]] = {}
-    for row in cur.fetchall():
-        id = row[0]
-        answer = row[1]
-        if id not in map.keys():
-            map[id] = []
-        map[id].append(answer)
-    return map
+    cur.execute("SELECT StudentID, AuthType, Answers FROM student_auth")  # one row per student
+    out: Dict[int, dict] = {}
+    for sid, auth_type, answers_raw in cur.fetchall():
+        try:
+            answers = json.loads(answers_raw)
+            if not isinstance(answers, list):
+                raise ValueError("Answers JSON must be a list")
+        except Exception:
+            # fallback if someone stored CSV
+            answers = [p.strip() for p in str(answers_raw).split(",") if p.strip()]
+        out[sid] = {"type": auth_type, "answers": answers}
+    return out
+
 def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None):
     """Return a list of student dicts to scrape.
 
@@ -45,7 +49,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd, Auth
+                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd
                 FROM Student
             """
             conditions = [
@@ -66,11 +70,10 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             cur.execute(query, params)
 
             for row in cur.fetchall():
-                auth_required = row["Auth"] is not None
-                auth_answers = None
-                if auth_required:
-                    auth_answers = student_auth_map.get(row["ID"])
-                    assert auth_answers is not None # auth required but no auth answers
+                # look up auth by StudentID (if present)
+                auth = student_auth_map.get(row["ID"])  # -> {"type": "...", "answers": [...] } or None
+                auth_images = auth["answers"] if auth and auth["type"] == "gps_pictograph" else None
+
                 students_list.append(
                     {
                         "db_id": row["ID"],
@@ -78,9 +81,10 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "id": row["P1Username"],
                         "password": row["P1Password"],
                         "portal": row["portal"],
-                        "auth_images": auth_answers,  # <- what the engine expects
+                        "auth_images": auth_images,  # only set when gps pictograph
                     }
                 )
+
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -113,8 +117,12 @@ async def scrape_one(pw, student: dict):
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
-        auth_images=student.get("auth_images")
     )
+
+    # Only GPS uses pictograph answers
+    if student.get("auth_images") and student["portal"] == "gps":
+        # safer than passing via __init__
+        setattr(scraper, "auth_images", student["auth_images"])
 
     try:
         print(f"Starting login for {student['id']}")
