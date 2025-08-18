@@ -51,7 +51,7 @@ class InfiniteCampus(PortalEngine):
         filtered by first_name (like match). Payload shaped for DB insert.
         """
         # Ensure we're on home
-        if "parent/home" not in self.page.url:
+        if "/home" not in self.page.url:
             await self.page.goto(
                 self.HOME_WRAPPER,
                 wait_until="domcontentloaded",
