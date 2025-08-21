@@ -3,16 +3,12 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
 import re
 from datetime import datetime, timedelta  # ← added timedelta
-from bs4 import BeautifulSoup  # type: ignore
-# from playwright.async_api import Page  # not used
+from bs4 import BeautifulSoup
+from . import register_portal 
 from .base import PortalEngine
-from . import register_portal  # ← removed nonexistent import infinite_campus_parent_gilbert
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from time import sleep
 
 # TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
-# TODO (in progress): Implement 2FA Handling (Select pictures)
-
 @register_portal("gps")
 class GPS(PortalEngine):
     """Portal scraper for Gilbert Public Schools' portal.
@@ -65,7 +61,8 @@ class GPS(PortalEngine):
             images_alts = await self.page.eval_on_selector_all(
                 ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
             )
-            print("Auth: ", self.auth_images)
+            # print("Alt tags: ", images_alts)
+            # print("Auth: ", self.auth_images)
             assert self.auth_images is not None  # must be provided by caller/DB
             user_match = next((image for image in self.auth_images if image in images_alts), None)
             if not user_match:
