@@ -8,9 +8,8 @@ import random
 import sqlite3
 import sys
 from traceback import format_exception_only
-
-from playwright.async_api import async_playwright  # type: ignore
-from scraper.portals import get_portal  # type: ignore
+from playwright.async_api import async_playwright
+from scraper.portals import get_portal, LoginError
 
 DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
 
@@ -118,7 +117,10 @@ async def scrape_one(pw, student: dict):
 
     try:
         print(f"Starting login for {student['id']}")
-        await scraper.login(first_name=student.get("student_name"))
+        try:
+            await scraper.login(first_name=student.get("student_name"))
+        except Exception as e:
+            raise LoginError(e)
         print(f"Login successful for {student['id']}, fetching grades…")
         grades = await scraper.fetch_grades()
 
@@ -170,15 +172,15 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     print(f"SUCCESS: {student['id']}")
                 except Exception as e:
                     # mark this student’s password as bad
-                    with sqlite3.connect(DB_PATH) as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
-                            (student["db_id"],)
-                        )
-                        conn.commit()
-                    print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
-
+                    if isinstance(e, LoginError):
+                        with sqlite3.connect(DB_PATH) as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
+                                (student["db_id"],)
+                            )
+                            conn.commit()
+                        print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
                         "student_id": student["id"],
@@ -187,7 +189,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     }
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
-                    print(f"ERROR: {student['id']} (PasswordGood flipped, details in grades.jsonl)")
+                    print(f"ERROR: {student['id']} (details in grades.jsonl)")
     print(f"\nScraping complete! Results saved to {out_file}")
     print(f"Successfully processed {success_count} students")
     print(f"Errors encountered: {error_count}")
