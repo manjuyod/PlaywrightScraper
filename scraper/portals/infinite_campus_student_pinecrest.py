@@ -24,15 +24,15 @@ from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_student_ccsd")
+@register_portal("infinite_campus_student_pinecrest")
 class InfiniteCampus(PortalEngine):
     """Student portal scraper for CCSD's Infinite Campus."""
 
-    LOGIN = "https://campus.ccsd.net/campus/portal/students/clark.jsp"
+    LOGIN = "https://nspcsa.infinitecampus.org/campus/portal/students/pinecrest.jsp"
     GRADEBOOK = (
-        "https://campus.ccsd.net/campus/nav-wrapper/student/portal/student/grades?appName=clark"
+        "https://nspcsa.infinitecampus.org/campus/nav-wrapper/student/portal/student/grades?appName=pinecrest"
     )
-    LOGOFF = "https://campus.ccsd.net/campus/portal/students/clark.jsp?status=logoff"
+    LOGOFF = "https://nspcsa.infinitecampus.org/campus/portal/students/pinecrest.jsp?status=logoff"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -62,7 +62,7 @@ class InfiniteCampus(PortalEngine):
 
     async def fetch_grades(self) -> Dict[str, Any]:
         """
-        Stay on HOME and scrape notifications. Return latest Quarter Grade per subject
+        Stay on HOME and scrape notifications. Return latest In Progress Grade per subject
         filtered by first_name (like match). Payload shaped for DB insert.
         """
         # Ensure we're on home
@@ -84,20 +84,20 @@ class InfiniteCampus(PortalEngine):
         # print(f"[IC] Wrote notifications HTML → {dump}")
 
         like_name = (getattr(self, "student_name", None) or "").strip()
-        parsed_dict = self._parse_quarter_from_notifications(html, first_name=like_name)
+        parsed_dict = self._parse_in_progress_from_notifications(html, first_name=like_name)
         # ^ parsed_dict is already {"Course": 93.4 or "A", ...}
 
         return {"parsed_grades": parsed_dict}
 
-    # ---------------------- PARSER (Quarter) --------------------------------
-    def _parse_quarter_from_notifications(
+    # ---------------------- PARSER (In Progress) --------------------------------
+    def _parse_in_progress_from_notifications(
         self, html: str, first_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Parse 'Quarter Grade' updates from notifications on HOME.
+        Parse 'In Progress Grade' updates from notifications on HOME.
 
         Example text:
-          "Theodor has an updated grade of D (61.90%) in ALGEBRA II: Quarter Grade"
+          "Theodor has an updated grade of D (61.90%) in ALGEBRA II: In Progress Grade"
         Becomes:
           {"ALGEBRA II": 61.90}
 
@@ -115,12 +115,12 @@ class InfiniteCampus(PortalEngine):
 
         name_like = (first_name or "").strip().lower()
 
-        # Regex for: has an updated grade of <letter?> (<pct?>) in SUBJECT: Quarter Grade
+        # Regex for: has an updated grade of <letter?> (<pct?>) in SUBJECT: In Progress Grade
         pat = re.compile(
             r"has an updated grade of\s+"
             r"(?:(?P<letter>[A-F][+-]?)\s*)?"
             r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
-            r"in\s+(?P<subject>.+?):\s*Quarter Grade",
+            r"in\s+(?P<subject>.+?):\s*In Progress Grade",
             re.IGNORECASE,
         )
 
@@ -191,7 +191,7 @@ class InfiniteCampus(PortalEngine):
                 latest[subject] = (dt, value)
 
         result = {subj: val for subj, (dt, val) in latest.items()}
-        print(f"[IC] Parsed {len(result)} quarter-grade notifications (filtered by {first_name!r}).")
+        print(f"[IC] Parsed {len(result)} in progress-grade notifications (filtered by {first_name!r}).")
         if result:
             print("[IC] Sample:", list(result.items())[:3])
         return result

@@ -24,4 +24,7 @@ from . import (classlink_newport, gps, infinite_campus_parent_alac,
                infinite_campus_parent_ccsd, infinite_campus_parent_gilbert,
                infinite_campus_student_ccsd, infinite_campus_student_chandler,
                microsoft_benjamin_franklin, parentvue_husd,
-               powerschool_lts_parent, studentvue_husd, aeries_losal)
+               powerschool_lts_parent, studentvue_husd, aeries_losal,
+               infinite_campus_student_coral, infinite_campus_student_henderson, 
+               bghs_blackbaud, infinite_campus_parent_somerset, 
+               infinite_campus_student_pinecrest)

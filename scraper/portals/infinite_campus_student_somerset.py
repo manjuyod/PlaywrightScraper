@@ -24,15 +24,15 @@ from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_student_ccsd")
+@register_portal("infinite_campus_student_somerset")
 class InfiniteCampus(PortalEngine):
     """Student portal scraper for CCSD's Infinite Campus."""
 
-    LOGIN = "https://campus.ccsd.net/campus/portal/students/clark.jsp"
+    LOGIN = "https://nspcsa.infinitecampus.org/campus/portal/students/somerset.jsp"
     GRADEBOOK = (
-        "https://campus.ccsd.net/campus/nav-wrapper/student/portal/student/grades?appName=clark"
+        "https://nspcsa.infinitecampus.org/campus/nav-wrapper/student/portal/student/grades?appName=somerset"
     )
-    LOGOFF = "https://campus.ccsd.net/campus/portal/students/clark.jsp?status=logoff"
+    LOGOFF = "https://nspcsa.infinitecampus.org/campus/portal/students/somerset.jsp?status=logoff"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -120,7 +120,7 @@ class InfiniteCampus(PortalEngine):
             r"has an updated grade of\s+"
             r"(?:(?P<letter>[A-F][+-]?)\s*)?"
             r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
-            r"in\s+(?P<subject>.+?):\s*Quarter Grade",
+            r"in\s+(?P<subject>.+?):\s*Quarter",
             re.IGNORECASE,
         )
 
