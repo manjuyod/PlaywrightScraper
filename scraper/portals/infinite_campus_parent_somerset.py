@@ -26,7 +26,7 @@ from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("infinite_campus_parent_ccsd")
+@register_portal("infinite_campus_parent_somerset")
 class InfiniteCampus(PortalEngine):
     """Parent portal scraper for CCSD's Infinite Campus.
 
@@ -35,11 +35,11 @@ class InfiniteCampus(PortalEngine):
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://campus.ccsd.net/campus/portal/parents/clark.jsp"
+    LOGIN = "https://nspcsa.infinitecampus.org/campus/portal/parents/somerset.jsp"
     HOME_WRAPPER = (
-        "https://campus.ccsd.net/campus/nav-wrapper/parent/portal/parent/home?appName=clark"
+        "https://nspcsa.infinitecampus.org/campus/nav-wrapper/student/portal/parents/grades?appName=somerset"
     )
-    LOGOFF = "https://campus.ccsd.net/campus/portal/parents/clark.jsp?status=logoff"
+    LOGOFF = "https://nspcsa.infinitecampus.org/campus/portal/parents/somerset.jsp?status=logoff"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -136,7 +136,7 @@ class InfiniteCampus(PortalEngine):
             r"has an updated grade of\s+"
             r"(?:(?P<letter>[A-F][+-]?)\s*)?"
             r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
-            r"in\s+(?P<subject>.+?):\s*Quarter Grade",
+            r"in\s+(?P<subject>.+?):\s*Quarter",
             re.IGNORECASE,
         )
 
