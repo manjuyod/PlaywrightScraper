@@ -28,6 +28,10 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
+import time
+from functools import wraps
+from gspread.exceptions import APIError
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Paths & constants
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # repo root
@@ -54,8 +58,32 @@ META_FIELDS = [
 HS_TOKENS = {"9", "9th", "10", "10th", "11", "11th", "12", "12th", "college"}
 HS_WORDS = {"freshman", "sophomore", "junior", "senior"}
 
+# tune as needed
+PER_TAB_SLEEP_SEC = 0.75          # small pause between tab writes
+MAX_RETRIES = 6                   # total attempts per call
+BACKOFF_BASE_SEC = 1.0            # starting backoff
+BACKOFF_MULTIPLIER = 1.8          # growth factor
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Helpers
+
+def _retry_on_rate_limit(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        delay = BACKOFF_BASE_SEC
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except APIError as e:
+                # Only back off on 429s
+                if "429" in str(e):
+                    if attempt == MAX_RETRIES:
+                        raise
+                    time.sleep(delay)
+                    delay *= BACKOFF_MULTIPLIER
+                else:
+                    raise
+    return wrapper
 
 def _connect_db() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
@@ -302,40 +330,69 @@ def _ensure_ws(sh, title: str, rows: int = 2000, cols: int = 100):
     except gspread.WorksheetNotFound:
         return sh.add_worksheet(title=title, rows=str(rows), cols=str(cols))
 
+@_retry_on_rate_limit
+def _ws_clear(ws):
+    return ws.clear()
+
+@_retry_on_rate_limit
+def _ws_update(ws, values):
+    return ws.update(values, "A1", value_input_option="USER_ENTERED")
 
 def _push_multi_sheets(sheet_id: str, frames: dict[str, tuple[pd.DataFrame, bool]]) -> None:
-    """
-    Push multiple tabs to an existing Google Sheet.
-    Header handling mirrors Excel export: grade sheets have header=False (no header row),
-    LoginMaster has header=True.
-    """
     creds = Credentials.from_service_account_file(KEY_PATH, scopes=SCOPES)
     gc = gspread.Client(auth=creds)
     sh = gc.open_by_key(sheet_id)
 
-    for title, (df, header_flag) in frames.items():
+    for idx, (title, (df, header_flag)) in enumerate(frames.items(), start=1):
         ws = _ensure_ws(sh, title)
-        ws.clear()
+
+        # Convert DF once
         clean = df.where(pd.notna(df), "")
         values = clean.values.tolist()
         if header_flag:
             values = [list(clean.columns)] + values
-        ws.update(values, "A1", value_input_option="USER_ENTERED")
 
+        # Instead of full clear+full update, you can do ranged update;
+        # but if you want to keep clear(), keep it with backoff:
+        _ws_clear(ws)
+        _ws_update(ws, values)
+
+        # small pacing between tabs to avoid per-minute spikes
+        time.sleep(PER_TAB_SLEEP_SEC)
+
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="Push grade/login tabs to Google Sheets per franchise.")
+    p.add_argument("--franchise-id", "--fid", type=int, default=None,
+                   help="Only process this FranchiseID. If omitted, process all known franchises.")
+    return p.parse_args()
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Main entry point
 
 def main() -> None:
+    #ArgParse First
+    args = _parse_args()
+    
     conn = _connect_db()
     sheet_map = _load_sheet_map(conn)
     df_all = _query_students(conn)       # has WeeklyData for grade blocks
     df_login_all = _query_login_master(conn)  # flat login rows
     known_fids = _load_known_franchise_ids(conn)
+
+    # NEW: compute target set (either the single requested ID, or all known)
+    if args.franchise_id is not None:
+        target_fids = {args.franchise_id} & known_fids
+        if not target_fids:
+            print(f"[SKIP] FranchiseID {args.franchise_id} not in known set; nothing to do.")
+            conn.close()
+            return
+    else:
+        target_fids = known_fids
     
     # hard gate: only keep rows for franchises that exist
-    df_all = df_all[df_all["FranchiseID"].isin(known_fids)].copy()
-    df_login_all = df_login_all[df_login_all["FranchiseID"].isin(known_fids)].copy()
+    df_all = df_all[df_all["FranchiseID"].isin(target_fids)].copy()
+    df_login_all = df_login_all[df_login_all["FranchiseID"].isin(target_fids)].copy()
     
     for fid, grp in df_all.groupby("FranchiseID"):
         if fid not in known_fids:

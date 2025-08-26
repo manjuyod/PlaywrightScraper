@@ -9,9 +9,9 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential, retry_if_not_exception_type, RetryError)
 from .base import PortalEngine
 from . import register_portal, LoginError
-from playwright.async_api import Locator, Dialog, TimeoutError
+from playwright.async_api import Locator, Dialog, TimeoutError, Page
 
-@register_portal("aeries_losal")
+@register_portal("aeries_tustin")
 class Aeries(PortalEngine):
     """Portal scraper for Aeries portal.
 
@@ -20,9 +20,7 @@ class Aeries(PortalEngine):
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://aeriesportal.losal.org/Parent/LoginParent.aspx"
-    LOGOFF = (
-    )
+    LOGIN = "https://parentnet.tustin.k12.ca.us/ParentPortal/LoginParent.aspx"
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -54,6 +52,11 @@ class Aeries(PortalEngine):
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
+            
+    async def getSoup(self) -> BeautifulSoup:
+        """Ensure the page is loaded before trying to get the soup"""
+        html = await self.page.content()
+        return BeautifulSoup(html, "html.parser")
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -63,18 +66,27 @@ class Aeries(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
         print("\nfetching grades")
-        if "Dashboard" not in self.page.url:  # ensure we have reached the next page
+        # ensure we have reached the next page
+        if "Dashboard" not in self.page.url:
             raise LoginError
         await self.page.wait_for_timeout(3000) # wait some to allow population
-        
-        html = await self.page.content()
-        soup = BeautifulSoup(html, "html.parser")
 
+        soup = await self.getSoup()
         class_table = soup.find('div', id="divClass")
+        
+        if class_table is None:
+            await self.page.click("#StudentNameDropDown")
+            await self.page.click("#StudentNameDropDownMenu")
+            await self.page.wait_for_load_state()
+            await self.page.wait_for_timeout(3000)
+            # try again with new page
+            soup = await self.getSoup()
+            class_table = soup.find('div', id='divClass')
+                
         class_cards = class_table.select('div.Card.CardWithPeriod')
         courses_dict = {}
-        
-        for card in class_cards:
+       
+        for card in class_cards: # parse the cards
             grade_div = card.find("div", class_="Grade")
             grade_span = grade_div.find("span")
             grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
