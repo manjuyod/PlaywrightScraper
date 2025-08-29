@@ -48,15 +48,9 @@ class Aeries(PortalEngine):
                 print(f"Login Error: {error_msg}")
                 raise LoginError(error_msg) 
             await self.page.wait_for_load_state('load', timeout=45000)
-            print('load state reached')
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
-            
-    async def getSoup(self) -> BeautifulSoup:
-        """Ensure the page is loaded before trying to get the soup"""
-        html = await self.page.content()
-        return BeautifulSoup(html, "html.parser")
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),

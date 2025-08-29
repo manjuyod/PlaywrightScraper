@@ -8,9 +8,11 @@ import random
 import sqlite3
 import sys
 from traceback import format_exception_only
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, Playwright
 from scraper.portals import get_portal, LoginError
 from typing import Dict, List
+
+from time import time
 
 DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
 
@@ -94,22 +96,24 @@ def students(franchise_id: int | None = None, student_id: int | None = None):
     return get_students_from_db(franchise_id=franchise_id, student_id=student_id)
 
 
-async def scrape_one(pw, student: dict):
+async def scrape_one(pw: Playwright, student: dict):
     """Scrape a single student using the appropriate portal engine."""
     await asyncio.sleep(random.uniform(0, 1.0))
     browser_args = [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
+        # "--no-sandbox",
+        # "--disable-dev-shm-usage",
+        # "--disable-gpu",
+        # "--disable-web-security",
+        # "--disable-features=VizDisplayCompositor",
+        "--disable-blink-features=AutomationControlled",
     ]
-    browser = await pw.chromium.launch(headless=False, args=browser_args)
+    browser = await pw.chromium.launch(headless=False, args=browser_args) 
     context = await browser.new_context()
+    
     page = await context.new_page()
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
-
+    
     Engine = get_portal(student["portal"])
     scraper = Engine(
         page,
@@ -172,6 +176,8 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
     error_count = 0
     with open(out_file, "w", encoding="utf-8") as f:
         async with async_playwright() as p:
+            # start timer
+            begin_time = time()
             for student in student_list:
                 try:
                     result = await scrape_one(p, student)
@@ -198,8 +204,11 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
                     print(f"ERROR: {student['id']} (details in grades.jsonl)")
+    end_time = time()
+    time_elapsed = int(end_time - begin_time)
+    time_per_student = float(time_elapsed) / len(student_list)
     print(f"\nScraping complete! Results saved to {out_file}")
-    print(f"Successfully processed {success_count} students")
+    print(f"Successfully processed {success_count} students in {time_elapsed / 60} minutes {time_elapsed % 60} seconds, at {time_per_student}s per student")
     print(f"Errors encountered: {error_count}")
     print("Script finished.")
 
