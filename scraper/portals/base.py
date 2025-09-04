@@ -7,8 +7,8 @@ from bs4 import BeautifulSoup
 class PortalEngine(ABC):
     """Interface every portal scraper must implement."""
 
-    def __init__(self, page: Page, student_id: str, password: str, student_name: str | None = None, auth_images: list | None = None) -> None:
-        self.page, self.sid, self.pw, self.student_name, self.auth_images = page, student_id, password, student_name, auth_images
+    def __init__(self, page: Page, student_id: str, password: str, login_url: str, student_name: str | None = None, auth_images: list | None = None) -> None:
+        self.page, self.sid, self.pw, self.student_name, self.auth_images, self.login_url = page, student_id, password, student_name, auth_images, login_url
         
     @abstractmethod
     async def login(self, first_name: str | None = None) -> None: ...
