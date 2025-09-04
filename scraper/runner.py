@@ -193,14 +193,14 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                 except Exception as e:
                     # mark this student’s password as bad
                     if isinstance(e, LoginError):
-                        # with sqlite3.connect(DB_PATH) as conn:
-                        #     cur = conn.cursor()
-                        #     cur.execute(
-                        #         "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
-                        #         (student["db_id"],)
-                        #     )
-                        #     conn.commit()
-                        print("\t\t\tBypassed credentials !good, dont forget to reset")
+                        with sqlite3.connect(DB_PATH) as conn:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
+                                (student["db_id"],)
+                            )
+                            conn.commit()
+                        # print("\t\t\tBypassed credentials !good, dont forget to reset")
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
