@@ -35,7 +35,7 @@ def _load_student_auth_map(conn: sqlite3.Connection) -> Dict[int, dict]:
         out[sid] = {"type": auth_type, "answers": answers}
     return out
 
-def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None):
+def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id (and returns at most one row).
@@ -50,7 +50,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, portal, YearStart, YearEnd
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal, YearStart, YearEnd
                 FROM Student
             """
             conditions = [
@@ -59,7 +59,9 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                 "(YearEnd   IS NULL OR date('now') <= date(YearEnd))",
             ]
             params: list = []
-
+            if portal is not None:
+                conditions.append("portal = ?")
+                params.append(portal)
             if student_id is not None:
                 conditions.append("ID = ?")
                 params.append(student_id)
@@ -80,6 +82,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "db_id": row["ID"],
                         "student_name": row["FirstName"],
                         "id": row["P1Username"],
+                        "login_url": row["Portal1"],
                         "password": row["P1Password"],
                         "portal": row["portal"],
                         "auth_images": auth_images,  # only set when gps pictograph
@@ -92,8 +95,8 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
 
     return students_list
 
-def students(franchise_id: int | None = None, student_id: int | None = None):
-    return get_students_from_db(franchise_id=franchise_id, student_id=student_id)
+def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
 
 
 async def scrape_one(pw: Playwright, student: dict):
@@ -114,12 +117,14 @@ async def scrape_one(pw: Playwright, student: dict):
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
     
+    
     Engine = get_portal(student["portal"])
     scraper = Engine(
         page,
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
+        login_url=student.get("login_url")
     )
 
     # Only GPS uses pictograph answers
@@ -155,13 +160,13 @@ async def scrape_one(pw: Playwright, student: dict):
         await browser.close()
 
 
-async def main(franchise_id: int | None = None, student_id: int | None = None):
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
     """Entry point for running the scraper over multiple students."""
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "grades.jsonl"
 
-    student_list = students(franchise_id=franchise_id, student_id=student_id)
+    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal)
     if not student_list:
         if student_id is not None:
             print(f"No active student found with ID = {student_id}.")
@@ -170,6 +175,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
         return
 
     label = f"student_id={student_id}" if student_id is not None else f"franchise_id={franchise_id}" if franchise_id is not None else "all active"
+    label = label + f"portal = {portal}" if portal is not None else None
     print(f"Found {len(student_list)} students to scrape ({label}).")
 
     success_count = 0
@@ -183,7 +189,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     result = await scrape_one(p, student)
                     f.write(json.dumps(result) + "\n")
                     success_count += 1
-                    print(f"SUCCESS: {student['id']}")
+                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]")
                 except Exception as e:
                     # mark this student’s password as bad
                     if isinstance(e, LoginError):
@@ -194,6 +200,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                                 (student["db_id"],)
                             )
                             conn.commit()
+                        # print("\t\t\tBypassed credentials !good, dont forget to reset")
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
@@ -206,9 +213,9 @@ async def main(franchise_id: int | None = None, student_id: int | None = None):
                     print(f"ERROR: {student['id']} (details in grades.jsonl)")
     end_time = time()
     time_elapsed = int(end_time - begin_time)
-    time_per_student = float(time_elapsed) / len(student_list)
+    time_per_student = time_elapsed / len(student_list)
     print(f"\nScraping complete! Results saved to {out_file}")
-    print(f"Successfully processed {success_count} students in {time_elapsed / 60} minutes {time_elapsed % 60} seconds, at {time_per_student}s per student")
+    print(f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student}s per student")
     print(f"Errors encountered: {error_count}")
     print("Script finished.")
 
@@ -225,5 +232,10 @@ if __name__ == "__main__":
         type=int,
         help="Scrape a single student by database ID. Takes precedence over --franchise-id."
     )
+    parser.add_argument(
+        "-p", "--portal",
+        type=str,
+        help="Test a single portal by name."
+    )
     args = parser.parse_args()
-    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id))
+    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal))

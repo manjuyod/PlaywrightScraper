@@ -11,7 +11,7 @@ from .base import PortalEngine
 from . import register_portal, LoginError
 from playwright.async_api import Locator, Dialog, TimeoutError, Page
 
-@register_portal("aeries_tustin")
+@register_portal("aeries")
 class Aeries(PortalEngine):
     """Portal scraper for Aeries portal.
 
@@ -20,7 +20,7 @@ class Aeries(PortalEngine):
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://parentnet.tustin.k12.ca.us/ParentPortal/LoginParent.aspx"
+    # LOGIN = "https://parentnet.tustin.k12.ca.us/ParentPortal/LoginParent.aspx"
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -29,9 +29,10 @@ class Aeries(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the Aeries parent portal."""
+        print(self.login_url)
         try:
             await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
+            await self.page.goto(self.login_url, wait_until="domcontentloaded")
             # Username
             await self.page.fill("input#portalAccountUsername", self.sid)
             await self.page.wait_for_timeout(2000)
@@ -84,8 +85,8 @@ class Aeries(PortalEngine):
             grade_div = card.find("div", class_="Grade")
             grade_span = grade_div.find("span")
             grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-            grade = float(grade_str.replace("(", "").replace(")", "").replace("%", "")) if grade_str is not None else None
-            
+            grade_str = grade_str.replace("(", "").replace(")", "").replace("%", "") if grade_str is not None else None
+            grade = float(grade_str)
             class_link = card.find("a", class_="TextHeading")
             class_name: str = class_link.text.strip()
             
