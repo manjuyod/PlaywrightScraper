@@ -7,8 +7,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, Frame
 from .base import PortalEngine
-from . import register_portal  # helper we'll create in __init__.py
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from . import register_portal, LoginError # helper we'll create in __init__.py
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
 
 
 @register_portal("infinite_campus")
@@ -19,7 +19,7 @@ class InfiniteCampus(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_not_exception_type(LoginError),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
@@ -30,6 +30,13 @@ class InfiniteCampus(PortalEngine):
         await self.page.fill("#password", self.pw)
         await self.page.wait_for_timeout(1000) # give time between input and continue
         await self.page.get_by_role('button', name="Log In").click()
+        await self.page.wait_for_load_state('networkidle')
+        await self.page.wait_for_timeout(1000)
+        if 'nav-wrapper' in self.page.url:
+            print("Successfully reached the home page")
+        else:
+            print("\t\t\tHome screen is not apparent")
+            raise LoginError
         print("[IC] Logged in and on student/home.")
 
     # ---------------------- FETCH (notifications → latest per subject) -------
@@ -41,25 +48,24 @@ class InfiniteCampus(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """Collect grades from the grade tab"""
         # finish nav from login
-        if 'nav-wrapper' in self.page.url:
-            print("Successfully reached the home page")
-        else: 
-            print("\t\t\tHome screen is not apparent")
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
         # get grades
         try:
-            await self.page.wait_for_load_state('domcontentloaded')
+            await self.page.wait_for_selector('#menu-toggle-button')
             # nav to the grades page
             await self.page.locator("#menu-toggle-button").click()
             await self.page.get_by_role("link", name='Grades').click()
             await self.page.wait_for_url("**/grades*", timeout = 20000)
             await self.page.wait_for_load_state("networkidle")
             frame = self.page.frame(name="main-workspace")
+            if ("chandleraz" in  self.page.url):
+                await frame.get_by_text("Q2").click()
             await frame.wait_for_selector("div.collapsible-card.grades__card", timeout=15000)
-            
             cards = await frame.query_selector_all("div.collapsible-card.grades__card")
-            print("Cards found:", len(cards))
+            print(f"{len(cards)} cards found:")
+            # for card in cards: 
+            #     print(card)
             # no soup, angular sucks
             # now try to parse the page
             parsed_dict = {}
@@ -67,13 +73,14 @@ class InfiniteCampus(PortalEngine):
                 # print(f"Class: {card}\n\n")
                 course_elem = await card.query_selector("h4 a")
                 grade_elem = await card.query_selector_all(".grading-score div")
-                if len(grade_elem) == 0: continue # no class info
+                # print(grade_elem)
+                if len(grade_elem) == 0:
+                    print("no class info") 
+                    continue # no class info
                 course = await course_elem.inner_text()
-                # for i, grade in enumerate(grade_elem):
-                #     print(i, await grade.inner_text())
-                grade_str: str = await grade_elem[-2].inner_text() 
-                 
-                # print(f"course: {course} grade: {grade_str}")
+                grade_index = -2 # the percentage grade is almost always the second to last element
+                grade_str: str = await grade_elem[grade_index].inner_text() 
+                # print(f"course: {course} grade: {grade_str}") # debug
                 try:
                     grade = float(grade_str.replace("(", "").replace(")", "").replace("%", ""))
                 except ValueError: # not a number grade
