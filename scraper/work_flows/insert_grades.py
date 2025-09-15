@@ -1,6 +1,7 @@
 # scraper/work_flows/insert_grades.py
 import json
-import sqlite3
+from scraper.runner import db_conn, DictCursor
+import psycopg2
 import pathlib
 from datetime import date, timedelta
 
@@ -40,9 +41,8 @@ def insert_grades():
     print(f"Input: {JSONL_PATH}")
 
     try:
-        with sqlite3.connect(DB_PATH) as conn, open(JSONL_PATH, "r", encoding="utf-8") as f:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
+        with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
+            cur = conn.cursor(cursor_factory=DictCursor)
 
             for raw in f:
                 raw = raw.strip()
@@ -73,20 +73,20 @@ def insert_grades():
                     continue
 
                 # Fetch existing WeeklyData
-                cur.execute("SELECT WeeklyData FROM Student WHERE ID = ?", (student_id,))
+                cur.execute("SELECT WeeklyData FROM Student WHERE ID = %s", (student_id,))
                 row = cur.fetchone()
                 if not row:
                     print(f"Student with ID '{student_id}' not found.")
                     continue
 
-                weekly_data = safe_load_json(row["WeeklyData"])
+                weekly_data = safe_load_json(row["weeklydata"])
 
                 # Update current week's bucket
                 weekly_data[monday_anchor] = grades
 
                 # Persist
                 cur.execute(
-                    "UPDATE Student SET WeeklyData = ? WHERE ID = ?",
+                    "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
                     (json.dumps(weekly_data, ensure_ascii=False), student_id)
                 )
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
@@ -95,7 +95,7 @@ def insert_grades():
 
     except FileNotFoundError:
         print(f"Error: Output file not found at {JSONL_PATH}")
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         print(f"Database error: {e}")
 
 if __name__ == "__main__":

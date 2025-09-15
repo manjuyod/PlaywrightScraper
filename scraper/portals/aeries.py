@@ -9,10 +9,9 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential, retry_if_not_exception_type, RetryError)
 from .base import PortalEngine
 from . import register_portal, LoginError
-from playwright.async_api import Locator, Dialog, TimeoutError
+from playwright.async_api import Locator, Dialog, TimeoutError, Page
 
-# TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
-@register_portal("aeries_losal")
+@register_portal("aeries")
 class Aeries(PortalEngine):
     """Portal scraper for Aeries portal.
 
@@ -21,10 +20,7 @@ class Aeries(PortalEngine):
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://aeriesportal.losal.org/Parent/LoginParent.aspx"
-    HOME_WRAPPER = "https://aeriesportal.losal.org/Parent/Dashboard.aspx"
-    LOGOFF = (
-    )
+    # LOGIN = "https://parentnet.tustin.k12.ca.us/ParentPortal/LoginParent.aspx"
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -33,9 +29,10 @@ class Aeries(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the Aeries parent portal."""
+        print(self.login_url)
         try:
             await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
+            await self.page.goto(self.login_url, wait_until="domcontentloaded")
             # Username
             await self.page.fill("input#portalAccountUsername", self.sid)
             await self.page.wait_for_timeout(2000)
@@ -52,7 +49,6 @@ class Aeries(PortalEngine):
                 print(f"Login Error: {error_msg}")
                 raise LoginError(error_msg) 
             await self.page.wait_for_load_state('load', timeout=45000)
-            print('load state reached')
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
@@ -69,25 +65,32 @@ class Aeries(PortalEngine):
         if "Dashboard" not in self.page.url:
             raise LoginError
         await self.page.wait_for_timeout(3000) # wait some to allow population
-        html = await self.page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        # dump html for debugging
+
+        soup = await self.getSoup()
         class_table = soup.find('div', id="divClass")
+        
+        if class_table is None:
+            await self.page.click("#StudentNameDropDown")
+            await self.page.click("#StudentNameDropDownMenu")
+            await self.page.wait_for_load_state()
+            await self.page.wait_for_timeout(3000)
+            # try again with new page
+            soup = await self.getSoup()
+            class_table = soup.find('div', id='divClass')
+                
         class_cards = class_table.select('div.Card.CardWithPeriod')
         courses_dict = {}
-        
-        # print(class_cards)
-        for card in class_cards:
+       
+        for card in class_cards: # parse the cards
             grade_div = card.find("div", class_="Grade")
             grade_span = grade_div.find("span")
             grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-            grade = float(grade_str.replace("(", "").replace(")", "").replace("%", "")) if grade_str is not None else None
-            
+            grade_str = grade_str.replace("(", "").replace(")", "").replace("%", "") if grade_str is not None else None
+            grade = float(grade_str)
             class_link = card.find("a", class_="TextHeading")
             class_name: str = class_link.text.strip()
             
             courses_dict[class_name.upper()] = grade
-            print(courses_dict)
         return {"parsed_grades": courses_dict}
     
     # ---------------------- LOGOUT ----------------------

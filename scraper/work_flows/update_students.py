@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-import sqlite3
+from scraper.runner import db_conn, connection, DictCursor
 from typing import Dict, List
 
 import gspread
@@ -33,7 +33,6 @@ from google.oauth2.service_account import Credentials
 # Paths & constants
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # repo root
-DB_PATH = ROOT / "config" / "students.db"
 KEY_PATH = ROOT / "sheet_mod_grades.json"
 
 SCOPES = [
@@ -52,33 +51,26 @@ TRACKED_FIELDS = [
 ]
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Helpers
-
-def _connect_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def _load_sheet_map(conn: sqlite3.Connection) -> Dict[int, str]:
+def _load_sheet_map(conn: connection) -> Dict[int, str]:
     """
     Return {FranchiseID: <sheet_id>} for non-empty spreadsheet URLs.
     """
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=DictCursor)
     cur.execute("""
-        SELECT FranchiseID, spreadsheet
+        SELECT franchiseid, spreadsheet
         FROM Spreadsheets
-        WHERE FranchiseID IS NOT NULL
+        WHERE franchiseid IS NOT NULL
           AND COALESCE(spreadsheet, '') <> ''
+        order by id desc
     """)
     mapping: Dict[int, str] = {}
     for fid, url in cur.fetchall():
-        m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
-        if m:
-            mapping[int(fid)] = m.group(1)
+        sheet_id = url.split("/")[-1]
+        mapping[int(fid)] = sheet_id
     return mapping
 
 def _gc_client() -> gspread.Client:
-    creds = Credentials.from_service_account_file(KEY_PATH, scopes=SCOPES)
+    creds = Credentials.from_service_account_file(str(KEY_PATH), scopes=SCOPES)
     return gspread.Client(auth=creds)
 
 def _norm_space(s: str | None) -> str:
@@ -101,17 +93,17 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     Read LoginMaster rows from a Google Sheet.
     Returns a list of dicts with normalized values.
     """
-    sh = gc.open_by_key(sheet_id)
+    sh = gc.open_by_key(sheet_id) # this hangs on franchise 19 because of the number of sheets within the document
     try:
         ws = sh.worksheet(LOGIN_MASTER_TITLE)
     except gspread.WorksheetNotFound:
         print(f"[WARN] Sheet has no tab named '{LOGIN_MASTER_TITLE}' (id={sheet_id}); parsed 0 rows.")
         return []
-
+    # print("worksheet parsed")
     # get_all_records() reads the header row and returns list[dict]
     rows = ws.get_all_records()  # empty cells -> ''
+    # print("worksheet rows parsed", rows)
     out: List[dict] = []
-
     for r in rows:
         rec = {
             "FirstName":   _norm_space(r.get("FirstName")),
@@ -131,29 +123,29 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
 
     return out
 
-def _load_db_keys_for_franchise(conn: sqlite3.Connection, fid: int) -> Dict[tuple, int]:
+def _load_db_keys_for_franchise(conn: connection, fid: int) -> Dict[tuple, int]:
     """
     Return { (fid, norm(first), norm(last)): student_id } for the franchise.
     """
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=DictCursor)
     cur.execute("""
-        SELECT ID, FirstName, LastName
+        SELECT id, firstname, lastname
         FROM Student
-        WHERE FranchiseID = ?
+        WHERE franchiseid = %s
     """, (fid,))
     mapping: Dict[tuple, int] = {}
     for row in cur.fetchall():
-        key = (fid, _norm_name_key(row["FirstName"]), _norm_name_key(row["LastName"]))
-        mapping[key] = int(row["ID"])
+        key = (fid, _norm_name_key(row["firstname"]), _norm_name_key(row["lastname"]))
+        mapping[key] = int(row["id"])
     return mapping
 
-def _fetch_db_row(conn: sqlite3.Connection, student_id: int) -> dict:
-    cur = conn.cursor()
+def _fetch_db_row(conn: connection, student_id: int) -> dict:
+    cur = conn.cursor(cursor_factory=DictCursor)
     cur.execute("""
-        SELECT Grade, Portal1, P1Username, P1Password,
-               Portal2, P2Username, P2Password, PasswordGood
+        SELECT grade, portal1, p1Username, p1password,
+               portal2, p2username, p2password, passwordgood
         FROM Student
-        WHERE ID = ?
+        WHERE id = %s
     """, (student_id,))
     row = cur.fetchone()
     if not row:
@@ -167,9 +159,9 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
     if not db_row:
         return True
     for f in TRACKED_FIELDS:
-        a = db_row.get(f)
+        a = db_row.get(f.lower())
         b = sheet_row.get(f)
-        if f == "PasswordGood":
+        if f == "passwordgood":
             if _norm_int(a) != _norm_int(b):
                 return True
         else:
@@ -181,11 +173,11 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
 # Main sync
 
 def sync_students() -> None:
-    conn = _connect_db()
+    conn = db_conn()
     gc = _gc_client()
     sheet_map = _load_sheet_map(conn)
 
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=DictCursor)
 
     total_ins = total_upd = total_del = total_skp = 0
 
@@ -227,11 +219,11 @@ def sync_students() -> None:
                     # INSERT
                     cur.execute("""
                         INSERT INTO Student
-                          (FranchiseID, FirstName, LastName, Grade,
-                           Portal1, P1Username, P1Password,
-                           Portal2, P2Username, P2Password, PasswordGood)
+                          (franchiseid, firstname, lastname, grade,
+                           portal1, p1username, p1password,
+                           portal2, p2username, p2password, passwordgood)
                         VALUES
-                          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         fid,
                         _norm_space(sheet_rec["FirstName"]),
@@ -253,11 +245,11 @@ def sync_students() -> None:
                 if _differs(db_row, sheet_rec):
                     cur.execute("""
                         UPDATE Student
-                        SET Grade = ?,
-                            Portal1 = ?, P1Username = ?, P1Password = ?,
-                            Portal2 = ?, P2Username = ?, P2Password = ?,
-                            PasswordGood = ?
-                        WHERE ID = ?
+                        SET grade = %s,
+                            portal1 = %s, p1username = %s, p1password = %s,
+                            portal2 = %s, p2username = %s, p2password = %s,
+                            passwordgood = %s
+                        WHERE id = %s
                     """, (
                         _norm_space(sheet_rec["Grade"]),
                         _norm_space(sheet_rec["Portal1"]),
@@ -281,9 +273,9 @@ def sync_students() -> None:
                 for dkey in to_delete:
                     cur.execute("""
                         DELETE FROM Student
-                        WHERE FranchiseID = ?
-                          AND LOWER(TRIM(FirstName)) = ?
-                          AND LOWER(TRIM(LastName))  = ?
+                        WHERE franchiseid = %s
+                          AND LOWER(TRIM(firstname)) = %s
+                          AND LOWER(TRIM(lastname))  = %s
                     """, (dkey[0], dkey[1], dkey[2]))
                     deletes += 1
             else:
