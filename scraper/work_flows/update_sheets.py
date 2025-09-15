@@ -21,7 +21,8 @@ import json
 import math
 import pathlib
 import re
-import sqlite3
+from scraper.runner import db_conn, DictCursor, connection
+import psycopg2
 from typing import Dict, List
 
 import gspread
@@ -44,14 +45,14 @@ SCOPES = [
 
 # Column / field order for the meta rows
 META_FIELDS = [
-    ("Name", "StudentName"),
-    ("Grade", "Grade"),
-    ("Portal1", "Portal1"),
-    ("P1Username", "P1Username"),
-    ("P1Password", "P1Password"),
-    ("Portal2", "Portal2"),
-    ("P2Username", "P2Username"),
-    ("P2Password", "P2Password"),
+    ("name", "studentname"),
+    ("grade", "grade"),
+    ("portal1", "portal1"),
+    ("p1username", "p1username"),
+    ("p1password", "p1password"),
+    ("portal2", "portal2"),
+    ("p2username", "p2username"),
+    ("p2password", "p2password"),
 ]
 
 # HS/MS detection helpers
@@ -85,14 +86,10 @@ def _retry_on_rate_limit(func):
                     raise
     return wrapper
 
-def _connect_db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
-
-
-def _load_sheet_map(conn: sqlite3.Connection) -> Dict[int, str]:
+def _load_sheet_map(conn: connection) -> Dict[int, str]:
     """Return {FranchiseID: <spreadsheet-id>} extracted from URL."""
     cur = conn.cursor()
-    cur.execute("SELECT FranchiseID, spreadsheet FROM Spreadsheets")
+    cur.execute("SELECT franchiseid, spreadsheet FROM Spreadsheets")
     mapping: Dict[int, str] = {}
     for fid, url in cur.fetchall():
         m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
@@ -101,46 +98,45 @@ def _load_sheet_map(conn: sqlite3.Connection) -> Dict[int, str]:
     return mapping
 
 
-def _query_students(conn: sqlite3.Connection) -> pd.DataFrame:
+def _query_students(conn: connection) -> pd.DataFrame:
     """Return a DataFrame with student rows + WeeklyData used for grade blocks."""
     sql = """
         SELECT
-            ID,
-            FranchiseID,
-            FirstName || ' ' || LastName AS StudentName,
-            Grade,
-            Portal1,
-            P1Username,
-            P1Password,
-            Portal2,
-            P2Username,
-            P2Password,
-            WeeklyData,
-            PasswordGood
+            id,
+            franchiseid,
+            firstname || ' ' || lastname AS StudentName,
+            grade,
+            portal1,
+            p1username,
+            p1password,
+            portal2,
+            p2username,
+            p2password,
+            weeklydata,
+            passwordgood
         FROM Student
-        ORDER BY FirstName ASC, Grade ASC
     """
     return pd.read_sql_query(sql, conn)
 
 
-def _query_login_master(conn: sqlite3.Connection) -> pd.DataFrame:
+def _query_login_master(conn: connection) -> pd.DataFrame:
     """Raw login control data for LoginMaster tab."""
     sql = """
         SELECT
-            ID,
-            FranchiseID,
-            FirstName,
-            LastName,
-            Grade,
-            Portal1,
-            P1Username,
-            P1Password,
-            Portal2,
-            P2Username,
-            P2Password,
-            PasswordGood
+            id,
+            franchiseid,
+            firstname, 
+            lastname,
+            grade,
+            portal1,
+            p1username,
+            p1password,
+            portal2,
+            p2username,
+            p2password,
+            weeklydata,
+            passwordgood
         FROM Student
-        ORDER BY LastName ASC, FirstName ASC
     """
     return pd.read_sql_query(sql, conn)
 
@@ -182,7 +178,7 @@ def _extract_subjects(wdata: dict) -> List[str]:
             names.update(week_payload.keys())
     return sorted(names)
 
-def _load_known_franchise_ids(conn: sqlite3.Connection) -> set[int]:
+def _load_known_franchise_ids(conn: connection) -> set[int]:
     """
     Only allow FranchiseIDs that are present in Spreadsheets.
     (Optionally require a non-empty spreadsheet URL.)
@@ -190,13 +186,13 @@ def _load_known_franchise_ids(conn: sqlite3.Connection) -> set[int]:
     cur = conn.cursor()
     try:
         cur.execute("""
-            SELECT DISTINCT FranchiseID
+            SELECT DISTINCT franchiseid
             FROM Spreadsheets
-            WHERE FranchiseID IS NOT NULL
+            WHERE franchiseid IS NOT NULL
               AND COALESCE(spreadsheet, '') <> ''   -- comment out this line if URL shouldn't be required
         """)
         return {int(r[0]) for r in cur.fetchall() if r[0] is not None}
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         print(f"[WARN] Could not load FranchiseIDs from Spreadsheets: {e}")
         return set()
     
@@ -230,7 +226,7 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
      meta rows (A/B only) → two blanks → subject rows with week columns.
     We align each student’s block to the franchise-wide weeks after computing per-student data.
     """
-    good_pw = row["PasswordGood"] == 1
+    good_pw = row["passwordgood"] == 1
 
     # 1) meta rows (explicit strings, no NaN bleed)
     meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
@@ -251,7 +247,7 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
         return pd.concat([meta, err], ignore_index=True)
 
     # 3) subject → grades for this student only
-    wdata = _safe_json_loads(row["WeeklyData"])
+    wdata = _safe_json_loads(row["weeklydata"])
     subjects = _extract_subjects(wdata)
     weeks_for_student = sorted([w for w in wdata.keys() if w in weeks_all])
 
@@ -290,7 +286,7 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
 
 def _collect_weeks(df: pd.DataFrame) -> List[str]:
     weeks: set[str] = set()
-    for wd_json in df["WeeklyData"]:
+    for wd_json in df["weeklydata"]:
         try:
             weeks.update(json.loads(wd_json).keys())
         except Exception:
@@ -374,7 +370,7 @@ def main() -> None:
     #ArgParse First
     args = _parse_args()
     
-    conn = _connect_db()
+    conn = db_conn()
     sheet_map = _load_sheet_map(conn)
     df_all = _query_students(conn)       # has WeeklyData for grade blocks
     df_login_all = _query_login_master(conn)  # flat login rows
@@ -391,10 +387,10 @@ def main() -> None:
         target_fids = known_fids
     
     # hard gate: only keep rows for franchises that exist
-    df_all = df_all[df_all["FranchiseID"].isin(target_fids)].copy()
-    df_login_all = df_login_all[df_login_all["FranchiseID"].isin(target_fids)].copy()
+    df_all = df_all[df_all["franchiseid"].isin(target_fids)].copy()
+    df_login_all = df_login_all[df_login_all["franchiseid"].isin(target_fids)].copy()
     
-    for fid, grp in df_all.groupby("FranchiseID"):
+    for fid, grp in df_all.groupby("franchiseid"):
         if fid not in known_fids:
             print(f"[SKIP] FranchiseID {fid} not found in Franchise table; no workbook/Sheet created.")
             continue
@@ -406,29 +402,29 @@ def main() -> None:
 
         # ---- LoginMaster (flat)
         login_master = (
-            df_login_all[df_login_all["FranchiseID"] == fid]
+            df_login_all[df_login_all["franchiseid"] == fid]
             .loc[:, [
-                "FirstName", "LastName", "Grade",
-                "Portal1", "P1Username", "P1Password",
-                "Portal2", "P2Username", "P2Password", "PasswordGood"
+                "firstname", "lastname", "grade",
+                "portal1", "p1username", "p1password",
+                "portal2", "p2username", "p2password", "passwordgood"
             ]]
-            .sort_values(["LastName", "FirstName"])
+            .sort_values(["lastname", "firstname"])
             .reset_index(drop=True)
         )
 
         # Build ID sets for HS / MS / Error from LoginMaster (authoritative for Grade/PasswordGood)
-        login_f = df_login_all[df_login_all["FranchiseID"] == fid].copy()
-        good = login_f["PasswordGood"] == 1
-        is_hs = login_f["Grade"].apply(_is_hs_grade)
+        login_f = df_login_all[df_login_all["franchiseid"] == fid].copy()
+        good = login_f["passwordgood"] == 1
+        is_hs = login_f["grade"].apply(_is_hs_grade)
 
-        hs_ids  = set(login_f.loc[good & is_hs,  "ID"].tolist())
-        ms_ids  = set(login_f.loc[good & ~is_hs, "ID"].tolist())
-        err_ids = set(login_f.loc[~good,         "ID"].tolist())
+        hs_ids  = set(login_f.loc[good & is_hs,  "id"].tolist())
+        ms_ids  = set(login_f.loc[good & ~is_hs, "id"].tolist())
+        err_ids = set(login_f.loc[~good,         "id"].tolist())
 
         # Slice the grade-pivot source to those students
-        grp_hs  = grp[grp["ID"].isin(hs_ids)]
-        grp_ms  = grp[grp["ID"].isin(ms_ids)]
-        grp_err = grp[grp["ID"].isin(err_ids)]
+        grp_hs  = grp[grp["id"].isin(hs_ids)]
+        grp_ms  = grp[grp["id"].isin(ms_ids)]
+        grp_err = grp[grp["id"].isin(err_ids)]
 
         # Build the 3 grade tabs using the SAME weeks list
         hs_df  = _build_dataframe_for_group(grp_hs,  weeks)

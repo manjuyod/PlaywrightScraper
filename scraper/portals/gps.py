@@ -61,8 +61,8 @@ class GPS(PortalEngine):
             images_alts = await self.page.eval_on_selector_all(
                 ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
             )
-            # print("Alt tags: ", images_alts)
-            # print("Auth: ", self.auth_images)
+            print("Alt tags: ", images_alts)
+            print("Auth: ", self.auth_images)
             assert self.auth_images is not None  # must be provided by caller/DB
             user_match = next((image for image in self.auth_images if image in images_alts), None)
             if not user_match:
