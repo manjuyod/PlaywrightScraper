@@ -2,36 +2,41 @@
 import asyncio
 import argparse
 import json
-import re
+import os
+from dotenv import load_dotenv
 import pathlib
 import random
-import sqlite3
+import psycopg2 as pg
+from psycopg2.extensions import connection
+from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
 from scraper.portals import get_portal, LoginError
 from typing import Dict, List
-
+load_dotenv()
 from time import time
 
-DB_PATH = pathlib.Path(__file__).parent.parent / "config" / "students.db"
+def db_conn() -> connection:
+    return pg.connect(
+        host=os.getenv("PGHOST"),
+        database=os.getenv("PGDATABASE"),
+        user=os.getenv("PGUSER"),
+        password=os.getenv("PGPASSWORD"),
+        port=os.getenv("PGPORT"),
+    )
 
-def _load_student_auth_map(conn: sqlite3.Connection) -> Dict[int, dict]:
+def _load_student_auth_map(conn: connection) -> Dict[int, dict]:
     """
     Returns {StudentID -> {"type": AuthType, "answers": list[str]}}
     from student_auth where each row stores JSON in Answers.
     """
     cur = conn.cursor()
-    cur.execute("SELECT StudentID, AuthType, Answers FROM student_auth")  # one row per student
+    cur.execute("SELECT studentid, authtype, answers FROM student_auth")  # one row per student
     out: Dict[int, dict] = {}
     for sid, auth_type, answers_raw in cur.fetchall():
-        try:
-            answers = json.loads(answers_raw)
-            if not isinstance(answers, list):
-                raise ValueError("Answers JSON must be a list")
-        except Exception:
-            # fallback if someone stored CSV
-            answers = [p.strip() for p in str(answers_raw).split(",") if p.strip()]
+        answers_raw = answers_raw.strip('{}').split(',')
+        answers = [a.strip('"') for a in answers_raw]
         out[sid] = {"type": auth_type, "answers": answers}
     return out
 
@@ -42,9 +47,9 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
     """
     students_list = []
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
+        with db_conn() as conn:
+            print("Successfully connected to database.")
+            cur = conn.cursor(cursor_factory=DictCursor)
 
             # load the picture map once per connection
             student_auth_map = _load_student_auth_map(conn)
@@ -55,41 +60,42 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             """
             conditions = [
                 "PasswordGood = 1",
-                "(YearStart IS NULL OR date(YearStart) <= date('now'))",
-                "(YearEnd   IS NULL OR date('now') <= date(YearEnd))",
+                "(YearStart IS NULL OR date(YearStart) <= CURRENT_DATE)",
+                "(YearEnd   IS NULL OR CURRENT_DATE <= date(YearEnd))",
             ]
             params: list = []
             if portal is not None:
-                conditions.append("portal = ?")
+                conditions.append("portal = %s")
                 params.append(portal)
             if student_id is not None:
-                conditions.append("ID = ?")
+                conditions.append("ID = %s")
                 params.append(student_id)
             elif franchise_id is not None:
-                conditions.append("FranchiseID = ?")
+                conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
 
             query = base + " WHERE " + " AND ".join(conditions)
+            print(query)
             cur.execute(query, params)
 
             for row in cur.fetchall():
                 # look up auth by StudentID (if present)
-                auth = student_auth_map.get(row["ID"])  # -> {"type": "...", "answers": [...] } or None
+                auth = student_auth_map.get(row["id"])  # -> {"type": "...", "answers": [...] } or None
                 auth_images = auth["answers"] if auth and auth["type"] == "gps_pictograph" else None
 
                 students_list.append(
                     {
-                        "db_id": row["ID"],
-                        "student_name": row["FirstName"],
-                        "id": row["P1Username"],
-                        "login_url": row["Portal1"],
-                        "password": row["P1Password"],
+                        "db_id": row["id"],
+                        "student_name": row["firstname"],
+                        "id": row["p1username"],
+                        "login_url": row["portal1"],
+                        "password": row["p1password"],
                         "portal": row["portal"],
                         "auth_images": auth_images,  # only set when gps pictograph
                     }
                 )
 
-    except sqlite3.Error as e:
+    except pg.Error as e:
         print(f"Database error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -193,14 +199,14 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                 except Exception as e:
                     # mark this student’s password as bad
                     if isinstance(e, LoginError):
-                        with sqlite3.connect(DB_PATH) as conn:
-                            cur = conn.cursor()
-                            cur.execute(
-                                "UPDATE Student SET PasswordGood = 0 WHERE ID = ?",
-                                (student["db_id"],)
-                            )
-                            conn.commit()
-                        # print("\t\t\tBypassed credentials !good, dont forget to reset")
+                        # with _db_conn() as conn:
+                        #     cur = conn.cursor()
+                        #     cur.execute(
+                        #         "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+                        #         (student["db_id"],)
+                        #     )
+                        #     conn.commit()
+                        print("\t\t\tBypassed credentials !good, dont forget to reset")
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
