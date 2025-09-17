@@ -28,4 +28,4 @@ from . import (classlink_newport, gps, infinite_campus_parent_alac,
                infinite_campus_student_coral, infinite_campus_student_henderson, 
                bghs_blackbaud, infinite_campus_parent_somerset, 
                infinite_campus_student_pinecrest, cnusd_student, infinite_campus_parent_chandler,
-               infinite_campus_parent_pinecrest)
+               infinite_campus_parent_pinecrest, aeries_tustin)

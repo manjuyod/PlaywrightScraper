@@ -98,11 +98,11 @@ async def scrape_one(pw, student: dict):
     """Scrape a single student using the appropriate portal engine."""
     await asyncio.sleep(random.uniform(0, 1.0))
     browser_args = [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
+    #    "--no-sandbox",
+    #    "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
+    #    "--disable-web-security",
+    #    "--disable-features=VizDisplayCompositor",
     ]
     browser = await pw.chromium.launch(headless=False, args=browser_args)
     context = await browser.new_context()
