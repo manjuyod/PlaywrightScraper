@@ -17,5 +17,10 @@ def get_portal(key: str) -> Type[PortalEngine]:
     except KeyError:  # nicer error than raw KeyError
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
+class LoginError(Exception):
+    pass
 # Import engines so they register.
-from . import infinite_campus_student_ccsd, infinite_campus_parent_ccsd, infinite_campus_parent_gilbert, infinite_campus_parent_alac, parentvue_husd, powerschool_lts_parent, studentvue_husd, infinite_campus_student_chandler, gps, microsoft_benjamin_franklin
+from . import (classlink_newport, gps,
+               microsoft_benjamin_franklin, parentvue_husd,
+               powerschool_lts_parent, studentvue_husd,
+               bghs_blackbaud, aeries, infinite_campus)

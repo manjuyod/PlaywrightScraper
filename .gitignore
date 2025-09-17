@@ -9,10 +9,11 @@ __pycache__/
 env/
 venv/
 .venv/
+scraper/.env
 
 # Config files with secrets
-# config/students.*
-config/students.db*
+config/students.*
+config/*.db
 
 # Logs
 logs/
