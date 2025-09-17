@@ -10,6 +10,7 @@ env/
 venv/
 .venv/
 scraper/.env
+*.env
 
 # Config files with secrets
 config/students.*
