@@ -23,4 +23,5 @@ class LoginError(Exception):
 from . import (classlink_newport, gps,
                microsoft_benjamin_franklin, parentvue_husd,
                powerschool_lts_parent, studentvue_husd,
-               bghs_blackbaud, aeries, infinite_campus)
+               bghs_blackbaud, aeries, infinite_campus,
+               student_connection)
