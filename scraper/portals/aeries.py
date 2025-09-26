@@ -86,11 +86,10 @@ class Aeries(PortalEngine):
             grade_span = grade_div.find("span")
             grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
             grade_str = grade_str.replace("(", "").replace(")", "").replace("%", "") if grade_str is not None else None
-            grade = float(grade_str)
             class_link = card.find("a", class_="TextHeading")
             class_name: str = class_link.text.strip()
             
-            courses_dict[class_name.upper()] = grade
+            courses_dict[class_name.upper()] = grade_str
         return {"parsed_grades": courses_dict}
     
     # ---------------------- LOGOUT ----------------------
