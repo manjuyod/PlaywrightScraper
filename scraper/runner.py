@@ -55,7 +55,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal, YearStart, YearEnd
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal2, portal, YearStart, YearEnd
                 FROM Student
             """
             conditions = [
@@ -75,7 +75,6 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                 params.append(franchise_id)
 
             query = base + " WHERE " + " AND ".join(conditions)
-            print(query)
             cur.execute(query, params)
 
             for row in cur.fetchall():
@@ -89,6 +88,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "student_name": row["firstname"],
                         "id": row["p1username"],
                         "login_url": row["portal1"],
+                        "alt_portal_url": row["portal2"],
                         "password": row["p1password"],
                         "portal": row["portal"],
                         "auth_images": auth_images,  # only set when gps pictograph
@@ -130,7 +130,8 @@ async def scrape_one(pw: Playwright, student: dict):
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
-        login_url=student.get("login_url")
+        login_url=student.get("login_url"),
+        alt_portal_url=student.get("alt_portal_url")
     )
 
     # Only GPS uses pictograph answers

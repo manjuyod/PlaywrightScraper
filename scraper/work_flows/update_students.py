@@ -173,7 +173,6 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
 from scraper.portals import managed_portals
 def get_portal_from_record(record: dict) -> str | None:
     """Sorts portal links into 'buckets' defined from portals that we currently manage"""
-    portal = None # we may not have implemented this portal yet
     portal_link = record["Portal1"]
     for portal, rules in managed_portals.items():
         for rule in rules:
@@ -225,14 +224,10 @@ def sync_students(target_fid: int | None = None) -> None:
             # INSERT / UPDATE / SKIP: iterate LoginMaster (sheet) and check DB
             for key in target_keys:
                 sheet_rec = target_map[key]
-                portal = get_portal_from_record(sheet_rec)
-                print(f"Found {portal} for {sheet_rec['Portal1']}")
-                print()
                 sid = db_key_to_id.get(key)
                 if sid is None:
                     # INSERT
                     portal = get_portal_from_record(sheet_rec)
-                    # print(f"Found {portal} for {sheet_rec['Portal1']}")
                     cur.execute("""
                         INSERT INTO Student
                           (franchiseid, firstname, lastname, grade,
@@ -260,12 +255,13 @@ def sync_students(target_fid: int | None = None) -> None:
                 # UPDATE vs SKIP
                 db_row = _fetch_db_row(conn, sid)
                 if _differs(db_row, sheet_rec):
+                    portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         UPDATE Student
                         SET grade = %s,
                             portal1 = %s, p1username = %s, p1password = %s,
                             portal2 = %s, p2username = %s, p2password = %s,
-                            passwordgood = %s
+                            passwordgood = %s, portal = %s
                         WHERE id = %s
                     """, (
                         _norm_space(sheet_rec["Grade"]),
@@ -276,6 +272,7 @@ def sync_students(target_fid: int | None = None) -> None:
                         _norm_space(sheet_rec["P2Username"]),
                         _norm_space(sheet_rec["P2Password"]),
                         _norm_int(sheet_rec["PasswordGood"]),
+                        portal,
                         sid,
                     ))
                     updates += 1

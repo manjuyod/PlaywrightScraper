@@ -23,11 +23,11 @@ class LoginError(Exception):
 import importlib
 # add portals that should be imported here as strings, along with the general substrings usually contained in their urls
 managed_portals = {
-    "classlink_newport": ["classlink"],
+    "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
     "parentvue_husd": ["parentvue"], # TODO: Unify parentvue and studentvue
-    "powerschool_lts_parent": ["powerschool"],
+    "powerschool": ["powerschool"],
     "studentvue_husd": ["parentvue"],
     "bghs_blackbaud": ["bishopgorman"],
     "aeries": ["aeries", "LoginParent.aspx"],
