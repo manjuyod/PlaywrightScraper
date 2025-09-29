@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import re
 from typing import List, Dict, Any, Optional, Tuple
 
+import playwright.async_api
+from playwright._impl._errors import TimeoutError
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, Frame
 from .base import PortalEngine
@@ -23,21 +25,36 @@ class InfiniteCampus(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
+        print(f"searching for {first_name}")
         #TODO: Insert LoginError logic
-        await self.page.goto(self.login_url, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(500)
-        await self.page.fill("#username", self.sid)
-        await self.page.fill("#password", self.pw)
-        await self.page.wait_for_timeout(1000) # give time between input and continue
-        await self.page.get_by_role('button', name="Log In").click()
-        await self.page.wait_for_load_state('networkidle')
-        await self.page.wait_for_timeout(1000)
-        if 'nav-wrapper' in self.page.url:
-            print("Successfully reached the home page")
-        else:
-            print("\t\t\tHome screen is not apparent")
-            raise LoginError
-        print("[IC] Logged in and on student/home.")
+        try:
+            await self.page.goto(self.login_url, wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(500)
+            await self.page.fill("#username", self.sid)
+            await self.page.fill("#password", self.pw)
+            await self.page.wait_for_timeout(1000) # give time between input and continue
+            await self.page.get_by_role('button', name="Log In").click()
+            await self.page.wait_for_load_state('networkidle')
+            await self.page.wait_for_timeout(1000)
+            if 'nav-wrapper' in self.page.url:
+                print("Successfully reached the home page")
+                await self.page.wait_for_load_state(timeout=10000)
+                await self.page.wait_for_timeout(1500)
+                # select for student if necessary
+                frame = self.page.frame(name="main-workspace")
+                try: # click the student with first name if it exists
+                    await frame.get_by_role('link', name=first_name).click()
+                except TimeoutError:
+                    pass
+            else:
+                print("\t\t\tHome screen is not apparent")
+                raise LoginError
+            print("[IC] Logged in and on student/home.")
+        except Exception as e:
+            print(e)
+        finally:
+            pass
+            # await self.page.pause()
 
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
@@ -47,9 +64,8 @@ class InfiniteCampus(PortalEngine):
     )
     async def fetch_grades(self) -> Dict[str, Any]:
         """Collect grades from the grade tab"""
-        # finish nav from login
         await self.page.wait_for_load_state()
-        await self.page.wait_for_timeout(1500)  # small hard wait for Angular to attach
+        await self.page.wait_for_timeout(1500)
         # get grades
         try:
             await self.page.wait_for_selector('#menu-toggle-button')
@@ -59,13 +75,18 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_url("**/grades*", timeout = 20000)
             await self.page.wait_for_load_state("networkidle")
             frame = self.page.frame(name="main-workspace")
-            if ("chandleraz" in  self.page.url):
+            if "chandleraz" in self.page.url:
                 await frame.get_by_text("Q2").click()
+            else:
+                try:
+                    qt2 = frame.get_by_text("QT2")
+                    await qt2.wait_for(timeout = 1000)
+                    await qt2.click()
+                except TimeoutError:
+                    pass
             await frame.wait_for_selector("div.collapsible-card.grades__card", timeout=15000)
             cards = await frame.query_selector_all("div.collapsible-card.grades__card")
             print(f"{len(cards)} cards found:")
-            # for card in cards: 
-            #     print(card)
             # no soup, angular sucks
             # now try to parse the page
             parsed_dict = {}
@@ -82,30 +103,26 @@ class InfiniteCampus(PortalEngine):
                 grade_str: str = await grade_elem[grade_index].inner_text() 
                 # print(f"course: {course} grade: {grade_str}") # debug
                 try:
-                    grade = float(grade_str.replace("(", "").replace(")", "").replace("%", ""))
+                    grade = float(grade_str
+                                  .replace("(", "")
+                                  .replace(")", "")
+                                  .replace("%", ""))
                 except ValueError: # not a number grade
                     continue 
                 parsed_dict[course] = grade
-                # print(f"course: {} grade: {await grade[1].inner_text()}")
-            # Optional debug dump
-            #out_dir = Path(__file__).resolve().parents[2] / "output" / "debug"
-            #out_dir.mkdir(parents=True, exist_ok=True)
-            #dump = out_dir / f"home-notifications-{datetime.now().strftime('%Y%m%d-%H%M%S')}.html"
-            #dump.write_text(html, encoding="utf-8")
-            #print(f"[IC] Wrote notifications HTML → {dump}")
+
             print(parsed_dict)
-            # like_name = (getattr(self, "student_name", None) or "").strip()
-            # parsed_dict = self._parse_semester_from_notifications(html, first_name=like_name)
-            # ^ parsed_dict is already {"Course": 93.4 or "A", ...}
+            # await self.page.pause()
             return {
                 "parsed_grades": parsed_dict
             }
         except Exception as e:
             print(f"{type(e)}: {e}")
         finally:
-            print("finished fetching") 
+            print("finished fetching")
+            await self.page.context.tracing.stop()
             # await self.page.pause()
     # ---------------------- LOGOUT ----------------------
     async def logout(self) -> None:
-        await self.page.goto(self.LOGOFF)
+        # await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)

@@ -136,6 +136,7 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
         # Must have non-empty names to be considered valid
         if rec["firstname"] or rec["lastname"]:
             out.append(rec)
+            # print(f"Portal: {rec['Portal1']}")
 
     return out
 
@@ -185,19 +186,30 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
                 return True
     return False
 
+from scraper.portals import managed_portals
+def get_portal_from_record(record: dict) -> str | None:
+    """Sorts portal links into 'buckets' defined from portals that we currently manage"""
+    portal_link = record["Portal1"]
+    for portal, rules in managed_portals.items():
+        for rule in rules:
+            if rule in portal_link:
+                return portal
+    return None
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Main sync
 
-def sync_students() -> None:
+def sync_students(target_fid: int | None = None) -> None:
     conn = db_conn()
     gc = _gc_client()
     sheet_map = _load_sheet_map(conn)
-
     cur = conn.cursor(cursor_factory=DictCursor)
 
     total_ins = total_upd = total_del = total_skp = 0
 
     for fid, sheet_id in sheet_map.items():
+        if target_fid and fid != target_fid:
+            continue
         print(f"\n--- Franchise {fid} ---")
         sheet_rows = _read_login_master(gc, sheet_id)
         parsed_count = len(sheet_rows)
@@ -222,7 +234,6 @@ def sync_students() -> None:
         db_key_to_id = _load_db_keys_for_franchise(conn, fid)
 
         inserts = updates = deletes = skips = 0
-
         # Transaction per franchise
         cur.execute("BEGIN")
         try:
@@ -230,16 +241,16 @@ def sync_students() -> None:
             for key in target_keys:
                 sheet_rec = target_map[key]
                 sid = db_key_to_id.get(key)
-
                 if sid is None:
                     # INSERT
+                    portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         INSERT INTO Student
                           (franchiseid, firstname, lastname, grade,
                            portal1, p1username, p1password,
-                           portal2, p2username, p2password, passwordgood)
+                           portal2, p2username, p2password, passwordgood, portal)
                         VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         fid,
                         _norm_space(sheet_rec["firstname"]),
@@ -259,12 +270,13 @@ def sync_students() -> None:
                 # UPDATE vs SKIP
                 db_row = _fetch_db_row(conn, sid)
                 if _differs(db_row, sheet_rec):
+                    portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         UPDATE Student
                         SET grade = %s,
                             portal1 = %s, p1username = %s, p1password = %s,
                             portal2 = %s, p2username = %s, p2password = %s,
-                            passwordgood = %s
+                            passwordgood = %s, portal = %s
                         WHERE id = %s
                     """, (
                         _norm_space(sheet_rec["grade"]),
@@ -313,8 +325,17 @@ def sync_students() -> None:
     print(f"\n=== GRAND TOTALS ===")
     print(f"inserts={total_ins} updates={total_upd} skips={total_skp} deletes={total_del}")
 
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="Pull grade/login tabs from Google Sheets to DB per franchise.")
+    p.add_argument("--franchise-id", "--fid", type=int, default=None,
+                   help="Only process this FranchiseID. If omitted, process all known franchises.")
+    return p.parse_args()
+
 def main() -> None:
-    sync_students()
+    args = _parse_args()
+    target_fid: int | None = args.franchise_id or None
+    sync_students(target_fid)
 
 if __name__ == "__main__":
     main()

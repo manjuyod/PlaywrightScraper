@@ -22,10 +22,8 @@ def canonicalize_course(text: str) -> str:
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
-@register_portal("powerschool_lts_parent")
-class PowerSchoolLTSParent(PortalEngine):
-    LOGIN = "https://lts.powerschool.com/public/home.html"
-
+@register_portal("powerschool")
+class PowerSchool(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -33,7 +31,7 @@ class PowerSchoolLTSParent(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         # 1) Load login page
-        await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
+        await self.page.goto(self.login_url, wait_until="domcontentloaded")
         await self.page.wait_for_timeout(500)
 
         # 2) Fill & submit
@@ -52,10 +50,14 @@ class PowerSchoolLTSParent(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         # grab full HTML
         html = await self.page.content()
-        parsed = self._parse_gradebook(html)
+        try:
+            parsed = self._parse_gradebook(html)
+            print(parsed)
+        finally: pass
         return {"parsed_grades": parsed}
 
-    def _parse_gradebook(self, html: str) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_gradebook(html: str) -> Dict[str, Any]:
         """
         Parse PowerSchool LTS table rows into { course_name: value }.
         Prefers the last <a class="bold">…</a> in each row (current term).
@@ -79,7 +81,7 @@ class PowerSchoolLTSParent(PortalEngine):
                 results[course] = ""
                 continue
 
-            link = bold_links[-1]
+            link = bold_links[0]
             text = link.get_text("\n", strip=True)
             parts = text.splitlines()
 
@@ -92,9 +94,4 @@ class PowerSchoolLTSParent(PortalEngine):
                 value = "" if letter.upper() in ("N/A", "-", "") else letter
 
             results[course] = value
-
         return results
-
-    async def logout(self) -> None:
-        # nothing special to click—just let the session expire
-        await self.page.wait_for_timeout(300)
