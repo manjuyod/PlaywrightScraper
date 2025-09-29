@@ -21,6 +21,7 @@ Requirements:
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import time
@@ -136,7 +137,7 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
         # Must have non-empty names to be considered valid
         if rec["firstname"] or rec["lastname"]:
             out.append(rec)
-            # print(f"Portal: {rec['Portal1']}")
+            # print(f"Portal: {rec['']}")
 
     return out
 
@@ -189,7 +190,7 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
 from scraper.portals import managed_portals
 def get_portal_from_record(record: dict) -> str | None:
     """Sorts portal links into 'buckets' defined from portals that we currently manage"""
-    portal_link = record["Portal1"]
+    portal_link = record["portal1"]
     for portal, rules in managed_portals.items():
         for rule in rules:
             if rule in portal_link:
@@ -243,14 +244,15 @@ def sync_students(target_fid: int | None = None) -> None:
                 sid = db_key_to_id.get(key)
                 if sid is None:
                     # INSERT
+                    weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
                     portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         INSERT INTO Student
                           (franchiseid, firstname, lastname, grade,
                            portal1, p1username, p1password,
-                           portal2, p2username, p2password, passwordgood, portal)
+                           portal2, p2username, p2password, passwordgood, portal, weeklydata)
                         VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         fid,
                         _norm_space(sheet_rec["firstname"]),
@@ -263,6 +265,8 @@ def sync_students(target_fid: int | None = None) -> None:
                         _norm_space(sheet_rec["p2username"]),
                         _norm_space(sheet_rec["p2password"]),
                         _norm_int(sheet_rec["passwordgood"]),
+                        portal,
+                        json.dumps(weeklydata)
                     ))
                     inserts += 1
                     continue
@@ -287,6 +291,7 @@ def sync_students(target_fid: int | None = None) -> None:
                         _norm_space(sheet_rec["p2username"]),
                         _norm_space(sheet_rec["p2password"]),
                         _norm_int(sheet_rec["passwordgood"]),
+                        portal,
                         sid,
                     ))
                     updates += 1
