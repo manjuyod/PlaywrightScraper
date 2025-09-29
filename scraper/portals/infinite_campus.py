@@ -38,13 +38,14 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_timeout(1000)
             if 'nav-wrapper' in self.page.url:
                 print("Successfully reached the home page")
-                await self.page.wait_for_load_state()
+                await self.page.wait_for_load_state(timeout=10000)
                 await self.page.wait_for_timeout(1500)
                 # select for student if necessary
                 frame = self.page.frame(name="main-workspace")
-                target = frame.get_by_role('link', name=first_name)
-                if await target.count() > 0:
-                    await target.click()
+                try: # click the student with first name if it exists
+                    await frame.get_by_role('link', name=first_name).click()
+                except TimeoutError:
+                    pass
             else:
                 print("\t\t\tHome screen is not apparent")
                 raise LoginError

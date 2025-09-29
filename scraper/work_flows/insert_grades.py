@@ -6,7 +6,6 @@ import pathlib
 from datetime import date, timedelta
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
-DB_PATH = PROJECT_ROOT / "config/students.db"
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
 def get_monday_anchor() -> str:
@@ -37,7 +36,7 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
 def insert_grades():
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
-    print(f"DB: {DB_PATH}")
+    print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
 
     try:
