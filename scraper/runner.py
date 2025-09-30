@@ -127,7 +127,7 @@ async def scrape_one(pw: Playwright, student: dict):
         Engine = get_portal(student["portal"])
     except ValueError as e:
         await browser.close()
-        return e
+        raise e
     scraper = Engine(
         page,
         student["id"],
@@ -213,6 +213,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
+                        "db_id": student["db_id"],
                         "student_id": student["id"],
                         "error": f"{type(e).__name__}: {e}",
                         "traceback": format_exception_only(type(e), e)

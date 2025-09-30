@@ -23,36 +23,37 @@ class Aeries(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_not_exception_type(LoginError),
+        retry=retry_if_exception_type(TimeoutError),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the Aeries parent portal."""
         try:
             await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=10000)
+            await self.page.goto(self.login_url, timeout=60000) # it should never take 60 seconds to reach the page, just for safety
             # Username
             await self.page.fill("input#portalAccountUsername", self.sid)
             await self.page.wait_for_timeout(2000)
             await self.page.locator("#next").click()
-
-            if 'nmusd' in self.login_url: #newport mesa needs sign in with google
-                await self.page.locator("#LoginButton").click()
-                await self.google_signin()
-                await self.page.wait_for_timeout(5000)
-                await self.page.wait_for_url('**/Dashboard**', timeout=10000)
-            else:
-                # Password
-                await self.page.fill("input#portalAccountPassword", self.pw)
+            # Password or Google Sign in
+            try:
+                await self.page.fill("input#portalAccountPassword", self.pw, timeout=3000)
                 await self.page.wait_for_timeout(2000)
                 await self.page.locator("#LoginButton").click()
-                #handle failed login
-                error_box: Locator = self.page.locator("#errorContainer")
-                if await error_box.is_visible():
-                    error_msg = await self.page.locator("#errorMessage").inner_text()
-                    print(f"Login Error: {error_msg}")
-                    raise LoginError(error_msg)
-            await self.page.wait_for_load_state('load', timeout=45000)
+            except TimeoutError: # password field DNE, must be Google signin
+                await self.page.locator("#LoginButton").click()
+                await self.google_signin()
+
+
+            #handle failed login
+            error_box: Locator = self.page.locator("#errorContainer")
+            if await error_box.is_visible():
+                error_msg = await self.page.locator("#errorMessage").inner_text()
+                print(f"Login Error: {error_msg}")
+                raise LoginError(error_msg)
+
+            await self.page.wait_for_url('**/Dashboard**', timeout=30000)
+            await self.page.wait_for_load_state(timeout=45000)
         except Exception as e:
             print(e)
         finally:
@@ -77,7 +78,7 @@ class Aeries(PortalEngine):
 
         # get class table
         class_table = soup.find('div', id="divClass")
-        if 'nmusd' not in self.login_url:  # for all aeries except nmusd, nav to the students alternate profile
+        if 'nmusd' not in self.login_url:
             if class_table is None: # failed to find class table
                 await self.page.click("#StudentNameDropDown")
                 await self.page.click("#StudentNameDropDownMenu")
@@ -87,7 +88,8 @@ class Aeries(PortalEngine):
                 soup = await self.get_soup()
                 class_table = soup.find('div', id='divClass')
             # parse the class table
-            class_cards = class_table.select('div.Card.CardWithPeriod')
+            class_cards = class_table.select('div.Card')
+            print(f"[AERIES] found {len(class_cards)} courses")
             for card in class_cards:  # parse the cards
                 # course name
                 class_link = card.find("a", class_="TextHeading")
@@ -124,8 +126,8 @@ class Aeries(PortalEngine):
                 if grade > 0:
                     # add to dictionary
                     courses_dict[course_name.upper()] = grade
-        print(f"[AERIES] found {len(courses_dict)}: {courses_dict}")
-                # await self.page.pause()
+        print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
+        # await self.page.pause()
         return {"parsed_grades": courses_dict}
 
     # helper
