@@ -14,7 +14,7 @@ def register_portal(key: str) -> Callable[[Type[PortalEngine]], Type[PortalEngin
 def get_portal(key: str) -> Type[PortalEngine]:
     try:
         return _REGISTRY[key.lower()]
-    except KeyError:  # nicer error than raw KeyError
+    except (KeyError, AttributeError):  # nicer error than raw KeyError
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
 class LoginError(Exception):
@@ -26,9 +26,9 @@ managed_portals = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
-    "parentvue_husd": ["parentvue"], # TODO: Unify parentvue and studentvue
+    "parentvue_husd": ["parentvue", "Login_Parent"], # TODO: Unify parentvue and studentvue
     "powerschool": ["powerschool"],
-    "studentvue_husd": ["parentvue"],
+    "studentvue_husd": ["parentvue", "Login_Student"],
     "bghs_blackbaud": ["bishopgorman"],
     "aeries": ["aeries", "LoginParent.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],
