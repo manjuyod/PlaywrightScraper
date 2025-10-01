@@ -123,8 +123,11 @@ async def scrape_one(pw: Playwright, student: dict):
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
     
-    
-    Engine = get_portal(student["portal"])
+    try:
+        Engine = get_portal(student["portal"])
+    except ValueError as e:
+        await browser.close()
+        raise e
     scraper = Engine(
         page,
         student["id"],
@@ -162,7 +165,6 @@ async def scrape_one(pw: Playwright, student: dict):
             html_file.write_text(grades["raw_html"], encoding="utf-8")
             # not included in final payload by design, but keeps debug artifact
         return {"db_id": student["db_id"], "id": student["id"], "parsed_grades": parsed}
-
     finally:
         await browser.close()
 
@@ -211,6 +213,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
+                        "db_id": student["db_id"],
                         "student_id": student["id"],
                         "error": f"{type(e).__name__}: {e}",
                         "traceback": format_exception_only(type(e), e)
