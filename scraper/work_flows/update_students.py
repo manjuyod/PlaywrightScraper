@@ -161,7 +161,7 @@ def _fetch_db_row(conn: connection, student_id: int) -> dict:
     cur = conn.cursor(cursor_factory=DictCursor)
     cur.execute("""
         SELECT grade, portal1, p1Username, p1password,
-               portal2, p2username, p2password, passwordgood
+               portal2, p2username, p2password, passwordgood, portal
         FROM Student
         WHERE id = %s
     """, (student_id,))
@@ -191,10 +191,16 @@ from scraper.portals import managed_portals
 def get_portal_from_record(record: dict) -> str | None:
     """Sorts portal links into 'buckets' defined from portals that we currently manage"""
     portal_link = record["portal1"]
+    # print(f'\n{portal_link}')
     for portal, rules in managed_portals.items():
+        # print(portal)
         for rule in rules:
+            # print(f'\t {rule}')
+            # print(rule in portal_link)
             if rule in portal_link:
+                # print(f'found {portal} for {portal_link}')
                 return portal
+    print(f"No portal found for {portal_link}")
     return None
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -273,7 +279,7 @@ def sync_students(target_fid: int | None = None) -> None:
 
                 # UPDATE vs SKIP
                 db_row = _fetch_db_row(conn, sid)
-                if _differs(db_row, sheet_rec):
+                if _differs(db_row, sheet_rec) or db_row['portal'] is None:
                     portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         UPDATE Student
