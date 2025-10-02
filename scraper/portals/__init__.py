@@ -26,9 +26,8 @@ managed_portals = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
-    "parentvue_husd": ["parentvue", "Login_Parent"], # TODO: Unify parentvue and studentvue
+    "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
-    "studentvue_husd": ["parentvue", "Login_Student"],
     "bghs_blackbaud": ["bishopgorman"],
     "aeries": ["aeries", "LoginParent.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],

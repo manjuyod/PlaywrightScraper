@@ -6,40 +6,55 @@ from bs4 import BeautifulSoup
 import re
 
 from scraper.portals.base import PortalEngine
-from scraper.portals import register_portal
+from scraper.portals import register_portal, LoginError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
-@register_portal("parentvue_husd")
-class ParentVUE_HUSD(PortalEngine):
-    LOGIN = "https://parentvue.husd.org/PXP2_Login_Parent.aspx"
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
-    )
+@register_portal("parentvue")
+class ParentVUE(PortalEngine):
+    # @retry(
+    #     stop=stop_after_attempt(3),
+    #     wait=wait_exponential(multiplier=1, min=2, max=10),
+    #     retry=retry_if_exception_type(PlaywrightTimeout),
+    # )
     async def login(self, first_name: Optional[str] = None) -> None:
-        # 1) Load login page
-        await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(400)
+        try:
+            print(self.login_url)
+            # 1) Load login page
+            await self.page.goto(self.login_url, wait_until='domcontentloaded', timeout=30000)
+            await self.page.wait_for_timeout(400)
 
-        # 2) Fill & submit
-        await self.page.fill("#ctl00_MainContent_username", self.sid)
-        await self.page.fill("#ctl00_MainContent_password", self.pw)
-        await self.page.click("#ctl00_MainContent_Submit1")
+            # 2) Fill & submit
+            await self.page.fill("#ctl00_MainContent_username", self.sid)
+            await self.page.fill("#ctl00_MainContent_password", self.pw)
+            await self.page.click("#ctl00_MainContent_Submit1")
 
-        # 3) Post-login settle without relying on networkidle
-        # 15 second pause more than suffices
-        await self.page.wait_for_timeout(8000)
-        await self.select_student(first_name)
+            if 'Login' in self.page.url:
+                print('We are still on login page page')
+                raise LoginError("No navigation after login")
+            await self.page.wait_for_timeout(1000) # wait some time to allow settling
+            await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)  # if we are on the home page, wait for it to load
+            # ensure that we select the correct student if there may be multiple
+            if 'Login_Parent' in self.login_url:
+                await self.select_student(first_name)
+            # nav to grades page given that we are on the home page
+            print(f"[PARENTVUE] Reached Home Page; Navigating to Gradebook for {first_name}")
+            await self.page.get_by_role("listitem").filter(has_text="Grade Book").click()
+            await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
+        except Exception as e:
+            print(e)
+            raise e
+        finally:
+            await self.page.context.tracing.stop()
+            # await self.page.pause()
+
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    async def select_student(self, first_name: Optional[str] = None) -> str:
+    async def select_student(self, first_name: Optional[str] = None):
         """
         Open the student dropdown, click the matching student,
         grab its data-agu, then fetch and return the Gradebook HTML.
@@ -47,7 +62,7 @@ class ParentVUE_HUSD(PortalEngine):
         target = (first_name or getattr(self, "student_name", "") or "").strip()
         if not target:
             raise RuntimeError("No first_name provided to select_student()")
-
+        print(f'[PARENTVUE] Selecting student {target}]')
         target_lc = target.lower()
 
         # base selectors
@@ -66,10 +81,8 @@ class ParentVUE_HUSD(PortalEngine):
                 agu = await self.page.locator(f"{selector_root} .current .student-info").get_attribute("data-agu")
                 if not agu:
                     raise RuntimeError("Could not read data-agu from current student")
-                grade_url = f"https://parentvue.husd.org/PXP2_Gradebook.aspx?AGU={agu}"
-                print(f"[PARENTVUE] Already on {name}; AGU={agu}; navigating to grades")
-                await self.page.goto(grade_url, wait_until="domcontentloaded")
-                return await self.page.content()
+                print(f"[PARENTVUE] Already on {name}; abort selection")
+                return
         except Exception:
             # continue to the dropdown approach
             pass
@@ -93,28 +106,20 @@ class ParentVUE_HUSD(PortalEngine):
                 await info.click()
                 print(f"[PARENTVUE] Clicked student '{name}' (AGU={agu})")
                 break
-
         if not agu:
             raise RuntimeError(f"No dropdown student matched '{target}'")
 
-        # 4) Navigate to gradebook using that AGU
-        grade_url = f"https://parentvue.husd.org/PXP2_Gradebook.aspx?AGU={agu}"
-        print(f"[PARENTVUE] Navigating to Gradebook → {grade_url}")
-        await self.page.goto(grade_url, wait_until="domcontentloaded")
-        # give it a moment to render
-        await self.fetch_grades()
-        
     async def fetch_grades(self) -> Dict[str, Any]:
-        html = await self.page.content()
-        parsed = self._parse_gradebook(html)
+        soup = await self.get_soup()
+        parsed = self._parse_gradebook(soup)
         return {"parsed_grades": parsed}
-    
-    def _parse_gradebook(self, html: str) -> Dict[str, Any]:
+
+    @staticmethod
+    def _parse_gradebook(soup: BeautifulSoup) -> Dict[str, Any]:
         """
         Given the Gradebook HTML, extract each course + percentage (float)
         or letter (str), preferring % over letter.
         """
-        soup = BeautifulSoup(html, "html.parser")
         results: Dict[str, Any] = {}
 
         # 1) Find each header row for a class
@@ -158,7 +163,7 @@ class ParentVUE_HUSD(PortalEngine):
             if value is not None and not (isinstance(value, str) and value == ""):
                 results[course] = value
 
-        print(f"[PARENTVUE] Parsed {len(results)} courses: {list(results.items())[:3]}")
+        print(f"[PARENTVUE] Parsed {len(results)} courses: {list(results.items())}")
         return results
 
     async def logout(self) -> None:
