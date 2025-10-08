@@ -95,8 +95,10 @@ def _norm_int(x) -> int:
 def _open_by_key_retry(gc, sheet_id, retries=5):
     for attempt in range(1, retries + 1):
         try:
+            print('open by key, ', sheet_id)
             return gc.open_by_key(sheet_id)
         except APIError as e:
+            print(e)
             msg = str(e)
             if any(code in msg for code in ("503", "500", "502", "429")) and attempt < retries:
                 sleep = (2 ** attempt) + random.random()
@@ -110,16 +112,18 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     Read LoginMaster rows from a Google Sheet.
     Returns a list of dicts with normalized values.
     """
-    sh = _open_by_key_retry(gc, sheet_id) # this hangs on franchise 19 because of the number of sheets within the document
+    print('trying to open sheet')
+    sh = _open_by_key_retry(gc, sheet_id)
+    print('opened, try to get worksheet')
     try:
         ws = sh.worksheet(LOGIN_MASTER_TITLE)
     except gspread.WorksheetNotFound:
         print(f"[WARN] Sheet has no tab named '{LOGIN_MASTER_TITLE}' (id={sheet_id}); parsed 0 rows.")
         return []
-    # print("worksheet parsed")
+    print("collected worksheet")
     # get_all_records() reads the header row and returns list[dict]
     rows = ws.get_all_records()  # empty cells -> ''
-    # print("worksheet rows parsed", rows)
+    print("worksheet parsed")
     out: List[dict] = []
     for r in rows:
         rec = {
@@ -137,7 +141,6 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
         # Must have non-empty names to be considered valid
         if rec["firstname"] or rec["lastname"]:
             out.append(rec)
-            # print(f"Portal: {rec['']}")
 
     return out
 
@@ -207,10 +210,9 @@ def get_portal_from_record(record: dict) -> str | None:
 # Main sync
 
 def sync_students(target_fid: int | None = None) -> None:
-    conn = db_conn()
     gc = _gc_client()
-    sheet_map = _load_sheet_map(conn)
-    cur = conn.cursor(cursor_factory=DictCursor)
+    with db_conn() as conn:
+        sheet_map = _load_sheet_map(conn)
 
     total_ins = total_upd = total_del = total_skp = 0
 
@@ -238,99 +240,103 @@ def sync_students(target_fid: int | None = None) -> None:
             target_map[key] = r
 
         # DB keys (for comparison only)
-        db_key_to_id = _load_db_keys_for_franchise(conn, fid)
+        with db_conn() as conn:
+            db_key_to_id = _load_db_keys_for_franchise(conn, fid)
 
         inserts = updates = deletes = skips = 0
-        # Transaction per franchise
-        cur.execute("BEGIN")
-        try:
-            # INSERT / UPDATE / SKIP: iterate LoginMaster (sheet) and check DB
-            for key in target_keys:
-                sheet_rec = target_map[key]
-                sid = db_key_to_id.get(key)
-                if sid is None:
-                    # INSERT
-                    weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
-                    portal = get_portal_from_record(sheet_rec)
-                    cur.execute("""
-                        INSERT INTO Student
-                          (franchiseid, firstname, lastname, grade,
-                           portal1, p1username, p1password,
-                           portal2, p2username, p2password, passwordgood, portal, weeklydata)
-                        VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        fid,
-                        _norm_space(sheet_rec["firstname"]),
-                        _norm_space(sheet_rec["lastname"]),
-                        _norm_space(sheet_rec["grade"]),
-                        _norm_space(sheet_rec["portal1"]),
-                        _norm_space(sheet_rec["p1username"]),
-                        _norm_space(sheet_rec["p1password"]),
-                        _norm_space(sheet_rec["portal2"]),
-                        _norm_space(sheet_rec["p2username"]),
-                        _norm_space(sheet_rec["p2password"]),
-                        _norm_int(sheet_rec["passwordgood"]),
-                        portal,
-                        json.dumps(weeklydata)
-                    ))
-                    inserts += 1
-                    continue
 
-                # UPDATE vs SKIP
-                db_row = _fetch_db_row(conn, sid)
-                if _differs(db_row, sheet_rec) or db_row['portal'] is None:
-                    portal = get_portal_from_record(sheet_rec)
-                    cur.execute("""
-                        UPDATE Student
-                        SET grade = %s,
-                            portal1 = %s, p1username = %s, p1password = %s,
-                            portal2 = %s, p2username = %s, p2password = %s,
-                            passwordgood = %s, portal = %s
-                        WHERE id = %s
-                    """, (
-                        _norm_space(sheet_rec["grade"]),
-                        _norm_space(sheet_rec["portal1"]),
-                        _norm_space(sheet_rec["p1username"]),
-                        _norm_space(sheet_rec["p1password"]),
-                        _norm_space(sheet_rec["portal2"]),
-                        _norm_space(sheet_rec["p2username"]),
-                        _norm_space(sheet_rec["p2password"]),
-                        _norm_int(sheet_rec["passwordgood"]),
-                        portal,
-                        sid,
-                    ))
-                    updates += 1
+        with db_conn() as conn:
+            cur = conn.cursor(cursor_factory=DictCursor)
+            # Transaction per franchise
+            cur.execute("BEGIN")
+            try:
+                # INSERT / UPDATE / SKIP: iterate LoginMaster (sheet) and check DB
+                for key in target_keys:
+                    sheet_rec = target_map[key]
+                    sid = db_key_to_id.get(key)
+                    if sid is None:
+                        # INSERT
+                        weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
+                        portal = get_portal_from_record(sheet_rec)
+                        cur.execute("""
+                            INSERT INTO Student
+                              (franchiseid, firstname, lastname, grade,
+                               portal1, p1username, p1password,
+                               portal2, p2username, p2password, passwordgood, portal, weeklydata)
+                            VALUES
+                              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            fid,
+                            _norm_space(sheet_rec["firstname"]),
+                            _norm_space(sheet_rec["lastname"]),
+                            _norm_space(sheet_rec["grade"]),
+                            _norm_space(sheet_rec["portal1"]),
+                            _norm_space(sheet_rec["p1username"]),
+                            _norm_space(sheet_rec["p1password"]),
+                            _norm_space(sheet_rec["portal2"]),
+                            _norm_space(sheet_rec["p2username"]),
+                            _norm_space(sheet_rec["p2password"]),
+                            _norm_int(sheet_rec["passwordgood"]),
+                            portal,
+                            json.dumps(weeklydata)
+                        ))
+                        inserts += 1
+                        continue
+
+                    # UPDATE vs SKIP
+                    db_row = _fetch_db_row(conn, sid)
+                    if _differs(db_row, sheet_rec) or db_row['portal'] is None:
+                        portal = get_portal_from_record(sheet_rec)
+                        cur.execute("""
+                            UPDATE Student
+                            SET grade = %s,
+                                portal1 = %s, p1username = %s, p1password = %s,
+                                portal2 = %s, p2username = %s, p2password = %s,
+                                passwordgood = %s, portal = %s
+                            WHERE id = %s
+                        """, (
+                            _norm_space(sheet_rec["grade"]),
+                            _norm_space(sheet_rec["portal1"]),
+                            _norm_space(sheet_rec["p1username"]),
+                            _norm_space(sheet_rec["p1password"]),
+                            _norm_space(sheet_rec["portal2"]),
+                            _norm_space(sheet_rec["p2username"]),
+                            _norm_space(sheet_rec["p2password"]),
+                            _norm_int(sheet_rec["passwordgood"]),
+                            portal,
+                            sid,
+                        ))
+                        updates += 1
+                    else:
+                        skips += 1
+
+                # DELETE: DB keys that are not in SHEET (with guard)
+                if parsed_count >= MIN_ROWS_FOR_DELETE:
+                    sheet_key_set = set(target_keys)
+                    db_key_set = set(db_key_to_id.keys())
+                    to_delete = db_key_set - sheet_key_set
+                    for dkey in to_delete:
+                        cur.execute("""
+                            DELETE FROM Student
+                            WHERE franchiseid = %s
+                              AND LOWER(TRIM(firstname)) = %s
+                              AND LOWER(TRIM(lastname))  = %s
+                        """, (dkey[0], dkey[1], dkey[2]))
+                        deletes += 1
                 else:
-                    skips += 1
+                    print(f"[WARN] FID={fid}: Only {parsed_count} rows parsed; skipping DELETE phase.")
 
-            # DELETE: DB keys that are not in SHEET (with guard)
-            if parsed_count >= MIN_ROWS_FOR_DELETE:
-                sheet_key_set = set(target_keys)
-                db_key_set = set(db_key_to_id.keys())
-                to_delete = db_key_set - sheet_key_set
-                for dkey in to_delete:
-                    cur.execute("""
-                        DELETE FROM Student
-                        WHERE franchiseid = %s
-                          AND LOWER(TRIM(firstname)) = %s
-                          AND LOWER(TRIM(lastname))  = %s
-                    """, (dkey[0], dkey[1], dkey[2]))
-                    deletes += 1
-            else:
-                print(f"[WARN] FID={fid}: Only {parsed_count} rows parsed; skipping DELETE phase.")
+                conn.commit()
 
-            conn.commit()
+            except Exception as e:
+                conn.rollback()
+                print(f"[ERROR] FID={fid}: rolled back due to error: {e}")
+                continue
 
-        except Exception as e:
-            conn.rollback()
-            print(f"[ERROR] FID={fid}: rolled back due to error: {e}")
-            continue
-
-        total_ins += inserts
-        total_upd += updates
-        total_del += deletes
-        total_skp += skips
+            total_ins += inserts
+            total_upd += updates
+            total_del += deletes
+            total_skp += skips
         print(f"[SUMMARY] FID={fid} inserts={inserts} updates={updates} skips={skips} deletes={deletes}")
 
     print(f"\n=== GRAND TOTALS ===")

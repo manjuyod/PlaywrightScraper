@@ -12,8 +12,9 @@ from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
-from scraper.portals import get_portal, LoginError
+from scraper.portals import get_portal
 from typing import Dict, List
+from scraper.portals.base import PortalEngine
 load_dotenv()
 from time import time
 
@@ -147,7 +148,7 @@ async def scrape_one(pw: Playwright, student: dict):
         try:
             await scraper.login(first_name=student.get("student_name"))
         except Exception as e:
-            raise LoginError(e)
+            raise scraper.LoginError(e)
         print(f"Login successful for {student['id']}, fetching grades…")
         grades = await scraper.fetch_grades()
 
@@ -201,7 +202,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]")
                 except Exception as e:
                     # mark this student’s password as bad
-                    if isinstance(e, LoginError):
+                    if isinstance(e, PortalEngine.LoginError):
                         with db_conn() as conn:
                             cur = conn.cursor()
                             cur.execute(

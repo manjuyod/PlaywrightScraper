@@ -17,8 +17,6 @@ def get_portal(key: str) -> Type[PortalEngine]:
     except (KeyError, AttributeError):  # nicer error than raw KeyError
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
-class LoginError(Exception):
-    pass
 
 import importlib
 # add portals that should be imported here as strings, along with the general substrings usually contained in their urls
