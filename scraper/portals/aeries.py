@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime, timedelta  # ← added timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import bs4
-from bs4 import BeautifulSoup
+from playwright.async_api import Locator
 from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential, retry_if_not_exception_type, RetryError)
-from .base import PortalEngine
-from . import register_portal, LoginError
-from playwright.async_api import Locator, Dialog, TimeoutError, Page
+                      wait_exponential)
+
+from . import register_portal
+from .base import PortalEngine, PlaywrightTimeout
+
 
 @register_portal("aeries")
 class Aeries(PortalEngine):
@@ -23,7 +22,7 @@ class Aeries(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(TimeoutError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
@@ -47,10 +46,12 @@ class Aeries(PortalEngine):
 
             #handle failed login
             error_box: Locator = self.page.locator("#errorContainer")
-            if await error_box.is_visible():
-                error_msg = await self.page.locator("#errorMessage").inner_text()
-                print(f"Login Error: {error_msg}")
-                raise LoginError(error_msg)
+            await self.raise_if_login_error(await error_box.is_visible())
+
+            # if await error_box.is_visible():
+            #     error_msg = await self.page.locator("#errorMessage").inner_text()
+            #     print(f"Login Error: {error_msg}")
+            #     raise LoginError(error_msg)
 
             await self.page.wait_for_url('**/Dashboard**', timeout=30000)
             await self.page.wait_for_load_state(timeout=45000)
@@ -63,14 +64,13 @@ class Aeries(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(TimeoutError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
         """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
         print("\nfetching grades")
         # ensure we have reached the next page
-        if "Dashboard" not in self.page.url:
-            raise LoginError
+        await self.raise_if_login_error("Dashboard" not in self.page.url)
         await self.page.wait_for_timeout(3000) # wait some to allow population
 
         soup = await self.get_soup()
@@ -78,7 +78,7 @@ class Aeries(PortalEngine):
 
         # get class table
         class_table = soup.find('div', id="divClass")
-        if 'nmusd' not in self.login_url:
+        if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
             if class_table is None: # failed to find class table
                 await self.page.click("#StudentNameDropDown")
                 await self.page.click("#StudentNameDropDownMenu")
@@ -114,7 +114,7 @@ class Aeries(PortalEngine):
             course_table = table.select("tr[id$='ReadRow1']")
             print(course_table)
             for course in course_table:
-                course_name = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
+                course_name: bs4.Tag = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
                 course_name.find('label').decompose()
                 course_name = course_name.get_text(strip=True)
 

@@ -42,13 +42,7 @@ class Microsoft(PortalEngine):
         """
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
         await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        # Fill username and password
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        # Short pause to ensure fields are recognized
-        await self.page.wait_for_timeout(200)
-        # Press Enter in password field to submit the form
-        await self.page.locator('.form-group input[name="password"]').press("Enter")
+        await self.microsoft_login()
         # Wait until the URL contains "home" indicating successful login
         await self.page.wait_for_url(lambda url: "home" in url, timeout=15_000)
         # Wait for network to be idle to ensure the home page is fully loaded

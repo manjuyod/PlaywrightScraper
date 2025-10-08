@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, Frame
 from .base import PortalEngine
-from . import register_portal, LoginError  # helper we'll create in __init__.py
+from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
 
 
@@ -38,8 +38,7 @@ class StudentConnection(PortalEngine):
         await self.page.wait_for_url(lambda url: "PortalMainPage" in url, timeout=20_000)
         # Wait for network to be idle to ensure the home page has loaded
         await self.page.wait_for_load_state("networkidle")
-        if  self.page.get_by_text("Login Not Found") is not None:
-            raise LoginError("Login Not Found")
+        await self.raise_if_login_error(self.page.get_by_text("Login Not Found") is not None)
         # Stop tracing after login
         await self.page.context.tracing.stop()
     @retry(

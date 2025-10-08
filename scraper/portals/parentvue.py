@@ -5,18 +5,17 @@ from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
 import re
 
-from scraper.portals.base import PortalEngine
-from scraper.portals import register_portal, LoginError
+from scraper.portals.base import PortalEngine, PlaywrightTimeout
+from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 @register_portal("parentvue")
 class ParentVUE(PortalEngine):
-    # @retry(
-    #     stop=stop_after_attempt(3),
-    #     wait=wait_exponential(multiplier=1, min=2, max=10),
-    #     retry=retry_if_exception_type(PlaywrightTimeout),
-    # )
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+    )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
             print(self.login_url)
@@ -29,9 +28,8 @@ class ParentVUE(PortalEngine):
             await self.page.fill("#ctl00_MainContent_password", self.pw)
             await self.page.click("#ctl00_MainContent_Submit1")
 
-            if 'Login' in self.page.url:
-                print('We are still on login page page')
-                raise LoginError("No navigation after login")
+            await self.raise_if_login_error('Login' in self.page.url) # we should move past the login screen after clicking the login button
+
             await self.page.wait_for_timeout(1000) # wait some time to allow settling
             await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)  # if we are on the home page, wait for it to load
             # ensure that we select the correct student if there may be multiple
