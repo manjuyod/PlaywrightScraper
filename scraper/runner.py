@@ -55,7 +55,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal, YearStart, YearEnd
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal2, portal, YearStart, YearEnd
                 FROM Student
             """
             conditions = [
@@ -75,7 +75,6 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                 params.append(franchise_id)
 
             query = base + " WHERE " + " AND ".join(conditions)
-            print(query)
             cur.execute(query, params)
 
             for row in cur.fetchall():
@@ -89,6 +88,7 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "student_name": row["firstname"],
                         "id": row["p1username"],
                         "login_url": row["portal1"],
+                        "alt_portal_url": row["portal2"],
                         "password": row["p1password"],
                         "portal": row["portal"],
                         "auth_images": auth_images,  # only set when gps pictograph
@@ -123,14 +123,18 @@ async def scrape_one(pw: Playwright, student: dict):
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
     
-    
-    Engine = get_portal(student["portal"])
+    try:
+        Engine = get_portal(student["portal"])
+    except ValueError as e:
+        await browser.close()
+        raise e
     scraper = Engine(
         page,
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
-        login_url=student.get("login_url")
+        login_url=student.get("login_url"),
+        alt_portal_url=student.get("alt_portal_url")
     )
 
     # Only GPS uses pictograph answers
@@ -161,7 +165,6 @@ async def scrape_one(pw: Playwright, student: dict):
             html_file.write_text(grades["raw_html"], encoding="utf-8")
             # not included in final payload by design, but keeps debug artifact
         return {"db_id": student["db_id"], "id": student["id"], "parsed_grades": parsed}
-
     finally:
         await browser.close()
 
@@ -210,6 +213,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
+                        "db_id": student["db_id"],
                         "student_id": student["id"],
                         "error": f"{type(e).__name__}: {e}",
                         "traceback": format_exception_only(type(e), e)

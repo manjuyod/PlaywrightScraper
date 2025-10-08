@@ -49,15 +49,7 @@ class BlackbaudBGHS(PortalEngine):
             await self.page.wait_for_load_state()
             await self.page.wait_for_timeout(1000)
             
-            # GOOGLE SIGN-IN FLOW
-            # enter email
-            await self.page.fill("input#identifierId", self.sid)
-            await self.page.wait_for_timeout(3000)
-            await self.page.get_by_text("Next").click()
-            await self.page.wait_for_selector('input[name="Passwd"]')
-            await self.page.fill('input[name="Passwd"]', self.pw)
-            await self.page.wait_for_timeout(2000)
-            await self.page.get_by_role("button", name="Next").click() # click next
+            await self.google_signin()
             if "resourceboard" not in self.page.url:
                 await self.page.locator("#primary-button").click()
             await self.page.wait_for_load_state()
@@ -85,7 +77,7 @@ class BlackbaudBGHS(PortalEngine):
         await self.page.goto(self.GRADES_URL, wait_until="domcontentloaded", timeout=60_000)
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(2000)
-        soup = await self.getSoup()
+        soup = await self.get_soup()
         coursesTable = soup.find("div", id="coursesContainer")
         courses = coursesTable.select("div.row")
         courses_dict = {}

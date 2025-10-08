@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from . import register_portal 
 from .base import PortalEngine
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
+from scraper.portals.infinite_campus import InfiniteCampus
 # TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
 @register_portal("gps")
 class GPS(PortalEngine):
@@ -20,18 +20,16 @@ class GPS(PortalEngine):
 
     LOGIN = "https://gpsportal.gilberted.net/"
     HOME_WRAPPER = (
-        "https://gilbertaz.infinitecampus.org/"
-        "campus/nav-wrapper/parent/portal/parent/home?appName=gilbert"
+        "https://gilbertaz.infinitecampus.org/campus/nav-wrapper/student/portal/student/home?appName=gilbert"
     )
     LOGOFF = (
-        "https://gilbertaz.infinitecampus.org/campus/"
-        "portal/parents/gilbert.jsp?status=logoff"
+        "https://gilbertaz.infinitecampus.org/campus/portal/student/gilbert.jsp?status=logoff"
     )
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(TimeoutError),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
@@ -70,129 +68,29 @@ class GPS(PortalEngine):
             await self.page.locator(
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()
-            await self.page.wait_for_timeout(2000)
-
-        # (Optional) Navigate to Infinite Campus tile if present
-        try:
+            await self.page.wait_for_timeout(1000)
+        # nav to infinite campus portal
+        async with self.page.expect_popup(timeout=0) as popup:
             await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
-            await self.page.wait_for_timeout(200)
-            await self.page.wait_for_load_state("networkidle")
-        except Exception:
-            # If IC isn't part of your flow, it's safe to ignore.
-            pass
+            self.page = await popup.value
+            await self.page.wait_for_load_state()
+        await self.page.context.tracing.stop()
 
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(TimeoutError),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
-        """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
-        if "/home" not in self.page.url:
-            await self.page.goto(self.HOME_WRAPPER, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(1200)
-        await self.page.wait_for_load_state("networkidle")
-
-        html = await self.page.content()
-        like_name = (getattr(self, "student_name", None) or "").strip()
-        parsed_dict = self._parse_semester_from_notifications(html, first_name=like_name)
-
-        return {"parsed_grades": parsed_dict}
-
-    # ---------------------- PARSER ------------------------------------------
-    def _parse_semester_from_notifications(
-        self, html: str, first_name: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Parse 'Semester Grade' updates from notifications on HOME.
-        Example: "… has an updated grade of D (61.90%) in ALGEBRA II: Semester Grade"
-        → {"ALGEBRA II": 61.90}
-        """
-        soup = BeautifulSoup(html or "", "html.parser")
-        ul = soup.select_one("ul.notifications-dropdown__body")
-        if not ul:
-            print("[IC] No notifications list found.")
-            return {}
-
-        name_like = (first_name or "").strip().lower()
-
-        pat = re.compile(
-            r"has an updated grade of\s+"
-            r"(?:(?P<letter>[A-F][+-]?)\s*)?"
-            r"(?:\((?P<pct>\d{1,3}(?:\.\d+)?)%\))?\s+"
-            r"in\s+(?P<subject>.+?):\s*Semester Grade",
-            re.IGNORECASE,
-        )
-
-        def parse_notif_dt(txt: str) -> Optional[datetime]:
-            s = txt.strip()
-            now = datetime.now()
-            m_time = re.search(r"(\d{1,2}:\d{2}\s*(AM|PM))", s, re.IGNORECASE)
-            if s.lower().startswith("today"):
-                t = (
-                    datetime.strptime(m_time.group(1), "%I:%M %p").time()
-                    if m_time
-                    else datetime.strptime("12:00 PM", "%I:%M %p").time()
-                )
-                return datetime.combine(now.date(), t)
-            if s.lower().startswith("yesterday"):
-                t = (
-                    datetime.strptime(m_time.group(1), "%I:%M %p").time()
-                    if m_time
-                    else datetime.strptime("12:00 PM", "%I:%M %p").time()
-                )
-                return datetime.combine((now - timedelta(days=1)).date(), t)
-            for fmt in ("%a, %m/%d/%y", "%m/%d/%y"):
-                try:
-                    return datetime.strptime(s, fmt)
-                except ValueError:
-                    continue
-            return None
-
-        latest: Dict[str, Tuple[datetime, Any]] = {}
-
-        for li in ul.select("li.notification__container"):
-            a = li.select_one("a.notification__text")
-            d = li.select_one("p.notification__date")
-            if not a or not d:
-                continue
-
-            text = " ".join(a.get_text(" ", strip=True).split())
-            date_str = d.get_text(" ", strip=True)
-
-            if name_like and name_like not in text.lower():
-                continue
-
-            m = pat.search(text)
-            if not m:
-                continue
-
-            dt = parse_notif_dt(date_str) or datetime.min
-            subject = m.group("subject").strip()
-            letter = (m.group("letter") or "").strip() or None
-            pct = m.group("pct")
-
-            if pct is not None:
-                try:
-                    value: Any = float(pct)
-                except ValueError:
-                    value = pct
-            elif letter:
-                value = letter
-            else:
-                continue
-
-            if subject not in latest or dt > latest[subject][0]:
-                latest[subject] = (dt, value)
-
-        result = {subj: val for subj, (dt, val) in latest.items()}
-        print(f"[IC] Parsed {len(result)} semester-grade notifications (filtered by {first_name!r}).")
-        if result:
-            print("[IC] Sample:", list(result.items())[:3])
-        return result
-
-    # ---------------------- LOGOUT ----------------------
+    async def fetch_grades(self) -> Dict[str, Any] | None:
+        """Collect grades from the grade tab"""
+        # GPS uses Infinite Campus as their portal, GPS is just a login wrapper
+        try:
+            return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
+        finally:
+            # await self.page.pause()
+            pass
+            # ---------------------- LOGOUT ----------------------
     async def logout(self) -> None:
         await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)

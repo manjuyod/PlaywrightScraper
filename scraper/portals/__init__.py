@@ -14,13 +14,26 @@ def register_portal(key: str) -> Callable[[Type[PortalEngine]], Type[PortalEngin
 def get_portal(key: str) -> Type[PortalEngine]:
     try:
         return _REGISTRY[key.lower()]
-    except KeyError:  # nicer error than raw KeyError
+    except (KeyError, AttributeError):  # nicer error than raw KeyError
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
 class LoginError(Exception):
     pass
+
+import importlib
+# add portals that should be imported here as strings, along with the general substrings usually contained in their urls
+managed_portals = {
+    "classlink": ["classlink"],
+    "gps": ["gpsportal"],
+    "microsoft_benjamin_franklin": ["benjaminfranklincs"],
+    "parentvue_husd": ["parentvue", "Login_Parent"], # TODO: Unify parentvue and studentvue
+    "powerschool": ["powerschool"],
+    "studentvue_husd": ["parentvue", "Login_Student"],
+    "bghs_blackbaud": ["bishopgorman"],
+    "aeries": ["aeries", "LoginParent.aspx"],
+    "infinite_campus": ["campus/portal", "infinitecampus"],
+    "student_connection": ["studentconnect"]
+   }
 # Import engines so they register.
-from . import (classlink_newport, gps,
-               microsoft_benjamin_franklin, parentvue_husd,
-               powerschool_lts_parent, studentvue_husd,
-               bghs_blackbaud, aeries, infinite_campus)
+for portal in managed_portals.keys():
+    importlib.import_module(f".{portal}", __name__)

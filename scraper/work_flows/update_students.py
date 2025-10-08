@@ -5,7 +5,7 @@ update_students.py · PlaywrightScraper/work_flows
 Synchronize Student table from each franchise's LoginMaster sheet (source of truth).
 
 Actions per franchise:
-  • INSERT  — if (FranchiseID, FirstName, LastName) exists in sheet but not DB
+  • INSERT  — if (FranchiseID, firstname, lastname) exists in sheet but not DB
   • UPDATE  — if exists in both and any tracked field differs
   • SKIP    — if exists in both and nothing differs
   • DELETE  — if in DB but not in sheet (guarded to avoid accidental wipes)
@@ -14,19 +14,23 @@ Requirements:
   - Google service account JSON at repo root (default: sheet_mod_grades.json)
   - Spreadsheets table: FranchiseID, spreadsheet (Google Sheet URL)
   - LoginMaster tab with headers:
-      FirstName, LastName, Grade,
-      Portal1, P1Username, P1Password,
-      Portal2, P2Username, P2Password, PasswordGood
+      firstname, lastname, grade,
+      portal1, p1username, p1password,
+      portal2, p2username, p2password, passwordgood
 """
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import time
+import random
 from scraper.runner import db_conn, connection, DictCursor
 from typing import Dict, List
 
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -44,10 +48,10 @@ LOGIN_MASTER_TITLE = "LoginMaster"
 MIN_ROWS_FOR_DELETE = 3  # safety: require at least this many parsed rows to run deletes
 
 TRACKED_FIELDS = [
-    "Grade",
-    "Portal1", "P1Username", "P1Password",
-    "Portal2", "P2Username", "P2Password",
-    "PasswordGood",
+    "grade",
+    "portal1", "p1username", "p1password",
+    "portal2", "p2username", "p2password",
+    "passwordgood",
 ]
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -87,13 +91,26 @@ def _norm_int(x) -> int:
         return int(x)
     except Exception:
         return 0
+    
+def _open_by_key_retry(gc, sheet_id, retries=5):
+    for attempt in range(1, retries + 1):
+        try:
+            return gc.open_by_key(sheet_id)
+        except APIError as e:
+            msg = str(e)
+            if any(code in msg for code in ("503", "500", "502", "429")) and attempt < retries:
+                sleep = (2 ** attempt) + random.random()
+                print(f"[WARN] transient Sheets error ({msg.split(':',1)[0]}) — retry {attempt}/{retries} in {sleep:.1f}s...")
+                time.sleep(sleep)
+                continue
+            raise
 
 def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     """
     Read LoginMaster rows from a Google Sheet.
     Returns a list of dicts with normalized values.
     """
-    sh = gc.open_by_key(sheet_id) # this hangs on franchise 19 because of the number of sheets within the document
+    sh = _open_by_key_retry(gc, sheet_id) # this hangs on franchise 19 because of the number of sheets within the document
     try:
         ws = sh.worksheet(LOGIN_MASTER_TITLE)
     except gspread.WorksheetNotFound:
@@ -106,20 +123,21 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     out: List[dict] = []
     for r in rows:
         rec = {
-            "FirstName":   _norm_space(r.get("FirstName")),
-            "LastName":    _norm_space(r.get("LastName")),
-            "Grade":       _norm_space(r.get("Grade")),
-            "Portal1":     _norm_space(r.get("Portal1")),
-            "P1Username":  _norm_space(r.get("P1Username")),
-            "P1Password":  _norm_space(r.get("P1Password")),
-            "Portal2":     _norm_space(r.get("Portal2")),
-            "P2Username":  _norm_space(r.get("P2Username")),
-            "P2Password":  _norm_space(r.get("P2Password")),
-            "PasswordGood": _norm_int(r.get("PasswordGood")),
+            "firstname":   _norm_space(r.get("firstname")),
+            "lastname":    _norm_space(r.get("lastname")),
+            "grade":       _norm_space(r.get("grade")),
+            "portal1":     _norm_space(r.get("portal1")),
+            "p1username":  _norm_space(r.get("p1username")),
+            "p1password":  _norm_space(r.get("p1password")),
+            "portal2":     _norm_space(r.get("portal2")),
+            "p2username":  _norm_space(r.get("p2username")),
+            "p2password":  _norm_space(r.get("p2password")),
+            "passwordgood": _norm_int(r.get("passwordgood")),
         }
         # Must have non-empty names to be considered valid
-        if rec["FirstName"] or rec["LastName"]:
+        if rec["firstname"] or rec["lastname"]:
             out.append(rec)
+            # print(f"Portal: {rec['']}")
 
     return out
 
@@ -169,19 +187,30 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
                 return True
     return False
 
+from scraper.portals import managed_portals
+def get_portal_from_record(record: dict) -> str | None:
+    """Sorts portal links into 'buckets' defined from portals that we currently manage"""
+    portal_link = record["portal1"]
+    for portal, rules in managed_portals.items():
+        for rule in rules:
+            if rule in portal_link:
+                return portal
+    return None
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Main sync
 
-def sync_students() -> None:
+def sync_students(target_fid: int | None = None) -> None:
     conn = db_conn()
     gc = _gc_client()
     sheet_map = _load_sheet_map(conn)
-
     cur = conn.cursor(cursor_factory=DictCursor)
 
     total_ins = total_upd = total_del = total_skp = 0
 
     for fid, sheet_id in sheet_map.items():
+        if target_fid and fid != target_fid:
+            continue
         print(f"\n--- Franchise {fid} ---")
         sheet_rows = _read_login_master(gc, sheet_id)
         parsed_count = len(sheet_rows)
@@ -196,7 +225,7 @@ def sync_students() -> None:
         target_keys = []
         target_map = {}  # key -> sheet_row
         for r in sheet_rows:
-            key = (fid, _norm_name_key(r["FirstName"]), _norm_name_key(r["LastName"]))
+            key = (fid, _norm_name_key(r["firstname"]), _norm_name_key(r["lastname"]))
             if not (key[1] or key[2]):  # skip empty names
                 continue
             target_keys.append(key)
@@ -206,7 +235,6 @@ def sync_students() -> None:
         db_key_to_id = _load_db_keys_for_franchise(conn, fid)
 
         inserts = updates = deletes = skips = 0
-
         # Transaction per franchise
         cur.execute("BEGIN")
         try:
@@ -214,28 +242,31 @@ def sync_students() -> None:
             for key in target_keys:
                 sheet_rec = target_map[key]
                 sid = db_key_to_id.get(key)
-
                 if sid is None:
                     # INSERT
+                    weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
+                    portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         INSERT INTO Student
                           (franchiseid, firstname, lastname, grade,
                            portal1, p1username, p1password,
-                           portal2, p2username, p2password, passwordgood)
+                           portal2, p2username, p2password, passwordgood, portal, weeklydata)
                         VALUES
-                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                          (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         fid,
-                        _norm_space(sheet_rec["FirstName"]),
-                        _norm_space(sheet_rec["LastName"]),
-                        _norm_space(sheet_rec["Grade"]),
-                        _norm_space(sheet_rec["Portal1"]),
-                        _norm_space(sheet_rec["P1Username"]),
-                        _norm_space(sheet_rec["P1Password"]),
-                        _norm_space(sheet_rec["Portal2"]),
-                        _norm_space(sheet_rec["P2Username"]),
-                        _norm_space(sheet_rec["P2Password"]),
-                        _norm_int(sheet_rec["PasswordGood"]),
+                        _norm_space(sheet_rec["firstname"]),
+                        _norm_space(sheet_rec["lastname"]),
+                        _norm_space(sheet_rec["grade"]),
+                        _norm_space(sheet_rec["portal1"]),
+                        _norm_space(sheet_rec["p1username"]),
+                        _norm_space(sheet_rec["p1password"]),
+                        _norm_space(sheet_rec["portal2"]),
+                        _norm_space(sheet_rec["p2username"]),
+                        _norm_space(sheet_rec["p2password"]),
+                        _norm_int(sheet_rec["passwordgood"]),
+                        portal,
+                        json.dumps(weeklydata)
                     ))
                     inserts += 1
                     continue
@@ -243,22 +274,24 @@ def sync_students() -> None:
                 # UPDATE vs SKIP
                 db_row = _fetch_db_row(conn, sid)
                 if _differs(db_row, sheet_rec):
+                    portal = get_portal_from_record(sheet_rec)
                     cur.execute("""
                         UPDATE Student
                         SET grade = %s,
                             portal1 = %s, p1username = %s, p1password = %s,
                             portal2 = %s, p2username = %s, p2password = %s,
-                            passwordgood = %s
+                            passwordgood = %s, portal = %s
                         WHERE id = %s
                     """, (
-                        _norm_space(sheet_rec["Grade"]),
-                        _norm_space(sheet_rec["Portal1"]),
-                        _norm_space(sheet_rec["P1Username"]),
-                        _norm_space(sheet_rec["P1Password"]),
-                        _norm_space(sheet_rec["Portal2"]),
-                        _norm_space(sheet_rec["P2Username"]),
-                        _norm_space(sheet_rec["P2Password"]),
-                        _norm_int(sheet_rec["PasswordGood"]),
+                        _norm_space(sheet_rec["grade"]),
+                        _norm_space(sheet_rec["portal1"]),
+                        _norm_space(sheet_rec["p1username"]),
+                        _norm_space(sheet_rec["p1password"]),
+                        _norm_space(sheet_rec["portal2"]),
+                        _norm_space(sheet_rec["p2username"]),
+                        _norm_space(sheet_rec["p2password"]),
+                        _norm_int(sheet_rec["passwordgood"]),
+                        portal,
                         sid,
                     ))
                     updates += 1
@@ -297,8 +330,17 @@ def sync_students() -> None:
     print(f"\n=== GRAND TOTALS ===")
     print(f"inserts={total_ins} updates={total_upd} skips={total_skp} deletes={total_del}")
 
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="Pull grade/login tabs from Google Sheets to DB per franchise.")
+    p.add_argument("--franchise-id", "--fid", type=int, default=None,
+                   help="Only process this FranchiseID. If omitted, process all known franchises.")
+    return p.parse_args()
+
 def main() -> None:
-    sync_students()
+    args = _parse_args()
+    target_fid: int | None = args.franchise_id or None
+    sync_students(target_fid)
 
 if __name__ == "__main__":
     main()
