@@ -254,9 +254,9 @@ if __name__ == "__main__":
         help="Test a single portal by name."
     )
     parser.add_argument(
-        "-e", "--error",
-        action="store_true",
+        "-stat", "--status",
+        type=str,
         help="Filter for errored students."
     )
     args = parser.parse_args()
-    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status=args.error))
+    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status=args.status))
