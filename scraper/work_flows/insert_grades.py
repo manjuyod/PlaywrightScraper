@@ -54,21 +54,24 @@ def insert_grades():
                     print(f"Skipping non-JSON line: {raw[:120]}…")
                     continue
 
+                student_id = data.get("db_id")
                 # Skip error payloads
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
+                    # todo update status by error?
+                    update_status(cur, student_id, "error")
                     continue
 
                 # Accept both NEW and OLD shapes:
                 # NEW: {"db_id": 1, "id": "...", "parsed_grades": {...}}
                 # OLD: {"db_id": 1, "id": "...", "grades": {"parsed_grades": {...}}}
-                student_id = data.get("db_id")
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
 
                 if not student_id or not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
+                    update_status(cur, student_id, "missing grades")
                     continue
 
                 # Fetch existing WeeklyData
@@ -84,10 +87,7 @@ def insert_grades():
                 weekly_data[monday_anchor] = grades
 
                 # Persist
-                cur.execute(
-                    "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
-                    (json.dumps(weekly_data, ensure_ascii=False), student_id)
-                )
+                update_status(cur, student_id, 'synced')
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
 
             conn.commit()
@@ -96,6 +96,9 @@ def insert_grades():
         print(f"Error: Output file not found at {JSONL_PATH}")
     except psycopg2.Error as e:
         print(f"Database error: {e}")
+
+def update_status(cur: DictCursor, student_id: int, status: str):
+    cur.execute("update student set status = %s where ID = %s", (status, student_id,))
 
 if __name__ == "__main__":
     try:

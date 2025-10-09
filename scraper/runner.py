@@ -41,7 +41,7 @@ def _load_student_auth_map(conn: connection) -> Dict[int, dict]:
         out[sid] = {"type": auth_type, "answers": answers}
     return out
 
-def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: bool = False):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id (and returns at most one row).
@@ -74,7 +74,8 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             elif franchise_id is not None:
                 conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
-
+            if status:
+                conditions.append("status != 'synced'")
             query = base + " WHERE " + " AND ".join(conditions)
             cur.execute(query, params)
 
@@ -101,10 +102,10 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
         sys.exit(1)
 
     return students_list
-
-def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
-    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
-
+#
+# def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+#     return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
+#
 
 async def scrape_one(pw: Playwright, student: dict):
     """Scrape a single student using the appropriate portal engine."""
@@ -170,13 +171,13 @@ async def scrape_one(pw: Playwright, student: dict):
         await browser.close()
 
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: bool = False):
     """Entry point for running the scraper over multiple students."""
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "grades.jsonl"
 
-    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal)
+    student_list = get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     if not student_list:
         if student_id is not None:
             print(f"No active student found with ID = {student_id}.")
@@ -184,8 +185,11 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             print("No active students found for the given filters.")
         return
 
-    label = f"student_id={student_id}" if student_id is not None else f"franchise_id={franchise_id}" if franchise_id is not None else "all active"
-    label = label + f"portal = {portal}" if portal is not None else None
+    label = f"student_id={student_id} " if student_id is not None else ''
+    label = label + f"franchise_id={franchise_id} " if franchise_id is not None else ''
+    label = label + f"portal = {portal} " if portal is not None else ''
+    label = label + f"errored = {status}" if status else ''
+    if len(label) == 0: label = 'all active'
     print(f"Found {len(student_list)} students to scrape ({label}).")
 
     success_count = 0
@@ -203,14 +207,14 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                 except Exception as e:
                     # mark this student’s password as bad
                     if isinstance(e, PortalEngine.LoginError):
-                        with db_conn() as conn:
-                            cur = conn.cursor()
-                            cur.execute(
-                                "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-                                (student["db_id"],)
-                            )
-                            conn.commit()
-                        # print("\t\t\tBypassed credentials !good, dont forget to reset")
+                        # with db_conn() as conn:
+                        #     cur = conn.cursor()
+                        #     cur.execute(
+                        #         "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+                        #         (student["db_id"],)
+                        #     )
+                        #     conn.commit()
+                        print("\t\t\tBypassed credentials !good, dont forget to reset")
                         print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
@@ -248,5 +252,10 @@ if __name__ == "__main__":
         type=str,
         help="Test a single portal by name."
     )
+    parser.add_argument(
+        "-e", "--error",
+        action="store_true",
+        help="Filter for errored students."
+    )
     args = parser.parse_args()
-    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal))
+    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status=args.error))
