@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, Frame
-from .base import PortalEngine
+from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
 
@@ -18,29 +18,41 @@ class StudentConnection(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the StudentConnection portal."""
-        # Start tracing for debugging and audit (screenshots and DOM snapshots)
-        await self.page.context.tracing.start(screenshots=True, snapshots=True)
-        # Navigate to login page
-        await self.page.goto(self.login_url, wait_until="domcontentloaded")
-        await self.page.fill("input[name='Pin']", self.sid)
-        await self.page.fill("input[name='Password']", self.pw)
-        # Wait briefly to ensure values are registered
-        await self.page.wait_for_timeout(500)
-        login_button = self.page.locator("form button:has-text('Login')")
-        # hit enter
-        await self.page.locator("input[name='Password']").press("Enter")
-        # Wait until the URL contains 'PortalMainPage' indicating successful login
-        await self.page.wait_for_url(lambda url: "PortalMainPage" in url, timeout=20_000)
-        # Wait for network to be idle to ensure the home page has loaded
-        await self.page.wait_for_load_state("networkidle")
-        await self.raise_if_login_error(self.page.get_by_text("Login Not Found") is not None)
-        # Stop tracing after login
-        await self.page.context.tracing.stop()
+        try:
+            # Start tracing for debugging and audit (screenshots and DOM snapshots)
+            await self.page.context.tracing.start(screenshots=True, snapshots=True)
+            # Navigate to login page
+            await self.page.goto(self.login_url, wait_until="domcontentloaded")
+            await self.page.fill("input[name='Pin']", self.sid)
+            await self.page.fill("input[name='Password']", self.pw)
+            # Wait briefly to ensure values are registered
+            await self.page.wait_for_timeout(500)
+            login_button = self.page.locator("form button:has-text('Login')")
+            # hit enter
+            await self.page.locator("input[name='Password']").press("Enter")
+            await self.page.wait_for_timeout(500) # allow population
+            login_error = False
+            try:
+                login_error = await self.page.get_by_text("Login Not Found").count() > 0
+            except: # not a failed login if this errors
+                pass
+            await self.raise_if_login_error(login_error)
+            # Wait until the URL contains 'PortalMainPage' indicating successful login
+            await self.page.wait_for_url(lambda url: "PortalMainPage" in url, timeout=20_000)
+            # Wait for network to be idle to ensure the home page has loaded
+            await self.page.wait_for_load_state("networkidle")
+        except Exception as e:
+            print(e)
+            raise
+        finally:
+            # Stop tracing after login
+            await self.page.context.tracing.stop()
+            # await self.page.pause()
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),
