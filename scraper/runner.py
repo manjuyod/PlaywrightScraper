@@ -41,7 +41,7 @@ def _load_student_auth_map(conn: connection) -> Dict[int, dict]:
         out[sid] = {"type": auth_type, "answers": answers}
     return out
 
-def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: bool = False):
+def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id (and returns at most one row).
@@ -75,7 +75,8 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                 conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
             if status:
-                conditions.append("status != 'synced'")
+                conditions.append("status = %s")
+                params.append(status)
             query = base + " WHERE " + " AND ".join(conditions)
             cur.execute(query, params)
 
@@ -171,7 +172,7 @@ async def scrape_one(pw: Playwright, student: dict):
         await browser.close()
 
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: bool = False):
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     """Entry point for running the scraper over multiple students."""
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +189,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     label = f"student_id={student_id} " if student_id is not None else ''
     label = label + f"franchise_id={franchise_id} " if franchise_id is not None else ''
     label = label + f"portal = {portal} " if portal is not None else ''
-    label = label + f"errored = {status}" if status else ''
+    label = label + f"status = {status}" if status else ''
     if len(label) == 0: label = 'all active'
     print(f"Found {len(student_list)} students to scrape ({label}).")
 
@@ -203,7 +204,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     result = await scrape_one(p, student)
                     f.write(json.dumps(result) + "\n")
                     success_count += 1
-                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]")
+                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]\n")
                 except Exception as e:
                     # mark this student’s password as bad
                     if isinstance(e, PortalEngine.LoginError):
@@ -225,7 +226,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     }
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
-                    print(f"ERROR: {student['id']} (details in grades.jsonl)")
+                    print(f"ERROR: {student['id']} (details in grades.jsonl)\n")
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / len(student_list)
