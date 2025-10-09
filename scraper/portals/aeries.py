@@ -39,7 +39,7 @@ class Aeries(PortalEngine):
                 await self.page.fill("input#portalAccountPassword", self.pw, timeout=3000)
                 await self.page.wait_for_timeout(2000)
                 await self.page.locator("#LoginButton").click()
-            except TimeoutError: # password field DNE, must be Google signin
+            except PlaywrightTimeout: # password field DNE, must be Google signin
                 await self.page.locator("#LoginButton").click()
                 await self.google_signin()
 
@@ -69,66 +69,71 @@ class Aeries(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
         print("\nfetching grades")
-        # ensure we have reached the next page
-        await self.raise_if_login_error("Dashboard" not in self.page.url)
-        await self.page.wait_for_timeout(3000) # wait some to allow population
+        try:
+            # ensure we have reached the next page
+            await self.raise_if_login_error("Dashboard" not in self.page.url)
+            await self.page.wait_for_timeout(3000) # wait some to allow population
 
-        soup = await self.get_soup()
-        courses_dict = {}
-
-        # get class table
-        class_table = soup.find('div', id="divClass")
-        if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
-            if class_table is None: # failed to find class table
-                await self.page.click("#StudentNameDropDown")
-                await self.page.click("#StudentNameDropDownMenu")
-                await self.page.wait_for_load_state()
-                await self.page.wait_for_timeout(3000)
-                # try again with new page
-                soup = await self.get_soup()
-                class_table = soup.find('div', id='divClass')
-            # parse the class table
-            class_cards = class_table.select('div.Card')
-            print(f"[AERIES] found {len(class_cards)} courses")
-            for card in class_cards:  # parse the cards
-                # course name
-                class_link = card.find("a", class_="TextHeading")
-                course_name: str = class_link.text.strip()
-                # grade
-                grade_div = card.find("div", class_="Grade")
-                grade_span = grade_div.find("span")
-                if grade_span is not None:
-                    grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-                    grade_str = grade_str.replace("(", "").replace(")", "").replace("%","") if grade_str is not None else None
-                    grade = grade_str
-                    # add to dictionary
-                    courses_dict[course_name.upper()] = grade
-        else: # newport portals are weird
-            await self.page.click('#NavMainGrades')
-            await self.page.click('#NavSubGrades')
-            await self.page.wait_for_url('**/Grades**', timeout=10000)
             soup = await self.get_soup()
-            # find the table first
-            table = soup.find("table", attrs={"id": "ctl00_MainContent_subGRD_tblEverything"})
-            # classes
-            course_table = table.select("tr[id$='ReadRow1']")
-            print(course_table)
-            for course in course_table:
-                course_name: bs4.Tag = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
-                course_name.find('label').decompose()
-                course_name = course_name.get_text(strip=True)
+            courses_dict = {}
 
-                course_letter = course.find('td', {'data-tcfc': 'GRD.M1'}) # course letter
-                course_letter.find('label').decompose()
-                course_letter = course_letter.get_text(strip=True)
-                print(course_name, course_letter)
-                grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
-                if grade > 0:
-                    # add to dictionary
-                    courses_dict[course_name.upper()] = grade
-        print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
-        # await self.page.pause()
-        return {"parsed_grades": courses_dict}
+            # get class table
+            class_table = soup.find('div', id="divClass")
+            if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
+                if class_table is None: # failed to find class table
+                    await self.page.click("#StudentNameDropDown")
+                    await self.page.click("#StudentNameDropDownMenu")
+                    await self.page.wait_for_load_state()
+                    await self.page.wait_for_timeout(3000)
+                    # try again with new page
+                    soup = await self.get_soup()
+                    class_table = soup.find('div', id='divClass')
+                # parse the class table
+                class_cards = class_table.select('div.Card')
+                print(f"[AERIES] found {len(class_cards)} courses")
+                for card in class_cards:  # parse the cards
+                    # course name
+                    class_link = card.find("a", class_="TextHeading")
+                    course_name: str = class_link.text.strip()
+                    # grade
+                    grade_div = card.find("div", class_="Grade")
+                    grade_span = grade_div.find("span")
+                    if grade_span is not None:
+                        grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
+                        grade_str = grade_str.replace("(", "").replace(")", "").replace("%","") if grade_str is not None else None
+                        grade = grade_str
+                        # add to dictionary
+                        courses_dict[course_name.upper()] = grade
+            else: # newport portals are weird
+                await self.page.click('#NavMainGrades')
+                await self.page.click('#NavSubGrades')
+                await self.page.wait_for_url('**/Grades**', timeout=10000)
+                soup = await self.get_soup()
+                # find the table first
+                table = soup.find("table", attrs={"id": "ctl00_MainContent_subGRD_tblEverything"})
+                # classes
+                course_table = table.select("tr[id$='ReadRow1']")
+                print(course_table)
+                for course in course_table:
+                    course_name: bs4.Tag = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
+                    course_name.find('label').decompose()
+                    course_name = course_name.get_text(strip=True)
+
+                    course_letter = course.find('td', {'data-tcfc': 'GRD.M1'}) # course letter
+                    course_letter.find('label').decompose()
+                    course_letter = course_letter.get_text(strip=True)
+                    print(course_name, course_letter)
+                    grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
+                    if grade > 0:
+                        # add to dictionary
+                        courses_dict[course_name.upper()] = grade
+            print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
+            return {"parsed_grades": courses_dict}
+        except Exception as e:
+            print(e)
+        finally:
+            await self.page.pause()
+            await self.page.context.tracing.stop()
 
     # helper
     @staticmethod
