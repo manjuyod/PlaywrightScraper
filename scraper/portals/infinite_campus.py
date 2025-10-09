@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from playwright.async_api import Page
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from . import register_portal  # helper we'll create in __init__.py
@@ -37,18 +38,20 @@ class InfiniteCampus(PortalEngine):
             print("Successfully reached the home page")
             await self.page.wait_for_load_state(timeout=10000)
             await self.page.wait_for_timeout(1500)
-            # select for student if necessary
-            frame = self.page.frame(name="main-workspace")
-            try: # click the student with first name if it exists
-                await frame.get_by_role('link', name=first_name).click()
-            except PlaywrightTimeout:
-                pass # no alternate student
+            await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
         except Exception as e:
             print(e)
         finally:
             await self.page.context.tracing.stop()
-
+    # helper
+    @staticmethod
+    async def select_student(first_name: str, page: Page):
+        frame = page.frame(name="main-workspace")
+        try:  # click the student with first name if it exists
+            await frame.get_by_role('link', name=first_name).click(timeout=3000)
+        except PlaywrightTimeout:
+            pass  # no alternate student
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -69,10 +72,10 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_load_state("networkidle")
             frame = self.page.frame(name="main-workspace")
             if "chandleraz" in self.page.url:
-                await frame.get_by_text("Q2").click()
+                await frame.get_by_role("button", name="Q2").click()
             else:
                 try:
-                    qt2 = frame.get_by_text("QT2")
+                    qt2 = frame.get_by_role("button", name="QT2")
                     await qt2.wait_for(timeout = 1000)
                     await qt2.click()
                 except PlaywrightTimeout:
