@@ -113,26 +113,27 @@ class Aeries(PortalEngine):
                 table = soup.find("table", attrs={"id": "ctl00_MainContent_subGRD_tblEverything"})
                 # classes
                 course_table = table.select("tr[id$='ReadRow1']")
-                print(course_table)
+                # print(course_table)
                 for course in course_table:
                     course_name: bs4.Tag = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
                     course_name.find('label').decompose()
                     course_name = course_name.get_text(strip=True)
 
                     course_letter = course.find('td', {'data-tcfc': 'GRD.M1'}) # course letter
-                    course_letter.find('label').decompose()
+                    course_letter = course_letter.find('label')
+                    if course_letter is None:
+                        continue # skip the courses without a letter
                     course_letter = course_letter.get_text(strip=True)
-                    print(course_name, course_letter)
+                    print("course: ", course_name, "grade: ", course_letter)
                     grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
-                    if grade > 0:
-                        # add to dictionary
+                    if grade > 0: # add to dictionary
                         courses_dict[course_name.upper()] = grade
             print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
             return {"parsed_grades": courses_dict}
         except Exception as e:
             print(e)
         finally:
-            await self.page.pause()
+            # await self.page.pause()
             await self.page.context.tracing.stop()
 
     # helper
