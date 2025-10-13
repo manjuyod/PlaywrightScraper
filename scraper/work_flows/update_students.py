@@ -262,9 +262,9 @@ def sync_students(target_fid: int | None = None) -> None:
                             INSERT INTO Student
                               (franchiseid, firstname, lastname, grade,
                                portal1, p1username, p1password,
-                               portal2, p2username, p2password, passwordgood, portal, weeklydata)
+                               portal2, p2username, p2password, portal, weeklydata)
                             VALUES
-                              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             fid,
                             _norm_space(sheet_rec["firstname"]),
@@ -276,7 +276,6 @@ def sync_students(target_fid: int | None = None) -> None:
                             _norm_space(sheet_rec["portal2"]),
                             _norm_space(sheet_rec["p2username"]),
                             _norm_space(sheet_rec["p2password"]),
-                            _norm_int(sheet_rec["passwordgood"]),
                             portal,
                             json.dumps(weeklydata)
                         ))
