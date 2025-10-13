@@ -17,8 +17,6 @@ def get_portal(key: str) -> Type[PortalEngine]:
     except (KeyError, AttributeError):  # nicer error than raw KeyError
         raise ValueError(f"No portal engine registered for '{key}'") from None
 
-class LoginError(Exception):
-    pass
 
 import importlib
 # add portals that should be imported here as strings, along with the general substrings usually contained in their urls
@@ -26,9 +24,8 @@ managed_portals = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
-    "parentvue_husd": ["parentvue", "Login_Parent"], # TODO: Unify parentvue and studentvue
+    "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
-    "studentvue_husd": ["parentvue", "Login_Student"],
     "bghs_blackbaud": ["bishopgorman"],
     "aeries": ["aeries", "LoginParent.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],

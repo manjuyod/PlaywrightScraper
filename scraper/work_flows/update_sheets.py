@@ -369,12 +369,11 @@ def _parse_args():
 def main() -> None:
     #ArgParse First
     args = _parse_args()
-    
-    conn = db_conn()
-    sheet_map = _load_sheet_map(conn)
-    df_all = _query_students(conn)       # has WeeklyData for grade blocks
-    df_login_all = _query_login_master(conn)  # flat login rows
-    known_fids = _load_known_franchise_ids(conn)
+    with db_conn() as conn:
+        sheet_map = _load_sheet_map(conn)
+        df_all = _query_students(conn)       # has WeeklyData for grade blocks
+        df_login_all = _query_login_master(conn)  # flat login rows
+        known_fids = _load_known_franchise_ids(conn)
 
     # NEW: compute target set (either the single requested ID, or all known)
     if args.franchise_id is not None:

@@ -2,8 +2,10 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 from bs4 import BeautifulSoup
+
+
 class PortalEngine(ABC):
     """Interface every portal scraper must implement."""
 
@@ -17,7 +19,7 @@ class PortalEngine(ABC):
     async def fetch_grades(self) -> Dict[str, Any]: ...
 
     # optional shared helpers ↓
-    async def _wait(self, selector: str, timeout: int = 15_000) -> None:
+    async def wait(self, selector: str, timeout: int = 15_000) -> None:
         await self.page.locator(selector).wait_for(state="visible", timeout=timeout)
         
     async def get_soup(self) -> BeautifulSoup:
@@ -25,6 +27,15 @@ class PortalEngine(ABC):
         html = await self.page.content()
         return BeautifulSoup(html, "html.parser")
 
+    async def raise_if_login_error(self, error_condition: bool):
+        """Recieves a condition on which the login has failed, raises LoginError if true"""
+        if error_condition:
+            raise self.LoginError(f'@{self.login_url}\nFailed to login {self.sid}')
+
+    class LoginError(Exception):
+        pass
+
+# universal flows
     async def google_signin(self):
         # GOOGLE SIGN-IN
         await self.page.fill("input#identifierId", self.sid)
@@ -33,4 +44,14 @@ class PortalEngine(ABC):
         await self.page.wait_for_selector('input[name="Passwd"]')
         await self.page.fill('input[name="Passwd"]', self.pw)
         await self.page.wait_for_timeout(2000)
-        await self.page.get_by_role("button", name="Next").click()  # click next
+        await self.page.get_by_role("button", name="Next").click()  # click
+
+    async def microsoft_login(self):
+        # MICROSOFT SIGN-IN
+        # Fill username and password
+        await self.page.fill("input#username", self.sid)
+        await self.page.fill("input#password", self.pw)
+        # Short pause to ensure fields are recognized
+        await self.page.wait_for_timeout(200)
+        # Press Enter in password field to submit the form
+        await self.page.locator('.form-group input[name="password"]').press("Enter")

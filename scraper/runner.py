@@ -12,8 +12,9 @@ from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
-from scraper.portals import get_portal, LoginError
+from scraper.portals import get_portal
 from typing import Dict, List
+from scraper.portals.base import PortalEngine
 load_dotenv()
 from time import time
 
@@ -40,7 +41,7 @@ def _load_student_auth_map(conn: connection) -> Dict[int, dict]:
         out[sid] = {"type": auth_type, "answers": answers}
     return out
 
-def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+def get_students_from_db(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id (and returns at most one row).
@@ -73,7 +74,9 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             elif franchise_id is not None:
                 conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
-
+            if status:
+                conditions.append("status = %s")
+                params.append(status)
             query = base + " WHERE " + " AND ".join(conditions)
             cur.execute(query, params)
 
@@ -100,10 +103,10 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
         sys.exit(1)
 
     return students_list
-
-def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
-    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
-
+#
+# def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+#     return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
+#
 
 async def scrape_one(pw: Playwright, student: dict):
     """Scrape a single student using the appropriate portal engine."""
@@ -147,7 +150,7 @@ async def scrape_one(pw: Playwright, student: dict):
         try:
             await scraper.login(first_name=student.get("student_name"))
         except Exception as e:
-            raise LoginError(e)
+            raise scraper.LoginError(e)
         print(f"Login successful for {student['id']}, fetching grades…")
         grades = await scraper.fetch_grades()
 
@@ -169,13 +172,13 @@ async def scrape_one(pw: Playwright, student: dict):
         await browser.close()
 
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     """Entry point for running the scraper over multiple students."""
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "grades.jsonl"
 
-    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal)
+    student_list = get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     if not student_list:
         if student_id is not None:
             print(f"No active student found with ID = {student_id}.")
@@ -183,8 +186,11 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             print("No active students found for the given filters.")
         return
 
-    label = f"student_id={student_id}" if student_id is not None else f"franchise_id={franchise_id}" if franchise_id is not None else "all active"
-    label = label + f"portal = {portal}" if portal is not None else None
+    label = f"student_id={student_id} " if student_id is not None else ''
+    label = label + f"franchise_id={franchise_id} " if franchise_id is not None else ''
+    label = label + f"portal = {portal} " if portal is not None else ''
+    label = label + f"status = {status}" if status else ''
+    if len(label) == 0: label = 'all active'
     print(f"Found {len(student_list)} students to scrape ({label}).")
 
     success_count = 0
@@ -198,11 +204,11 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     result = await scrape_one(p, student)
                     f.write(json.dumps(result) + "\n")
                     success_count += 1
-                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]")
+                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]\n")
                 except Exception as e:
                     # mark this student’s password as bad
-                    if isinstance(e, LoginError):
-                        # with _db_conn() as conn:
+                    if isinstance(e, PortalEngine.LoginError):
+                        # with db_conn() as conn:
                         #     cur = conn.cursor()
                         #     cur.execute(
                         #         "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
@@ -220,7 +226,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     }
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
-                    print(f"ERROR: {student['id']} (details in grades.jsonl)")
+                    print(f"ERROR: {student['id']} (details in grades.jsonl)\n")
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / len(student_list)
@@ -247,5 +253,10 @@ if __name__ == "__main__":
         type=str,
         help="Test a single portal by name."
     )
+    parser.add_argument(
+        "-stat", "--status",
+        type=str,
+        help="Filter for errored students."
+    )
     args = parser.parse_args()
-    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal))
+    asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status=args.status))

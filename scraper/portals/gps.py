@@ -74,6 +74,15 @@ class GPS(PortalEngine):
             await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
             self.page = await popup.value
             await self.page.wait_for_load_state()
+            # await self.page.wait_for_selector()
+        await self.page.wait_for_load_state('networkidle')
+        await self.page.wait_for_timeout(1000)
+
+        await self.raise_if_login_error('nav-wrapper' not in self.page.url)
+
+        print("Successfully reached the home page")
+        await self.page.wait_for_load_state(timeout=10000)
+        await self.page.wait_for_timeout(1500)
         await self.page.context.tracing.stop()
 
     # ---------------------- FETCH (notifications → latest per subject) -------
