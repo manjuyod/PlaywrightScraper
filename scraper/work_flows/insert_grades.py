@@ -68,7 +68,6 @@ def insert_grades():
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-
                 if not student_id or not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
                     update_status(cur, student_id, "missing grades")
@@ -85,8 +84,11 @@ def insert_grades():
 
                 # Update current week's bucket
                 weekly_data[monday_anchor] = grades
-
                 # Persist
+                cur.execute(
+                    "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
+                    (json.dumps(weekly_data, ensure_ascii=False), student_id)
+                )
                 update_status(cur, student_id, 'synced')
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
 
