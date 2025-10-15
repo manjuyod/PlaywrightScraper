@@ -79,6 +79,14 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
             cur.execute(query, params)
 
             for row in cur.fetchall():
+                # infer/normalize portal
+                portal_val = row["portal"]
+                if portal_val is not None:
+                    portal_val = str(portal_val).strip().lower()
+                # if missing, infer from login_url (Portal1)
+                login_url = row["portal1"]
+                if (not portal_val) and login_url and "instructure.com" in login_url:
+                    portal_val = "canvas"
                 # look up auth by StudentID (if present)
                 auth = student_auth_map.get(row["id"])  # -> {"type": "...", "answers": [...] } or None
                 auth_images = auth["answers"] if auth and auth["type"] == "gps_pictograph" else None
@@ -88,9 +96,9 @@ def get_students_from_db(franchise_id: int | None = None, student_id: int | None
                         "db_id": row["id"],
                         "student_name": row["firstname"],
                         "id": row["p1username"],
-                        "login_url": row["portal1"],
+                        "login_url": login_url,
                         "password": row["p1password"],
-                        "portal": row["portal"],
+                        "portal": portal_val,
                         "auth_images": auth_images,  # only set when gps pictograph
                     }
                 )
