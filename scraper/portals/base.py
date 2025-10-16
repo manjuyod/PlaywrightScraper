@@ -32,6 +32,29 @@ class PortalEngine(ABC):
         if error_condition:
             raise self.LoginError(f'@{self.login_url}\nFailed to login {self.sid}')
 
+    @staticmethod
+    def percent_from_letter_grade(letter_grade: str):
+        minus = letter_grade.endswith("-")
+        plus = letter_grade.endswith("+")
+        modifier = -5 if minus else 5 if plus else 0
+        grade = 95
+        if modifier != 0:
+            letter_grade = letter_grade.replace("-", "")
+            letter_grade = letter_grade.replace("+", "")
+        match letter_grade:
+            case 'A':
+                pass
+            case 'B':
+                grade -= 11  # 89
+            case 'C':
+                grade -= 21  # 79
+            case 'D':
+                grade -= 31  # 69
+            case 'F':
+                grade -= 40  # 60
+            case _:
+                grade = -1
+        return grade + modifier if grade > 0 else grade
     class LoginError(Exception):
         pass
 

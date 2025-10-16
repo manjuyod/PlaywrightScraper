@@ -201,7 +201,7 @@ def get_portal_from_record(record: dict) -> str | None:
             # print(f'\t {rule}')
             # print(rule in portal_link)
             if rule in portal_link:
-                # print(f'found {portal} for {portal_link}')
+                print(f'found {portal} for {portal_link}')
                 return portal
     print(f"No portal found for {portal_link}")
     return None
@@ -290,8 +290,8 @@ def sync_students(target_fid: int | None = None) -> None:
                             UPDATE Student
                             SET grade = %s,
                                 portal1 = %s, p1username = %s, p1password = %s,
-                                portal2 = %s, p2username = %s, p2password = %s,
-                                passwordgood = %s, portal = %s
+                                portal2 = %s, p2username = %s, p2password = %s, 
+                                portal = %s
                             WHERE id = %s
                         """, (
                             _norm_space(sheet_rec["grade"]),
@@ -301,7 +301,6 @@ def sync_students(target_fid: int | None = None) -> None:
                             _norm_space(sheet_rec["portal2"]),
                             _norm_space(sheet_rec["p2username"]),
                             _norm_space(sheet_rec["p2password"]),
-                            _norm_int(sheet_rec["passwordgood"]),
                             portal,
                             sid,
                         ))
