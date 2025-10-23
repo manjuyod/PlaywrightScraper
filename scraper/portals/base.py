@@ -72,9 +72,17 @@ class PortalEngine(ABC):
     async def microsoft_login(self):
         # MICROSOFT SIGN-IN
         # Fill username and password
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
+        try:
+            await self.page.fill("input#username", self.sid, timeout=1000)
+            await self.page.fill("input#password", self.pw)
+            # Press Enter in password field to submit the form
+            await self.page.locator('.form-group input[name="password"]').press("Enter")
+        except PlaywrightTimeout:
+            # try with alternate tags
+            await self.page.fill("input#i0116", self.sid, timeout=1000)
+            await self.page.click("#idSIButton9")
+            await self.page.fill("input#i0118", self.pw)
+            await self.page.click("#idSIButton9")
+            await self.page.wait_for_load_state()
         # Short pause to ensure fields are recognized
-        await self.page.wait_for_timeout(200)
-        # Press Enter in password field to submit the form
-        await self.page.locator('.form-group input[name="password"]').press("Enter")
+        await self.page.wait_for_timeout(1000)

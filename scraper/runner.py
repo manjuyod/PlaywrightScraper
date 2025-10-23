@@ -177,7 +177,6 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "grades.jsonl"
-
     student_list = get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     if not student_list:
         if student_id is not None:
@@ -188,8 +187,8 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
 
     label = f"student_id={student_id} " if student_id is not None else ''
     label = label + f"franchise_id={franchise_id} " if franchise_id is not None else ''
-    label = label + f"portal = {portal} " if portal is not None else ''
-    label = label + f"status = {status}" if status else ''
+    label = label + f"portal={portal} " if portal is not None else ''
+    label = label + f"status={status}" if status else ''
     if len(label) == 0: label = 'all active'
     print(f"Found {len(student_list)} students to scrape ({label}).")
 
