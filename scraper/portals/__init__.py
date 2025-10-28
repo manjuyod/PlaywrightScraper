@@ -30,7 +30,8 @@ managed_portals = {
     "aeries": ["aeries", "LoginParent.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],
     "student_connection": ["studentconnect", "k12.ca.us"],
-    "schoology": ["schoology"]
+    "schoology": ["schoology"],
+    "howsschoolgoing": ["howsschoolgoing"],
    }
 # Import engines so they register.
 for portal in managed_portals.keys():
