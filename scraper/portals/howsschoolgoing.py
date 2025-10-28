@@ -28,9 +28,9 @@ class HowsSchoolGoing(PortalEngine):
             await self.page.wait_for_timeout(3500)
             # navigate to the grades page
             # await self.page.get_by_role('button', name='Student', exact=True).click() # student accordion
-            await self.page.locator("#data-tab").get_by_role("button", name="Grades").click()
             # await self.page.get_by_role('button', name='Grades', exact=True).click()  # grades accordion
             # await self.page.get_by_role('link', name='Grades Overview').click()  # takes us to the grades page
+            await self.page.locator("#data-tab").get_by_role("button", name="Grades").click() # this button on the front page takes us to the grades page
             await self.page.wait_for_timeout(3000)
         except Exception as e:
             print(e)
