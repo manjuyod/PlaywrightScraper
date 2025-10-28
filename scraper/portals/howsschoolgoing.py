@@ -1,0 +1,77 @@
+from __future__ import annotations
+from typing import Any, Dict, Optional
+from bs4 import BeautifulSoup
+import re
+from scraper.portals.base import PortalEngine, PlaywrightTimeout
+from scraper.portals import register_portal
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+@register_portal("howsschoolgoing")
+class HowsSchoolGoing(PortalEngine):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+    )
+    async def login(self, first_name: Optional[str] = None) -> None:
+        try:
+            # 1) Load login page
+            await self.page.goto(self.login_url, wait_until="domcontentloaded")
+            await self.page.wait_for_timeout(500)
+
+            # Google Sign-in
+            await self.page.get_by_text("Sign In With Google").click()
+            await self.page.wait_for_load_state()
+            # 2) Fill & submit
+            await self.google_signin()
+            # 3) Give it time to load the gradebook table
+            await self.page.wait_for_timeout(3500)
+            # navigate to the grades page
+            # await self.page.get_by_role('button', name='Student', exact=True).click() # student accordion
+            await self.page.locator("#data-tab").get_by_role("button", name="Grades").click()
+            # await self.page.get_by_role('button', name='Grades', exact=True).click()  # grades accordion
+            # await self.page.get_by_role('link', name='Grades Overview').click()  # takes us to the grades page
+            await self.page.wait_for_timeout(3000)
+        except Exception as e:
+            print(e)
+        finally:
+            # await self.page.pause()
+            pass
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+    )
+    async def fetch_grades(self) -> Dict[str, Any]:
+        if 'grades' not in self.page.url:
+            raise self.LoginError('No grades page')
+        parsed = {}
+        try:
+            soup = await self.get_soup()
+            course_table = soup.find("table", id="DataTables_Table_0")
+            courses = course_table.find_all('tr')
+            print(f'found {len(courses)} courses')
+            for course in courses:
+                columns = course.find_all('td')
+                if len(columns) >= 2:
+                    title = columns[0].text
+                    # format title like [title - Mr./Ms. teacher]
+                    index = len(title)
+                    if '- Ms' in title:
+                        index = title.find('- Ms')
+                    elif '- Mr' in title:
+                        index = title.find('- Mr')
+                    if index > 0:
+                        title = title[:index - 1]
+
+                    # format grade like [letter percent] or [letter]
+                    grade = columns[1].text
+                    grade = grade[2:6]
+                    # print(f'found {title}\n\tgrade: {grade}')
+                    parsed[title] = grade
+        except Exception as e:
+            print(e)
+        finally:
+            print(parsed)
+            # await self.page.pause()
+            return parsed

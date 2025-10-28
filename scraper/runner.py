@@ -25,6 +25,7 @@ def db_conn() -> connection:
         user=os.getenv("PGUSER"),
         password=os.getenv("PGPASSWORD"),
         port=os.getenv("PGPORT"),
+        sslmode='require'
     )
 
 def _load_student_auth_map(conn: connection) -> Dict[int, dict]:
@@ -146,7 +147,7 @@ async def scrape_one(pw: Playwright, student: dict):
         setattr(scraper, "auth_images", student["auth_images"])
 
     try:
-        print(f"Starting login for {student['id']}")
+        print(f"Starting login for {student['id']} ({student['db_id']})")
         try:
             await scraper.login(first_name=student.get("student_name"))
         except Exception as e:
