@@ -1,4 +1,3 @@
-# scraper/portals/__init__.py
 from typing import Callable, Dict, Type
 from .base import PortalEngine
 
@@ -32,7 +31,8 @@ managed_portals = {
     "student_connection": ["studentconnect", "k12.ca.us"],
     "schoology": ["schoology"],
     "howsschoolgoing": ["howsschoolgoing"],
+    "k12": ["login.k12"]
    }
-# Import engines so they register.
+# Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():
     importlib.import_module(f".{portal}", __name__)
