@@ -57,6 +57,7 @@ class Aeries(PortalEngine):
             await self.page.wait_for_load_state(timeout=45000)
         except Exception as e:
             print(e)
+            raise
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
@@ -106,7 +107,7 @@ class Aeries(PortalEngine):
                         courses_dict[course_name.upper()] = grade
             else: # newport portals are weird
                 await self.page.click('#NavMainGrades')
-                await self.page.click('#NavSubGrades')
+                await self.page.click('#NavSubGrades') # sometimes this doesn't exist and we should bail early
                 await self.page.wait_for_url('**/Grades**', timeout=10000)
                 soup = await self.get_soup()
                 # find the table first
@@ -115,14 +116,21 @@ class Aeries(PortalEngine):
                 course_table = table.select("tr[id$='ReadRow1']")
                 # print(course_table)
                 for course in course_table:
-                    course_name: bs4.Tag = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
+                    # print(course)
+                    course_name: bs4.Tag | None = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
+                    if course_name == None:
+                        continue
                     course_name.find('label').decompose()
                     course_name = course_name.get_text(strip=True)
-
-                    course_letter = course.find('td', {'data-tcfc': 'GRD.M1'}) # course letter
-                    course_letter = course_letter.find('label')
-                    if course_letter is None:
+                    print("Course: ", course_name)
+                    course_letter: bs4.Tag | None = course.find('td', {'data-tcfc': 'GRD.M2'}) # course letter
+                    if course_letter == None:
                         continue # skip the courses without a letter
+                    course_letter_label: bs4.Tag | None = course_letter.find('label')
+                    if course_letter_label == None:
+                        print("Current course letter", course_letter.get_text())
+                        continue
+                    course_letter_label.decompose()
                     course_letter = course_letter.get_text(strip=True)
                     print("course: ", course_name, "grade: ", course_letter)
                     grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
@@ -132,6 +140,7 @@ class Aeries(PortalEngine):
             return {"parsed_grades": courses_dict}
         except Exception as e:
             print(e)
+            raise
         finally:
             # await self.page.pause()
             await self.page.context.tracing.stop()
