@@ -122,7 +122,10 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
         return []
     print("collected worksheet")
     # get_all_records() reads the header row and returns list[dict]
-    rows = ws.get_all_records()  # empty cells -> ''
+    # rows = ws.get_all_records()  # empty cells -> ''
+    values = ws.get_all_values(value_render_option='FORMATTED_VALUE') # this is necessary so that strings are not interpreted as numbers, resulting in the truncation of zeros
+    headers = values[0]
+    rows = [dict(zip(headers, row)) for row in values[1:]] # this replaces get_all_records, formatted as a list of dicts (rows)
     print("worksheet parsed")
     out: List[dict] = []
     for r in rows:
@@ -141,7 +144,6 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
         # Must have non-empty names to be considered valid
         if rec["firstname"] or rec["lastname"]:
             out.append(rec)
-
     return out
 
 def _load_db_keys_for_franchise(conn: connection, fid: int) -> Dict[tuple, int]:
@@ -305,6 +307,7 @@ def sync_students(target_fid: int | None = None) -> None:
                             sid,
                         ))
                         updates += 1
+                        print(f"Updated student {sheet_rec['firstname']}\n\tPassword is {sheet_rec['p1password']}")
                     else:
                         skips += 1
 
