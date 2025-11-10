@@ -45,6 +45,7 @@ class Classlink(PortalEngine):
 
         except Exception as e:
             print(e)
+            raise
         finally:
             # await self.page.wait_for_load_state("networkidle")
             print('completed login')

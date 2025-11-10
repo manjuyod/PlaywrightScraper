@@ -40,8 +40,9 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_timeout(1500)
             await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
-        except Exception as e:
+        except self.LoginError as e:
             print(e)
+            raise
         finally:
             await self.page.context.tracing.stop()
     # helper

@@ -54,7 +54,6 @@ class BlackbaudBGHS(PortalEngine):
                 await self.page.locator("#primary-button").click()
             await self.page.wait_for_load_state()
             await self.page.wait_for_timeout(5000)
-            
         except Exception as e:
             print(e)
             raise e

@@ -97,6 +97,7 @@ class StudentConnection(PortalEngine):
             print(f"[SC] Grades parsed: {parsed}")
             return {"parsed_grades": parsed}
         except Exception as e:
+            raise
             print(e)
         finally:
             pass

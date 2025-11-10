@@ -34,6 +34,7 @@ class HowsSchoolGoing(PortalEngine):
             await self.page.wait_for_timeout(3000)
         except Exception as e:
             print(e)
+            raise
         finally:
             # await self.page.pause()
             pass

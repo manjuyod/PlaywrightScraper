@@ -30,6 +30,7 @@ class K12(PortalEngine):
             # nav to grades page
         except Exception as e:
             print(e)
+            raise
         finally:
             await self.page.pause()
             pass
