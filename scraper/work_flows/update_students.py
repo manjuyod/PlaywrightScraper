@@ -203,9 +203,9 @@ def get_portal_from_record(record: dict) -> str | None:
             # print(f'\t {rule}')
             # print(rule in portal_link)
             if rule in portal_link:
-                print(f'found {portal} for {portal_link}')
+                # print(f'found {portal} for {portal_link}')
                 return portal
-    print(f"No portal found for {portal_link}")
+    # print(f"No portal found for {portal_link}")
     return None
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -307,7 +307,6 @@ def sync_students(target_fid: int | None = None) -> None:
                             sid,
                         ))
                         updates += 1
-                        print(f"Updated student {sheet_rec['firstname']}\n\tPassword is {sheet_rec['p1password']}")
                     else:
                         skips += 1
 

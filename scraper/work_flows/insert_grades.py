@@ -59,7 +59,7 @@ def insert_grades():
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
                     # todo update status by error?
-                    update_status(cur, student_id, "error")
+                    update_status(cur, student_id, "error", error_msg=data['error'])
                     continue
 
                 # Accept both NEW and OLD shapes:
@@ -99,9 +99,14 @@ def insert_grades():
     except psycopg2.Error as e:
         print(f"Database error: {e}")
 
-def update_status(cur: DictCursor, student_id: int, status: str):
+def update_status(cur: DictCursor, student_id: int, status: str, error_msg: str | None = None):
+    """ Modifies a students update status (synced, missing grades, error) in the database
+        If the status is 'error' we will update the error_msg field in the database"""
     cur.execute("update student set status = %s where ID = %s", (status, student_id,))
-
+    if status == 'error':
+        cur.execute("update student set error_msg = %s where ID = %s", (error_msg, student_id,))
+    else:
+        cur.execute("update student set error_msg = NULL where ID = %s", (student_id,))
 if __name__ == "__main__":
     try:
         insert_grades()

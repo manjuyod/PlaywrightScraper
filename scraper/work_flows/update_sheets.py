@@ -113,7 +113,8 @@ def _query_students(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
@@ -135,7 +136,8 @@ def _query_login_master(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
@@ -227,7 +229,7 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     We align each student’s block to the franchise-wide weeks after computing per-student data.
     """
     good_pw = row["passwordgood"] == 1
-
+    good_fetch = row["status"] == 'synced'
     # 1) meta rows (explicit strings, no NaN bleed)
     meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
     meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
@@ -235,17 +237,33 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     # 2) two blank spacer rows
     blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
 
+    # handle fails
     if not good_pw:
         err = pd.DataFrame(
             [
-                {"Field": "Error", "Value": "invalid entry, check credentials"},
-                {"Field": "", "Value": ""},
-                {"Field": "", "Value": ""},
+                {"Field": "Bad Password", "Value": "invalid entry, check credentials"},
             ],
             columns=["Field", "Value"],
         )
-        return pd.concat([meta, err], ignore_index=True)
-
+        return pd.concat([meta, err, blank], ignore_index=True)
+    if not good_fetch:
+        if row['status'] == 'missing grades':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Missing Grades", "Value": "failed to collect grades for student"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        elif row['status'] == 'error':
+            err = pd.DataFrame(
+                [ # there should be more info here
+                    {"Field": "Error", "Value": "something bad happened"},
+                    {"Field": "Message", "Value": row['error_msg']}
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
     # 3) subject → grades for this student only
     wdata = _safe_json_loads(row["weeklydata"])
     subjects = _extract_subjects(wdata)
@@ -413,12 +431,14 @@ def main() -> None:
 
         # Build ID sets for HS / MS / Error from LoginMaster (authoritative for Grade/PasswordGood)
         login_f = df_login_all[df_login_all["franchiseid"] == fid].copy()
-        good = login_f["passwordgood"] == 1
         is_hs = login_f["grade"].apply(_is_hs_grade)
+        good_fetch = login_f["status"] == 'synced'
+        good_password = login_f["passwordgood"] == 1
+        good = good_fetch & good_password
 
-        hs_ids  = set(login_f.loc[good & is_hs,  "id"].tolist())
-        ms_ids  = set(login_f.loc[good & ~is_hs, "id"].tolist())
-        err_ids = set(login_f.loc[~good,         "id"].tolist())
+        hs_ids  = set(login_f.loc[is_hs & good,  "id"].tolist())
+        ms_ids  = set(login_f.loc[~is_hs & good, "id"].tolist())
+        err_ids = set(login_f.loc[~good, "id"].tolist())
 
         # Slice the grade-pivot source to those students
         grp_hs  = grp[grp["id"].isin(hs_ids)]

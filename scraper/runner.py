@@ -149,9 +149,19 @@ async def scrape_one(pw: Playwright, student: dict):
     try:
         print(f"Starting login for {student['id']} ({student['db_id']})")
         try:
-            await scraper.login(first_name=student.get("student_name"))
-        except Exception as e:
-            raise scraper.LoginError(e)
+            await scraper.login(first_name=student.get("student_name")) # may throw login error, we should handle and abort
+        except Exception as e: # mark this student’s password as bad, TODO: in a perfect world, this would only occur on LoginError
+            with db_conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+                    (student["db_id"],)
+                )
+                conn.commit()
+            # print("\t\t\tBypassed credentials !good, dont forget to reset")
+            print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
+            raise PortalEngine.LoginError(e) # raise once again so we log the error in the output json
+
         print(f"Login successful for {student['id']}, fetching grades…")
         grades = await scraper.fetch_grades()
 
@@ -202,21 +212,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             for student in student_list:
                 try:
                     result = await scrape_one(p, student)
-                    f.write(json.dumps(result) + "\n")
-                    success_count += 1
-                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]\n")
                 except Exception as e:
-                    # mark this student’s password as bad
-                    if isinstance(e, PortalEngine.LoginError):
-                        with db_conn() as conn:
-                            cur = conn.cursor()
-                            cur.execute(
-                                "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-                                (student["db_id"],)
-                            )
-                            conn.commit()
-                        # print("\t\t\tBypassed credentials !good, dont forget to reset")
-                        print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
                     # record the error in the JSONL for auditing
                     error_result = {
                         "db_id": student["db_id"],
@@ -227,6 +223,10 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     f.write(json.dumps(error_result) + "\n")
                     error_count += 1
                     print(f"ERROR: {student['id']} (details in grades.jsonl)\n")
+                    continue
+                f.write(json.dumps(result) + "\n")
+                success_count += 1
+                print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]\n")
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / len(student_list)
