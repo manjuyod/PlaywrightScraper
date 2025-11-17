@@ -1,4 +1,3 @@
-# scraper/portals/__init__.py
 from typing import Callable, Dict, Type
 import importlib
 from .base import PortalEngine
@@ -57,10 +56,9 @@ managed_portals: Dict[str, list[str]] = {
     "schoology": ["schoology"],
     "howsschoolgoing": ["howsschoolgoing"],
     "canvas": ["instructure.com", "canvas"],
-}
-
-# Import engines so they self-register via @register_portal(...)
-# Each imported module must be named <key>.py (e.g., canvas.py, aeries.py, etc.).
+    "k12": ["login.k12"]
+   }
+# Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():
     importlib.import_module(f".{portal}", __name__)
 
