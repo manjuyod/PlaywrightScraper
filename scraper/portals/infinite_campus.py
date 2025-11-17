@@ -87,17 +87,24 @@ class InfiniteCampus(PortalEngine):
             # now try to parse the page
             parsed_dict = {}
             for card in cards:
-                # print(f"Class: {card}\n\n")
                 course_elem = await card.query_selector("h4 a")
                 grade_elem = await card.query_selector_all(".grading-score div")
-                # print(grade_elem)
                 if len(grade_elem) == 0:
                     print("no class info") 
                     continue # no class info
+
+                percent_text: str | None = None
+                for elem in grade_elem:
+                    text = (await elem.inner_text()).strip()
+                    if "%" in text:
+                        percent_text = text
+
+                if percent_text is None:
+                    print("no percentage grade found")
+                    continue
+
                 course = await course_elem.inner_text()
-                grade_index = -2 # the percentage grade is almost always the second to last element
-                grade_str: str = await grade_elem[grade_index].inner_text() 
-                # print(f"course: {course} grade: {grade_str}") # debug
+                grade_str = percent_text
                 try:
                     grade = float(grade_str
                                   .replace("(", "")
