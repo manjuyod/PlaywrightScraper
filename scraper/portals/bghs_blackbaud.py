@@ -77,15 +77,15 @@ class BlackbaudBGHS(PortalEngine):
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(2000)
         soup = await self.get_soup()
-        coursesTable = soup.find("div", id="coursesContainer")
-        courses = coursesTable.select("div.row")
+        courses_table = soup.find("div", id="coursesContainer")
+        courses = courses_table.select("div.row")
         courses_dict = {}
         # print(f"Course: {courses[0]}")
         for course in courses:
             # print(course)
             course_name: str = course.find("h3").text
-            course_grade: str = course.find("h3", class_="showGrade").text
-            course_grade = float(course_grade.replace("%", "").strip())
+            course_grade_str: str = course.find("h3", class_="showGrade").text
+            course_grade = float(course_grade_str.replace("%", "").strip())
             course_name = course_name[:course_name.index("-")]
             courses_dict[course_name] = course_grade
             print(course_name, course_grade)

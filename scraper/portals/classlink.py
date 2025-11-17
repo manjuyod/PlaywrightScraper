@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
 from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
                       wait_exponential)
-from .base import PortalEngine
+from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
 from scraper.portals.infinite_campus import InfiniteCampus
 
@@ -18,7 +18,7 @@ class Classlink(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
@@ -45,10 +45,9 @@ class Classlink(PortalEngine):
 
         except Exception as e:
             print(e)
-            raise
+            raise self.LoginError(e)
         finally:
             # await self.page.wait_for_load_state("networkidle")
-            print('completed login')
             await self.page.context.tracing.stop()
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(

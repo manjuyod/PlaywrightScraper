@@ -12,7 +12,9 @@ from .base import PortalEngine, PlaywrightTimeout
 @register_portal("infinite_campus")
 class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
-    
+
+    # username_field_id = 'username'
+    # password_field_id = 'password'
     # ---------------------- LOGIN (home only) ----------------------
     @retry(
         stop=stop_after_attempt(3),
@@ -22,7 +24,6 @@ class InfiniteCampus(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
         print(f"searching for {first_name}")
-        #TODO: Insert LoginError logic
         try:
             await self.page.goto(self.login_url, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(500)
@@ -72,6 +73,7 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_url("**/grades*", timeout = 20000)
             await self.page.wait_for_load_state("networkidle")
             frame = self.page.frame(name="main-workspace")
+            # target the correct timeframe
             if "chandleraz" in self.page.url:
                 await frame.get_by_role("button", name="Q2").click()
             else:
@@ -81,6 +83,7 @@ class InfiniteCampus(PortalEngine):
                     await qt2.click()
                 except PlaywrightTimeout:
                     pass
+            # collect grades
             await frame.wait_for_selector("div.collapsible-card.grades__card", timeout=15000)
             cards = await frame.query_selector_all("div.collapsible-card.grades__card")
             print(f"{len(cards)} cards found:")
@@ -88,25 +91,32 @@ class InfiniteCampus(PortalEngine):
             # now try to parse the page
             parsed_dict = {}
             for card in cards:
-                # print(f"Class: {card}\n\n")
                 course_elem = await card.query_selector("h4 a")
-                grade_elem = await card.query_selector_all(".grading-score div")
-                # print(grade_elem)
-                if len(grade_elem) == 0:
-                    print("no class info") 
-                    continue # no class info
                 course = await course_elem.inner_text()
+                # print(f"\nCourse: {course}\n")
+
+                grade_elem = await card.query_selector_all(".grading-score div")
+                if len(grade_elem) == 0:
+                    print("no class info")
+                    continue # no class info
+
+                # for i, elem in enumerate(grade_elem):
+                #     print(f"\tgrade elem [{i}] | {await elem.inner_text()}")
+
                 grade_index = -2 # the percentage grade is almost always the second to last element
-                grade_str: str = await grade_elem[grade_index].inner_text() 
-                # print(f"course: {course} grade: {grade_str}") # debug
-                try:
-                    grade = float(grade_str
-                                  .replace("(", "")
-                                  .replace(")", "")
-                                  .replace("%", ""))
-                except ValueError: # not a number grade
-                    continue 
-                parsed_dict[course] = grade
+                while grade_index < 0 and len(grade_elem) > 1:
+                    grade_str: str = await grade_elem[grade_index].inner_text()
+                    # print(f"course: {course} grade: {grade_str}")  # debug
+                    try:
+                        grade = float(grade_str
+                                      .replace("(", "")
+                                      .replace(")", "")
+                                      .replace("%", ""))
+                    except ValueError:  # NaN grade
+                        grade_index += 1
+                        continue
+                    parsed_dict[course] = grade
+                    break
 
             print(parsed_dict)
             # await self.page.pause()
