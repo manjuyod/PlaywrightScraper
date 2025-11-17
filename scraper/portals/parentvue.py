@@ -41,7 +41,7 @@ class ParentVUE(PortalEngine):
             await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
         except Exception as e:
             print(e)
-            raise e
+            raise
         finally:
             await self.page.context.tracing.stop()
             # await self.page.pause()

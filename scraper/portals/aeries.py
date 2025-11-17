@@ -80,18 +80,19 @@ class Aeries(PortalEngine):
 
             # get class table
             class_table = soup.find('div', id="divClass")
-            if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
-                if class_table is None: # failed to find class table
-                    await self.page.click("#StudentNameDropDown")
-                    await self.page.click("#StudentNameDropDownMenu")
-                    await self.page.wait_for_load_state()
-                    await self.page.wait_for_timeout(3000)
-                    # try again with new page
-                    soup = await self.get_soup()
-                    class_table = soup.find('div', id='divClass')
-                # parse the class table
-                class_cards = class_table.select('div.Card')
-                print(f"[AERIES] found {len(class_cards)} courses")
+            # if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
+            if class_table is None: # failed to find class table
+                await self.page.click("#StudentNameDropDown")
+                await self.page.click("#StudentNameDropDownMenu")
+                await self.page.wait_for_load_state()
+                await self.page.wait_for_timeout(3000)
+                # try again with new page
+                soup = await self.get_soup()
+                class_table = soup.find('div', id='divClass')
+            # parse the class table
+            class_cards = class_table.select('div.Card')
+            print(f"[AERIES] found {len(class_cards)}")
+            if len(class_cards) > 0:
                 for card in class_cards:  # parse the cards
                     # course name
                     class_link = card.find("a", class_="TextHeading")
@@ -105,7 +106,7 @@ class Aeries(PortalEngine):
                         grade = grade_str
                         # add to dictionary
                         courses_dict[course_name.upper()] = grade
-            else: # newport portals are weird
+            else: # if we dont have grades on the home page
                 await self.page.click('#NavMainGrades')
                 await self.page.click('#NavSubGrades') # sometimes this doesn't exist and we should bail early
                 await self.page.wait_for_url('**/Grades**', timeout=10000)

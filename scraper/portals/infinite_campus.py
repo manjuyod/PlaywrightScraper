@@ -12,7 +12,9 @@ from .base import PortalEngine, PlaywrightTimeout
 @register_portal("infinite_campus")
 class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
-    
+
+    # username_field_id = 'username'
+    # password_field_id = 'password'
     # ---------------------- LOGIN (home only) ----------------------
     @retry(
         stop=stop_after_attempt(3),
@@ -22,7 +24,6 @@ class InfiniteCampus(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
         print(f"searching for {first_name}")
-        #TODO: Insert LoginError logic
         try:
             await self.page.goto(self.login_url, wait_until="domcontentloaded")
             await self.page.wait_for_timeout(500)
@@ -40,8 +41,9 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_timeout(1500)
             await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
-        except Exception as e:
+        except self.LoginError as e:
             print(e)
+            raise
         finally:
             await self.page.context.tracing.stop()
     # helper
@@ -71,6 +73,7 @@ class InfiniteCampus(PortalEngine):
             await self.page.wait_for_url("**/grades*", timeout = 20000)
             await self.page.wait_for_load_state("networkidle")
             frame = self.page.frame(name="main-workspace")
+            # target the correct timeframe
             if "chandleraz" in self.page.url:
                 await frame.get_by_role("button", name="Q2").click()
             else:
@@ -80,6 +83,7 @@ class InfiniteCampus(PortalEngine):
                     await qt2.click()
                 except PlaywrightTimeout:
                     pass
+            # collect grades
             await frame.wait_for_selector("div.collapsible-card.grades__card", timeout=15000)
             cards = await frame.query_selector_all("div.collapsible-card.grades__card")
             print(f"{len(cards)} cards found:")
@@ -88,13 +92,16 @@ class InfiniteCampus(PortalEngine):
             parsed_dict = {}
             for card in cards:
                 course_elem = await card.query_selector("h4 a")
+                course = await course_elem.inner_text()
+                # print(f"\nCourse: {course}\n")
+
                 grade_elem = await card.query_selector_all(".grading-score div")
                 if len(grade_elem) == 0:
-                    print("no class info") 
+                    print("no class info")
                     continue # no class info
 
                 percent_text: str | None = None
-                for elem in grade_elem:
+                for elem in reversed(grade_elem):
                     text = (await elem.inner_text()).strip()
                     if "%" in text:
                         percent_text = text
