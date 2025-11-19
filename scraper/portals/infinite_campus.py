@@ -100,23 +100,26 @@ class InfiniteCampus(PortalEngine):
                     print("no class info")
                     continue # no class info
 
-                # for i, elem in enumerate(grade_elem):
-                #     print(f"\tgrade elem [{i}] | {await elem.inner_text()}")
+                percent_text: str | None = None
+                for elem in reversed(grade_elem):
+                    text = (await elem.inner_text()).strip()
+                    if "%" in text:
+                        percent_text = text
 
-                grade_index = -2 # the percentage grade is almost always the second to last element
-                while grade_index < 0 and len(grade_elem) > 1:
-                    grade_str: str = await grade_elem[grade_index].inner_text()
-                    # print(f"course: {course} grade: {grade_str}")  # debug
-                    try:
-                        grade = float(grade_str
-                                      .replace("(", "")
-                                      .replace(")", "")
-                                      .replace("%", ""))
-                    except ValueError:  # NaN grade
-                        grade_index += 1
-                        continue
-                    parsed_dict[course] = grade
-                    break
+                if percent_text is None:
+                    print("no percentage grade found")
+                    continue
+
+                course = await course_elem.inner_text()
+                grade_str = percent_text
+                try:
+                    grade = float(grade_str
+                                  .replace("(", "")
+                                  .replace(")", "")
+                                  .replace("%", ""))
+                except ValueError: # not a number grade
+                    continue 
+                parsed_dict[course] = grade
 
             print(parsed_dict)
             # await self.page.pause()
