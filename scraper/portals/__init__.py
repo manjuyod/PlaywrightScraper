@@ -67,17 +67,13 @@ for portal in managed_portals.keys():
 # Optional helper: detect portal key from a login URL
 # ---------------------------
 
-def detect_portal_from_url(url: str) -> str | None:
-    """
-    Try to infer a portal key by scanning for known substrings in `url`.
-    Returns the key (e.g., 'canvas') or None if no match.
-    """
+def get_portal_key_from_url(url: str) -> str | None:
+    """Sorts portal links into 'buckets' defined from portals that we currently manage"""
     if not url:
         return None
-    u = url.lower()
-    for key, needles in managed_portals.items():
-        if any(n.lower() in u for n in needles):
-            return key
+    for portal, rules in managed_portals.items():
+        if any(rule in url for rule in rules):
+            return portal
     return None
 
 
@@ -86,5 +82,5 @@ __all__ = [
     "register_portal",
     "get_portal",
     "managed_portals",
-    "detect_portal_from_url",
+    "get_portal_key_from_url",
 ]
