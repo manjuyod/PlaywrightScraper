@@ -267,14 +267,16 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     success_count += 1
                     print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]", flush=True)
                 except Exception as e:
-                    error_result = {
-                        "student_id": student["id"],
-                        "error": f"{type(e).__name__}: {e}",
-                        "traceback": format_exception_only(type(e), e),
-                    }
-                    f.write(json.dumps(error_result) + "\n")
-                    error_count += 1
-                    print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
+                    if 'Connection closed while reading from the driver' not in str(e):
+                        error_result = {
+                            "db_id": student["db_id"],
+                            "student_id": student["id"],
+                            "error": f"{type(e).__name__}: {e}",
+                            "traceback": format_exception_only(type(e), e),
+                        }
+                        f.write(json.dumps(error_result) + "\n")
+                        error_count += 1
+                        print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
 
     end_time = time()
     time_elapsed = int(end_time - begin_time)

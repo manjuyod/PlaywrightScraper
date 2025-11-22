@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import Page, TimeoutError
 
-from .base import PortalEngine
+from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal, LoginError
 
 
@@ -125,7 +125,7 @@ class CanvasEngine(PortalEngine):
         self.user = username
 
         # Defaults + base
-        self.login_url = login_url or "https://canvas.instructure.com/login/canvas"
+        self.login_url = login_url
         self._base = _origin(self.login_url)
 
         # Term context from date or optional override
@@ -156,9 +156,12 @@ class CanvasEngine(PortalEngine):
 
     async def _exists(self, selector: str, *, timeout: int = 3000) -> bool:
         try:
+            print(f'locating {selector} |\t')
             await self.page.wait_for_selector(selector, timeout=timeout, state="visible")
+            print('Elem exists')
             return True
         except TimeoutError:
+            print('Failed to find elem')
             return False
 
     async def _container_text_for(self, a_locator) -> str:
@@ -184,7 +187,7 @@ class CanvasEngine(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=0.8, min=0.8, max=3),
-        retry=retry_if_exception_type(LoginError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None):
@@ -194,60 +197,67 @@ class CanvasEngine(PortalEngine):
                 raise LoginError("Missing login_url for Canvas")
 
             await self._goto(self.login_url)
+            await self.page.wait_for_timeout(3000)
 
-            # Native Canvas selectors
-            uid_sel = "input[name='pseudonym_session[unique_id]']"
-            pwd_sel = "input[name='pseudonym_session[password]']"
-
-            # Generic SSO fallbacks
-            generic_user = "input[type='email'], input[name='username'], input#username, input[autocomplete='username']"
-            generic_pass = "input[type='password'], input[name='password'], input#password, input[autocomplete='current-password']"
-
-            # Fill fields
-            filled = False
-            if await self._exists(uid_sel, timeout=4000) and await self._exists(pwd_sel, timeout=4000):
-                await self._fill(uid_sel, self.username)
-                await self._fill(pwd_sel, self.password)
-                filled = True
+            if 'microsoft' in self.page.url:
+                await self.microsoft_login()
+            elif 'google' in self.page.url:
+                await self.google_signin()
             else:
-                if await self._exists(generic_user, timeout=2000):
-                    await self._fill(generic_user, self.username)
+                # Native Canvas selectors
+                uid_sel = "input[name='pseudonym_session[unique_id]']"
+                pwd_sel = "input[name='pseudonym_session[password]']"
+
+                # Generic SSO fallbacks
+                generic_user = "input[type='email'], input[name='username'], input#username, input[autocomplete='username']"
+                generic_pass = "input[type='password'], input[name='password'], input#password, input[autocomplete='current-password']"
+
+                # Fill fields
+                filled = False
+                if await self._exists(uid_sel, timeout=4000) and await self._exists(pwd_sel, timeout=4000):
+                    await self._fill(uid_sel, self.username)
+                    await self._fill(pwd_sel, self.password)
                     filled = True
-                if await self._exists(generic_pass, timeout=2000):
-                    await self._fill(generic_pass, self.password)
-                    filled = True
+                else:
+                    print('Non Canvas login, use fallback')
+                    if await self._exists(generic_user, timeout=2000):
+                        await self._fill(generic_user, self.username)
+                    if await self._exists(generic_pass, timeout=2000):
+                        await self._fill(generic_pass, self.password)
+                        print('Fallback successful')
+                        filled = True
 
-            if not filled:
-                raise LoginError("Could not locate username/password fields")
+                if not filled:
+                    raise LoginError("Could not locate username/password fields")
 
-            # Robust submit
-            submit_selectors = [
-                "button[type='submit']",
-                "button:has-text('Log In')",
-                "button:has-text('Login')",
-                "button:has-text('Sign in')",
-                "input[type='submit']",
-            ]
-            for sel in submit_selectors:
-                if await self._exists(sel, timeout=1200):
-                    await self._click(sel)
-                    break
-            else:
-                try:
-                    await self.page.focus("input[type='password'], input[name='pseudonym_session[password]'], input#password")
-                    await self.page.keyboard.press("Enter")
-                except Exception:
-                    pass
-
-            # Interstitials
-            await self.page.wait_for_load_state("domcontentloaded")
-            nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=15000)
-            if not nav_ok:
-                for btn_txt in ("Continue", "Yes", "Accept", "Allow", "Skip"):
-                    if await self._exists(f"button:has-text('{btn_txt}')", timeout=1200):
-                        await self._click(f"button:has-text('{btn_txt}')")
+                # Robust submit
+                submit_selectors = [
+                    # "button[type='submit']",
+                    # "button:has-text('Log In')",
+                    # "button:has-text('Login')",
+                    # "button:has-text('Sign in')",
+                    "input[type='submit']",
+                ]
+                for sel in submit_selectors:
+                    if await self._exists(sel, timeout=1200):
+                        await self._click(sel)
                         break
-                nav_ok = await self._exists("nav.ic-app-header__menu-list, [aria-label='Global Navigation']", timeout=8000)
+                else:
+                    try:
+                        await self.page.focus("input[type='password'], input[name='pseudonym_session[password]'], input#password")
+                        await self.page.keyboard.press("Enter")
+                    except Exception:
+                        pass
+
+                # Interstitials
+                await self.page.wait_for_load_state("domcontentloaded")
+            nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
+            # if not nav_ok:
+            #     for btn_txt in ("Continue", "Yes", "Accept", "Allow", "Skip"):
+            #         if await self._exists(f"button:has-text('{btn_txt}')", timeout=1200):
+            #             await self._click(f"button:has-text('{btn_txt}')")
+            #             break
+            #     nav_ok = await self._exists("nav.ic-app-header__menu-list, [aria-label='Global Navigation']", timeout=8000)
 
             if not nav_ok:
                 raise LoginError("Canvas login did not reach dashboard/global nav")
@@ -261,17 +271,77 @@ class CanvasEngine(PortalEngine):
                 pass
 
         except Exception as e:
+            print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
-        """
-        Flow:
-          - Open 'Courses' tray (or fall back to /courses)
-          - Collect '/courses/<id>' links whose row/card text matches CURRENT term (allow AND NOT deny)
-          - For each course, open 'Grades' and parse final/total grade
-        """
+        # """
+        # Flow:
+        #   - Open 'Courses' tray (or fall back to /courses)
+        #   - Collect '/courses/<id>' links whose row/card text matches CURRENT term (allow AND NOT deny)
+        #   - For each course, open 'Grades' and parse final/total grade
+        # """
         # Ensure base reflects post-login host
+        try:
+            parsed = await self.parse_grades_from_list_view()
+
+            if len(parsed) == 0:
+                parsed = await self.parse_grades_iterative()
+
+            return parsed
+        except Exception as e:
+            print(f"[Canvas] Error: {e}")
+            raise
+        finally:
+            pass
+            # await self.page.pause()
+        print(parsed)
+        return {"parsed_grades": parsed}
+
+    async def parse_grades_from_list_view(self) -> dict[str, float]:
+        try:
+            parsed: dict[str, float] = {}
+            # 1. show grades
+            show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+            if await show_grades_button.count() > 0:
+                await show_grades_button.click()
+            else: # switch views then try again
+                await self.page.locator('[data-testid="dashboard-options-button"]').click()
+                await self.page.locator('[data-testid="list-view-menu-item"]').click()
+
+                await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+                show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+
+                if await show_grades_button.count() > 0:
+                    await show_grades_button.click()
+                else:
+                    print('failed to switch to a valid view')
+            # await self.page.wait_for_timeout(2000) # small wait to allow population
+            await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
+            # 2. parse
+            course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
+            count = len(course_grades)
+            print(f"Found {count} grades")
+            # print("Course cards: ", course_cards)
+            for i in range(count):
+                course_grade = course_grades[i]
+                course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
+                course = await course_card.get_by_role('link').inner_text()
+                grade_str: str = await course_grade.inner_text()
+                if '%' in grade_str:
+                    grade = float(grade_str.replace('%', ''))
+                else: continue # NaN
+
+                parsed[course] = grade
+                # print(course, grade_str)
+            # print(grade_cards)
+            return parsed
+        finally:
+            pass
+            # await self.page.pause()
+
+    async def parse_grades_iterative(self):
         try:
             cur = self.page.url
             if cur:
@@ -391,9 +461,6 @@ class CanvasEngine(PortalEngine):
                 results.append({"course_id": cid, "course_name": course_name, "grades_url": self.page.url, "error": "Timeout"})
             except Exception as e:
                 results.append({"course_id": cid, "course_name": course_name, "grades_url": self.page.url, "error": str(e)})
-
-        return {"parsed_grades": results}
-
     # ----------------- HTML parsing heuristics -----------------
     def _parse_canvas_grades_html(self, html: str) -> Dict[str, Any]:
         soup = BeautifulSoup(html, "html.parser")
