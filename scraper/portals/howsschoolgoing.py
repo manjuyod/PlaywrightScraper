@@ -49,7 +49,7 @@ class HowsSchoolGoing(PortalEngine):
         parsed = {}
         try:
             soup = await self.get_soup()
-            course_table = soup.find("table", id="DataTables_Table_0")
+            course_table = soup.find("div", class_="dataSource_Common_StudentProfile_Grades_GradesTable")
             courses = course_table.find_all('tr')
             print(f'found {len(courses)} courses')
             for course in courses:
@@ -69,7 +69,11 @@ class HowsSchoolGoing(PortalEngine):
                     grade = columns[1].text
                     grade = grade[2:6]
                     # print(f'found {title}\n\tgrade: {grade}')
-                    parsed[title] = grade
+                    try:
+                        grade = float(grade)
+                        parsed[title] = grade
+                    except ValueError: # NaN Grade
+                        continue
         except Exception as e:
             print(e)
         finally:

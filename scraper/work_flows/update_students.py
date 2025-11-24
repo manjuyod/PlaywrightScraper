@@ -192,21 +192,8 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
                 return True
     return False
 
-from scraper.portals import managed_portals
-def get_portal_from_record(record: dict) -> str | None:
-    """Sorts portal links into 'buckets' defined from portals that we currently manage"""
-    portal_link = record["portal1"]
-    # print(f'\n{portal_link}')
-    for portal, rules in managed_portals.items():
-        # print(portal)
-        for rule in rules:
-            # print(f'\t {rule}')
-            # print(rule in portal_link)
-            if rule in portal_link:
-                # print(f'found {portal} for {portal_link}')
-                return portal
-    # print(f"No portal found for {portal_link}")
-    return None
+from scraper.portals import get_portal_key_from_url
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Main sync
@@ -259,7 +246,7 @@ def sync_students(target_fid: int | None = None) -> None:
                     if sid is None:
                         # INSERT
                         weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
-                        portal = get_portal_from_record(sheet_rec)
+                        portal = get_portal_key_from_url(sheet_rec['portal1'])
                         cur.execute("""
                             INSERT INTO Student
                               (franchiseid, firstname, lastname, grade,
@@ -287,7 +274,7 @@ def sync_students(target_fid: int | None = None) -> None:
                     # UPDATE vs SKIP
                     db_row = _fetch_db_row(conn, sid)
                     if _differs(db_row, sheet_rec) or db_row['portal'] is None:
-                        portal = get_portal_from_record(sheet_rec)
+                        portal = get_portal_key_from_url(sheet_rec['portal1'])
                         cur.execute("""
                             UPDATE Student
                             SET grade = %s,

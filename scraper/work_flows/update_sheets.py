@@ -114,6 +114,7 @@ def _query_students(conn: connection) -> pd.DataFrame:
             p2password,
             weeklydata,
             passwordgood,
+            error_msg,
             status
         FROM Student
     """

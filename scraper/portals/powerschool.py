@@ -34,13 +34,16 @@ class PowerSchool(PortalEngine):
         await self.page.goto(self.login_url, wait_until="domcontentloaded")
         await self.page.wait_for_timeout(500)
 
-        # 2) Fill & submit
-        await self.page.fill("#fieldAccount", self.sid)
-        await self.page.fill("#fieldPassword", self.pw)
-        await self.page.click("#btn-enter-sign-in")
+        if 'microsoft' in self.page.url:
+            await self.microsoft_login()
+        else:
+            # 2) Fill & submit
+            await self.page.fill("#fieldAccount", self.sid)
+            await self.page.fill("#fieldPassword", self.pw)
+            await self.page.click("#btn-enter-sign-in")
 
-        # 3) Give it time to load the gradebook table
-        await self.page.wait_for_timeout(8000)
+            # 3) Give it time to load the gradebook table
+            await self.page.wait_for_timeout(8000)
 
     @retry(
         stop=stop_after_attempt(3),

@@ -51,7 +51,7 @@ class BlackbaudBGHS(PortalEngine):
             
             await self.google_signin()
             if "resourceboard" not in self.page.url:
-                await self.page.locator("#primary-button").click()
+                await self.page.locator('[skyid="primary-button"]').click()
             await self.page.wait_for_load_state()
             await self.page.wait_for_timeout(5000)
         except Exception as e:

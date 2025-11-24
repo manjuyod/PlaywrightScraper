@@ -12,7 +12,7 @@ from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
-from scraper.portals import get_portal, LoginError, detect_portal_from_url
+from scraper.portals import get_portal, LoginError, get_portal_key_from_url
 from typing import Dict, List
 
 load_dotenv()
@@ -62,13 +62,14 @@ def get_students_from_db(
     franchise_id: int | None = None,
     student_id: int | None = None,
     portal: str | None = None,
+    status: str | None = None
 ):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id.
     If `portal` is provided, we filter in Python (post auto-detection) so rows with portal=NULL aren't dropped.
     """
-    print(f"[runner] get_students_from_db(): fid={franchise_id} sid={student_id} portal={portal}", flush=True)
+    print(f"[runner] get_students_from_db(): fid={franchise_id} sid={student_id} portal={portal} status={status}", flush=True)
     students_list = []
     try:
         with db_conn() as conn:
@@ -96,6 +97,9 @@ def get_students_from_db(
             elif franchise_id is not None:
                 conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
+            elif status is not None:
+                conditions.append("status = %s")
+                params.append(status)
 
             query = base + " WHERE " + " AND ".join(conditions)
             print("[runner] SQL:", query, flush=True)
@@ -112,8 +116,8 @@ def get_students_from_db(
                 portal_raw = row["portal"]  # may be NULL/None
                 portal_key = (portal_raw or "").strip().lower()
                 if not portal_key:
-                    portal_key = detect_portal_from_url(login_url) or ""
-                print(f"[runner] row ID={row['id']} portal_raw={portal_raw!r} → portal_key={portal_key!r}", flush=True)
+                    portal_key = get_portal_key_from_url(login_url) or ""
+                # print(f"[runner] row ID={row['id']} portal_raw={portal_raw!r} → portal_key={portal_key!r}", flush=True)
 
                 # If CLI asked for a specific portal, enforce it now (post-detection)
                 if want_portal and portal_key != want_portal:
@@ -146,8 +150,8 @@ def get_students_from_db(
     return students_list
 
 
-def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
-    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal)
+def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
+    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
 
 
 async def scrape_one(pw: Playwright, student: dict):
@@ -186,7 +190,24 @@ async def scrape_one(pw: Playwright, student: dict):
         try:
             await scraper.login(first_name=student.get("student_name"))
         except Exception as e:
-            raise LoginError(e)
+            with db_conn() as conn:
+
+                cur = conn.cursor()
+
+                cur.execute(
+
+                    "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+
+                    (student["db_id"],)
+
+                )
+
+                conn.commit()
+
+            # print("\t\t\tBypassed credentials !good, dont forget to reset")
+
+            print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
+            raise LoginError(e) # raise once again so we log the error in the output json
         print(f"Login successful for {student['id']}, fetching grades…", flush=True)
         grades = await scraper.fetch_grades()
 
@@ -209,13 +230,13 @@ async def scrape_one(pw: Playwright, student: dict):
         await browser.close()
 
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None):
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     print(f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}", flush=True)
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "grades.jsonl"
 
-    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal)
+    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     print(f"[runner] main(): fetched {len(student_list)} students", flush=True)
 
     if not student_list:
@@ -246,18 +267,16 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                     success_count += 1
                     print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]", flush=True)
                 except Exception as e:
-                    if isinstance(e, LoginError):
-                        # Optional: write back to DB if you want to mark bad creds
-                        print("\t\t\tBypassed credentials !good, dont forget to reset", flush=True)
-                        print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0", flush=True)
-                    error_result = {
-                        "student_id": student["id"],
-                        "error": f"{type(e).__name__}: {e}",
-                        "traceback": format_exception_only(type(e), e),
-                    }
-                    f.write(json.dumps(error_result) + "\n")
-                    error_count += 1
-                    print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
+                    if 'Connection closed while reading from the driver' not in str(e):
+                        error_result = {
+                            "db_id": student["db_id"],
+                            "student_id": student["id"],
+                            "error": f"{type(e).__name__}: {e}",
+                            "traceback": format_exception_only(type(e), e),
+                        }
+                        f.write(json.dumps(error_result) + "\n")
+                        error_count += 1
+                        print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
 
     end_time = time()
     time_elapsed = int(end_time - begin_time)
@@ -287,11 +306,16 @@ if __name__ == "__main__":
         type=str,
         help="Test a single portal by name."
     )
+    parser.add_argument(
+        "-stat", "--status",
+        type=str,
+        help="Filter for the state of students."
+    )
     args = parser.parse_args()
     print("[runner] CLI args:", args, flush=True)
 
     try:
-        asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal))
+        asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status = args.status))
     except Exception as e:
         import traceback as _tb
         print("[runner] FATAL EXCEPTION:", repr(e), flush=True)
