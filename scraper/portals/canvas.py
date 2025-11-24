@@ -285,19 +285,16 @@ class CanvasEngine(PortalEngine):
         # Ensure base reflects post-login host
         try:
             parsed = await self.parse_grades_from_list_view()
-
             if len(parsed) == 0:
                 parsed = await self.parse_grades_iterative()
 
+            print(parsed)
             return parsed
         except Exception as e:
             print(f"[Canvas] Error: {e}")
             raise
         finally:
             pass
-            # await self.page.pause()
-        print(parsed)
-        return {"parsed_grades": parsed}
 
     async def parse_grades_from_list_view(self) -> dict[str, float]:
         try:
