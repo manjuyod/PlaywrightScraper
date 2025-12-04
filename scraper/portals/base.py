@@ -84,5 +84,10 @@ class PortalEngine(ABC):
             await self.page.fill("input#i0118", self.pw)
             await self.page.click("#idSIButton9")
             await self.page.wait_for_load_state()
+        # await self.page.pause()
+        # did we reach a 'stay signed in' screen?
+        stay_signed_in = self.page.get_by_text('Stay signed in?')
+        if await stay_signed_in.count() > 0:
+            await self.page.click("#idSIButton9")
         # Short pause to ensure fields are recognized
         await self.page.wait_for_timeout(1000)
