@@ -58,7 +58,6 @@ def insert_grades():
                 # Skip error payloads
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
-                    # todo update status by error?
                     update_status(cur, student_id, "error", error_msg=data['error'])
                     continue
 
