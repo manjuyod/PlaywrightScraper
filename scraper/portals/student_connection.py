@@ -90,10 +90,10 @@ class StudentConnection(PortalEngine):
                 print('no pulse, fallback to assignments table')
                 parsed = await self.collect_from_assignments()
 
-            if not parsed:
-                html = await self.page.content()
-                print("Parsed 0 rows. First 4k of HTML follows:")
-                print(html[:4000])
+            # if not parsed:
+                # html = await self.page.content()
+                # print("Parsed 0 rows. First 4k of HTML follows:")
+                # print(html[:4000])
             print(f"[SC] Grades parsed: {parsed}")
             return {"parsed_grades": parsed}
         except Exception as e:

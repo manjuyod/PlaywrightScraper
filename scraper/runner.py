@@ -40,6 +40,7 @@ def db_conn() -> connection:
         user=os.getenv("PGUSER"),
         password=os.getenv("PGPASSWORD"),
         port=os.getenv("PGPORT"),
+        sslmode='require'
     )
 
 

@@ -156,12 +156,12 @@ class CanvasEngine(PortalEngine):
 
     async def _exists(self, selector: str, *, timeout: int = 3000) -> bool:
         try:
-            print(f'locating {selector} |\t')
+            # print(f'locating {selector} |\t')
             await self.page.wait_for_selector(selector, timeout=timeout, state="visible")
-            print('Elem exists')
+            # print('Elem exists')
             return True
-        except TimeoutError:
-            print('Failed to find elem')
+        except PlaywrightTimeout:
+            # print('Failed to find elem')
             return False
 
     async def _container_text_for(self, a_locator) -> str:
@@ -287,7 +287,6 @@ class CanvasEngine(PortalEngine):
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0:
                 parsed = await self.parse_grades_iterative()
-
             print(parsed)
             return parsed
         except Exception as e:
@@ -308,6 +307,7 @@ class CanvasEngine(PortalEngine):
                 await self.page.locator('[data-testid="list-view-menu-item"]').click()
 
                 await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+                await self.page.wait_for_timeout(1500)
                 show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
 
                 if await show_grades_button.count() > 0:
