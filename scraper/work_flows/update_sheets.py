@@ -458,11 +458,12 @@ def main() -> None:
         login_f = df_login_all[df_login_all["franchiseid"] == fid].copy()
         is_hs = login_f["grade"].apply(_is_hs_grade)
         good_fetch = login_f["status"] == 'synced'
+        has_been_updated = login_f['status'] != 'never'
         good_password = login_f["passwordgood"] == 1
         good = good_fetch & good_password
 
-        hs_ids  = set(login_f.loc[is_hs,  "id"].tolist())
-        ms_ids  = set(login_f.loc[~is_hs, "id"].tolist())
+        hs_ids  = set(login_f.loc[is_hs & has_been_updated,  "id"].tolist())
+        ms_ids  = set(login_f.loc[~is_hs & has_been_updated, "id"].tolist())
         err_ids = set(login_f.loc[~good, "id"].tolist())
 
         # Slice the grade-pivot source to those students
