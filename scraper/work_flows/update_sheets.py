@@ -229,8 +229,6 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
      meta rows (A/B only) → two blanks → subject rows with week columns.
     We align each student’s block to the franchise-wide weeks after computing per-student data.
     """
-    good_pw = row["passwordgood"] == 1
-    good_fetch = row["status"] == 'synced'
     # 1) meta rows (explicit strings, no NaN bleed)
     meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
     meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
@@ -238,33 +236,6 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     # 2) two blank spacer rows
     blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
 
-    # handle fails
-    if not good_pw:
-        err = pd.DataFrame(
-            [
-                {"Field": "Bad Password", "Value": "invalid entry, check credentials"},
-            ],
-            columns=["Field", "Value"],
-        )
-        return pd.concat([meta, err, blank], ignore_index=True)
-    if not good_fetch:
-        if row['status'] == 'missing grades':
-            err = pd.DataFrame(
-                [
-                    {"Field": "Missing Grades", "Value": "failed to collect grades for student"},
-                ],
-                columns=["Field", "Value"],
-            )
-            return pd.concat([meta, err, blank], ignore_index=True)
-        elif row['status'] == 'error':
-            err = pd.DataFrame(
-                [ # there should be more info here
-                    {"Field": "Error", "Value": "something bad happened"},
-                    {"Field": "Message", "Value": row['error_msg']}
-                ],
-                columns=["Field", "Value"],
-            )
-            return pd.concat([meta, err, blank], ignore_index=True)
     # 3) subject → grades for this student only
     wdata = _safe_json_loads(row["weeklydata"])
     subjects = _extract_subjects(wdata)
@@ -302,6 +273,49 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     # Final block for this student
     return pd.concat([meta, pivot_df, blank], ignore_index=True)
 
+def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
+    """
+    Return one student’s error block:
+     meta rows (A/B only) → two blanks → subject rows with week columns.
+    We align each student’s block to the franchise-wide weeks after computing per-student data.
+    """
+    good_pw = row["passwordgood"] == 1
+    good_fetch = row["status"] == 'synced'
+    # 1) meta rows (explicit strings, no NaN bleed)
+    meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
+    meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
+
+    # 2) two blank spacer rows
+    blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
+
+    # handle fails
+    if not good_pw:
+        err = pd.DataFrame(
+            [
+                {"Field": "Bad Password", "Value": "invalid entry, check credentials"},
+            ],
+            columns=["Field", "Value"],
+        )
+        return pd.concat([meta, err, blank], ignore_index=True)
+    if not good_fetch:
+        if row['status'] == 'missing grades':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Missing Grades", "Value": "failed to collect grades for student"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        elif row['status'] == 'error':
+            err = pd.DataFrame(
+                [ # there should be more info here
+                    {"Field": "Error", "Value": "something bad happened"},
+                    {"Field": "Message", "Value": row['error_msg']}
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+    raise Exception("This student does not appear to be errored")
 
 def _collect_weeks(df: pd.DataFrame) -> List[str]:
     weeks: set[str] = set()
@@ -313,13 +327,16 @@ def _collect_weeks(df: pd.DataFrame) -> List[str]:
     return sorted(weeks)
 
 
-def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str]) -> pd.DataFrame:
+def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str], err_group: bool = False) -> pd.DataFrame:
     """Legend + all student blocks in df_sub, aligned to the provided weeks."""
     legend = _build_legend_rows(weeks)
     if df_sub.empty:
         note = pd.DataFrame([{"Field": "", "Value": "(no students)"}])
         return pd.concat([legend, note], ignore_index=True)
-    frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
+    if err_group:
+        frames = [_build_student_err_block(row) for _, row in df_sub.iterrows()]
+    else:
+        frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
     return pd.concat([legend, *frames], ignore_index=True)
 
 
@@ -437,8 +454,8 @@ def main() -> None:
         good_password = login_f["passwordgood"] == 1
         good = good_fetch & good_password
 
-        hs_ids  = set(login_f.loc[is_hs & good,  "id"].tolist())
-        ms_ids  = set(login_f.loc[~is_hs & good, "id"].tolist())
+        hs_ids  = set(login_f.loc[is_hs,  "id"].tolist())
+        ms_ids  = set(login_f.loc[~is_hs, "id"].tolist())
         err_ids = set(login_f.loc[~good, "id"].tolist())
 
         # Slice the grade-pivot source to those students
@@ -449,7 +466,7 @@ def main() -> None:
         # Build the 3 grade tabs using the SAME weeks list
         hs_df  = _build_dataframe_for_group(grp_hs,  weeks)
         ms_df  = _build_dataframe_for_group(grp_ms,  weeks)
-        err_df = _build_dataframe_for_group(grp_err, weeks)
+        err_df = _build_dataframe_for_group(grp_err, weeks, err_group=True)
 
         # Assemble sheets with header flags
         frames = {
