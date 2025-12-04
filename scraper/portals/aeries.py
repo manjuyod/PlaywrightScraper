@@ -89,10 +89,10 @@ class Aeries(PortalEngine):
                 # try again with new page
                 soup = await self.get_soup()
                 class_table = soup.find('div', id='divClass')
-            # parse the class table
-            class_cards = class_table.select('div.Card')
-            print(f"[AERIES] found {len(class_cards)}")
-            if len(class_cards) > 0:
+            if class_table is not None and len(class_table.select('div.Card')) > 0:
+                # parse the class table
+                class_cards = class_table.select('div.Card')
+                print(f"[AERIES] found {len(class_cards)}")
                 for card in class_cards:  # parse the cards
                     # course name
                     class_link = card.find("a", class_="TextHeading")
@@ -100,12 +100,10 @@ class Aeries(PortalEngine):
                     # grade
                     grade_div = card.find("div", class_="Grade")
                     grade_span = grade_div.find("span")
-                    if grade_span is not None:
+                    if grade_span is not None: # as long as the grade exists
                         grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
                         grade_str = grade_str.replace("(", "").replace(")", "").replace("%","") if grade_str is not None else None
-                        grade = grade_str
-                        # add to dictionary
-                        courses_dict[course_name.upper()] = grade
+                        courses_dict[course_name.upper()] = grade_str # add to dictionary
             else: # if we dont have grades on the home page
                 await self.page.click('#NavMainGrades')
                 await self.page.click('#NavSubGrades') # sometimes this doesn't exist and we should bail early
@@ -123,8 +121,7 @@ class Aeries(PortalEngine):
                         continue
                     course_name.find('label').decompose()
                     course_name = course_name.get_text(strip=True)
-                    print("Course: ", course_name)
-                    course_letter: bs4.Tag | None = course.find('td', {'data-tcfc': 'GRD.M2'}) # course letter
+                    course_letter: bs4.Tag | str | None = course.find('td', {'data-tcfc': 'GRD.M2'}) # course letter
                     if course_letter == None:
                         continue # skip the courses without a letter
                     course_letter_label: bs4.Tag | None = course_letter.find('label')

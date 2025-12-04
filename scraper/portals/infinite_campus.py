@@ -95,16 +95,17 @@ class InfiniteCampus(PortalEngine):
                 course = await course_elem.inner_text()
                 # print(f"\nCourse: {course}\n")
 
-                grade_elem = await card.query_selector_all(".grading-score div")
-                if len(grade_elem) == 0:
+                grade_elems = await card.query_selector_all(".grading-score div")
+                if len(grade_elems) == 0:
                     print("no class info")
                     continue # no class info
 
                 percent_text: str | None = None
-                for elem in reversed(grade_elem):
+                for elem in reversed(grade_elems):
                     text = (await elem.inner_text()).strip()
                     if "%" in text:
                         percent_text = text
+                        break
 
                 if percent_text is None:
                     print("no percentage grade found")

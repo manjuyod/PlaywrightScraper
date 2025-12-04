@@ -42,8 +42,8 @@ class PowerSchool(PortalEngine):
             await self.page.fill("#fieldPassword", self.pw)
             await self.page.click("#btn-enter-sign-in")
 
-            # 3) Give it time to load the gradebook table
-            await self.page.wait_for_timeout(8000)
+        # 3) Give it time to load the gradebook table
+        await self.page.wait_for_timeout(8000)
 
     @retry(
         stop=stop_after_attempt(3),
