@@ -287,8 +287,7 @@ def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
 
     # 2) two blank spacer rows
     blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
-
-    # handle fails
+    # handle fails / not updated
     if not good_pw:
         err = pd.DataFrame(
             [
@@ -298,6 +297,14 @@ def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
         )
         return pd.concat([meta, err, blank], ignore_index=True)
     if not good_fetch:
+        if row['status'] == 'never':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Never updated", "Value": "Student has never been updated"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
         if row['status'] == 'missing grades':
             err = pd.DataFrame(
                 [
