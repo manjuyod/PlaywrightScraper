@@ -49,7 +49,7 @@ managed_portals: Dict[str, list[str]] = {
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
     "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
-    "bghs_blackbaud": ["bishopgorman"],
+    "blackbaud": ["myschoolapp, blackbaud"],
     "aeries": ["aeries", "LoginParent.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],
     "student_connection": ["studentconnect", "k12.ca.us"],
