@@ -15,6 +15,8 @@ from playwright.async_api import Page, TimeoutError
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal, LoginError
 
+from .utils import *
+
 
 # --------------------- utilities ---------------------
 
@@ -107,41 +109,6 @@ class CanvasEngine(PortalEngine):
       - login_url (Student.Portal1), e.g. https://<tenant>.instructure.com/login/canvas
     """
 
-    def __init__(
-        self,
-        page: Page,
-        username: str,
-        password: str,
-        *,
-        student_name: Optional[str] = None,
-        login_url: Optional[str] = None,
-    ):
-        super().__init__(page, username, password, login_url=login_url, student_name=student_name)
-
-        # Ensure attributes used here exist (don't shadow self.login)
-        self.page = page
-        self.username = username
-        self.password = password
-        self.user = username
-
-        # Defaults + base
-        self.login_url = login_url
-        self._base = _origin(self.login_url)
-
-        # Term context from date or optional override
-        ctx = _term_context_from_today()
-        # Manual override (rarely needed): CANVAS_TERM = FALL|SPRING, CANVAS_FALL_YEAR=YYYY
-        term_override = os.getenv("CANVAS_TERM")
-        fall_override = os.getenv("CANVAS_FALL_YEAR")
-        if term_override in ("FALL", "SPRING") and fall_override and fall_override.isdigit():
-            ctx = {"fall_year": int(fall_override), "spring_year": int(fall_override) + 1, "term": term_override}
-
-        self.fall_year = ctx["fall_year"]
-        self.spring_year = ctx["spring_year"]
-        self.term = ctx["term"]
-        self._allow_regexes, self._deny_regexes = _build_term_regexes(self.fall_year, self.spring_year, self.term)
-        print(f"[CanvasEngine] Term filter: {self.term} {self.fall_year} (cycle {self.fall_year}-{self.spring_year})")
-
     # ----------------- helpers -----------------
     async def _goto(self, url: str):
         await self.page.goto(url, wait_until="domcontentloaded")
@@ -196,79 +163,24 @@ class CanvasEngine(PortalEngine):
             if not self.login_url:
                 raise LoginError("Missing login_url for Canvas")
 
-            await self._goto(self.login_url)
-            await self.page.wait_for_timeout(3000)
+            # Native Canvas selectors
+            uid_sel = "input[name='pseudonym_session[unique_id]']"
+            pwd_sel = "input[name='pseudonym_session[password]']"
 
-            if 'microsoft' in self.page.url:
-                await self.microsoft_login()
-            elif 'google' in self.page.url:
-                await self.google_signin()
-            else:
-                # Native Canvas selectors
-                uid_sel = "input[name='pseudonym_session[unique_id]']"
-                pwd_sel = "input[name='pseudonym_session[password]']"
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                uid_sel,
+                pwd_sel,
+                self.microsoft_login,
+                self.google_login
+            )
 
-                # Generic SSO fallbacks
-                generic_user = "input[type='email'], input[name='username'], input#username, input[autocomplete='username']"
-                generic_pass = "input[type='password'], input[name='password'], input#password, input[autocomplete='current-password']"
-
-                # Fill fields
-                filled = False
-                if await self._exists(uid_sel, timeout=4000) and await self._exists(pwd_sel, timeout=4000):
-                    await self._fill(uid_sel, self.username)
-                    await self._fill(pwd_sel, self.password)
-                    filled = True
-                else:
-                    print('Non Canvas login, use fallback')
-                    if await self._exists(generic_user, timeout=2000):
-                        await self._fill(generic_user, self.username)
-                    if await self._exists(generic_pass, timeout=2000):
-                        await self._fill(generic_pass, self.password)
-                        print('Fallback successful')
-                        filled = True
-
-                if not filled:
-                    raise LoginError("Could not locate username/password fields")
-
-                # Robust submit
-                submit_selectors = [
-                    # "button[type='submit']",
-                    # "button:has-text('Log In')",
-                    # "button:has-text('Login')",
-                    # "button:has-text('Sign in')",
-                    "input[type='submit']",
-                ]
-                for sel in submit_selectors:
-                    if await self._exists(sel, timeout=1200):
-                        await self._click(sel)
-                        break
-                else:
-                    try:
-                        await self.page.focus("input[type='password'], input[name='pseudonym_session[password]'], input#password")
-                        await self.page.keyboard.press("Enter")
-                    except Exception:
-                        pass
-
-                # Interstitials
-                await self.page.wait_for_load_state("domcontentloaded")
+            await wait_after_nav(self.page, wait_until="domcontentloaded")
             nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
-            # if not nav_ok:
-            #     for btn_txt in ("Continue", "Yes", "Accept", "Allow", "Skip"):
-            #         if await self._exists(f"button:has-text('{btn_txt}')", timeout=1200):
-            #             await self._click(f"button:has-text('{btn_txt}')")
-            #             break
-            #     nav_ok = await self._exists("nav.ic-app-header__menu-list, [aria-label='Global Navigation']", timeout=8000)
-
-            if not nav_ok:
-                raise LoginError("Canvas login did not reach dashboard/global nav")
-
-            # After login, recompute base in case of redirect
-            try:
-                current = self.page.url
-                if current:
-                    self._base = _origin(current)
-            except Exception:
-                pass
+            await self.raise_login_error_if(not nav_ok, "Canvas login did not reach dashboard/global nav")
 
         except Exception as e:
             print(e)
@@ -276,12 +188,12 @@ class CanvasEngine(PortalEngine):
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
-        # """
-        # Flow:
-        #   - Open 'Courses' tray (or fall back to /courses)
-        #   - Collect '/courses/<id>' links whose row/card text matches CURRENT term (allow AND NOT deny)
-        #   - For each course, open 'Grades' and parse final/total grade
-        # """
+        """
+        Flow:
+          - Open 'Courses' tray (or fall back to /courses)
+          - Collect '/courses/<id>' links whose row/card text matches CURRENT term (allow AND NOT deny)
+          - For each course, open 'Grades' and parse final/total grade
+        """
         # Ensure base reflects post-login host
         try:
             parsed = await self.parse_grades_from_list_view()

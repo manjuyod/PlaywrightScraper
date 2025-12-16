@@ -16,6 +16,7 @@ from tenacity import (
 
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
+from .utils import *
 
 logger = logging.getLogger("blackbaud")
 logger.setLevel(logging.INFO)
@@ -36,23 +37,26 @@ class Blackbaud(PortalEngine):
             await self.page.context.tracing.start(screenshots=True, snapshots=True)
             print("[BBG] starting login()")
             # Entry page (Blackbaud SSO landing)
-            await self.page.goto(self.login_url, wait_until="domcontentloaded", timeout=45_000)
-            await self.page.wait_for_load_state()
+            username_selector = '#Username'
+            password_selector = ''
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                google_callback=self.google_login,
+                pre_fill_wait=3000,
+                post_fill_wait=2000
+            )
+            await wait_after_nav(self.page, pattern='**/app/**', wait_after_load=5000)
 
-
-            await self.page.fill("#Username", self.sid)
-            await self.page.get_by_role('button', name="Next").click()
-            await self.page.wait_for_load_state()
-            await self.page.wait_for_timeout(1000)
-            await self.google_signin()
-
-            await self.page.wait_for_load_state()
-            await self.page.wait_for_timeout(5000)
         except Exception as e:
             print(e)
             raise e
         finally:
-
+            print(f"URL post-login: {self.page.url}")
             await self.page.context.tracing.stop()
 
     # ── FETCH ────────────────────────────────────────────────────────────────
@@ -66,16 +70,13 @@ class Blackbaud(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """Navigate to My Day → Progress, collect per-course grades via modal."""
         try:
-            await self.page.wait_for_load_state()
-            await self.page.wait_for_timeout(2000)
-            # Go directly to Progress (faster & consistent)
-            # await self.page.goto(self.GRADES_URL, wait_until="domcontentloaded", timeout=60_000)
-            if 'progress' not in self.page.url:
+            # print(self.page.url)
+            try:
+                await self.page.wait_for_selector("#coursesContainer", timeout=6000)
+            except PlaywrightTimeout:
                 my_day_tab = self.page.get_by_role('link', name='My Day')
                 grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
-                try:
-                    await expect(my_day_tab).to_be_visible()
-                except AssertionError:
+                if not await exists(my_day_tab):
                     await self.page.locator('#site-switcher-change').click()
                     await self.page.get_by_role('link', name='Student').click()
                     await self.page.wait_for_load_state()
@@ -85,11 +86,12 @@ class Blackbaud(PortalEngine):
 
                 await my_day_tab.click()
                 await grades_tab.click()
-                await self.page.wait_for_load_state()
-                await self.page.wait_for_timeout(2000)
+                await wait_after_nav(self.page, pattern='**/progress**', wait_after_load=2000)
+                # await self.page.wait_for_timeout(2000)
 
             soup = await self.get_soup()
             courses_table = soup.find("div", id="coursesContainer")
+            # print(courses_table)
             courses = courses_table.select("div.row")
             parsed = {}
             # print(f"Course: {courses[0]}")
@@ -99,17 +101,20 @@ class Blackbaud(PortalEngine):
                 course_name = course_name_raw[:course_name_raw.index("-")]
 
                 course_grade_str: str = course.find("h3", class_="showGrade").text
-                course_grade = float(course_grade_str.replace("%", "").strip())
+                try:
+                    course_grade = float(course_grade_str.replace("%", "").strip())
+                except ValueError: # NaN grade
+                    continue
 
                 parsed[course_name] = course_grade
-                # print(course_name, course_grade)
+
             print(parsed)
             return {"parsed_grades": parsed}
         except Exception as e:
             print(e)
         finally:
-            pass
             # await self.page.pause()
+            pass
 
     # ── PARSERS ──────────────────────────────────────────────────────────────
    

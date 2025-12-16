@@ -27,10 +27,10 @@ class PortalEngine(ABC):
         html = await self.page.content()
         return BeautifulSoup(html, "html.parser")
 
-    async def raise_if_login_error(self, error_condition: bool):
+    async def raise_login_error_if(self, error_condition: bool, message: str = ""):
         """Recieves a condition on which the login has failed, raises LoginError if true"""
         if error_condition:
-            raise self.LoginError(f'@{self.login_url}\nFailed to login {self.sid}')
+            raise self.LoginError(f'@{self.login_url}\nFailed to login {self.sid}\n{message}')
 
     @staticmethod
     def percent_from_letter_grade(letter_grade: str):
@@ -59,7 +59,7 @@ class PortalEngine(ABC):
         pass
 
 # universal flows
-    async def google_signin(self):
+    async def google_login(self):
         # GOOGLE SIGN-IN
         await self.page.fill("input#identifierId", self.sid)
         await self.page.wait_for_timeout(3000)

@@ -84,7 +84,7 @@ def get_students_from_db(
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal,
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal2, portal,
                        YearStart, YearEnd, PasswordGood, FranchiseID
                 FROM Student
             """
@@ -142,6 +142,7 @@ def get_students_from_db(
                         "student_name": row["firstname"],
                         "id": row["p1username"],
                         "login_url": login_url,
+                        "alt_login_url": row['portal2'],
                         "password": row["p1password"],
                         "portal": portal_key,  # guaranteed non-empty here
                         "auth_images": auth_images,
@@ -184,6 +185,7 @@ async def scrape_one(pw: Playwright, student: dict):
         student["password"],
         student_name=student.get("student_name"),
         login_url=student.get("login_url"),
+        alt_portal_url=student.get("alt_login_url")
     )
 
     # Only GPS uses pictograph answers
@@ -197,13 +199,13 @@ async def scrape_one(pw: Playwright, student: dict):
         except Exception:
             with db_conn() as conn:
                 cur = conn.cursor()
-                cur.execute(
-                    "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-                    (student["db_id"],)
-                )
-                conn.commit()
+                # cur.execute(
+                #     "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+                #     (student["db_id"],)
+                # )
+                # conn.commit()
 
-            # print("\t\t\tBypassed credentials !good, dont forget to reset")
+            print("\t\t\tBypassed credentials !good, dont forget to reset")
 
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
             raise LoginError(e) # raise once again so we log the error in the output json
@@ -279,6 +281,8 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         }
                         f.write(json.dumps(error_result) + "\n")
                         print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
+
+    # Compute summary
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / max(1, len(student_list))

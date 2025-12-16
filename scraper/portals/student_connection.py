@@ -41,7 +41,7 @@ class StudentConnection(PortalEngine):
                 login_error = await self.page.get_by_text("Login Not Found").count() > 0
             except: # not a failed login if this errors
                 pass
-            await self.raise_if_login_error(login_error)
+            await self.raise_login_error_if(login_error)
             # Wait until the URL contains 'PortalMainPage' indicating successful login
             await self.page.wait_for_url(lambda url: "PortalMainPage" in url, timeout=20_000)
             # Wait for network to be idle to ensure the home page has loaded

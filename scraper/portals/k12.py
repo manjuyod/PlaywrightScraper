@@ -6,6 +6,9 @@ from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from scraper.portals.utils import universal_login_flow
+
+
 @register_portal("k12")
 class K12(PortalEngine):
     @retry(
@@ -15,18 +18,27 @@ class K12(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            # 1) Load login page
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(500)
-            # Fill username
-            await self.page.fill('#okta-signin-username', self.sid)
-            # Fill password
-            await self.page.fill('#okta-signin-password', self.pw)
-            # Login
-            # with self.page.expect_navigation()
-            await self.page.locator('#okta-signin-submit').click()
-            await self.page.wait_for_timeout(3000)
-
+            # # 1) Load login page
+            # await self.page.goto(self.login_url, wait_until="domcontentloaded")
+            # await self.page.wait_for_timeout(500)
+            # # Fill username
+            # await self.page.fill('#okta-signin-username', self.sid)
+            # # Fill password
+            # await self.page.fill('#okta-signin-password', self.pw)
+            # # Login
+            # # with self.page.expect_navigation()
+            # await self.page.locator('#okta-signin-submit').click()
+            # await self.page.wait_for_timeout(3000)
+            username_selector = '#okta-signin-username'
+            pw_selector = '#okta-signin-password'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                pw_selector
+            )
             # nav to grades page
         except Exception as e:
             print(e)

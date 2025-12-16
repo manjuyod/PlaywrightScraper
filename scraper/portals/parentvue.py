@@ -8,6 +8,7 @@ import re
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from .utils import *
 
 @register_portal("parentvue")
 class ParentVUE(PortalEngine):
@@ -18,20 +19,21 @@ class ParentVUE(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            print(self.login_url)
-            # 1) Load login page
-            await self.page.goto(self.login_url, wait_until='domcontentloaded', timeout=30000)
-            await self.page.wait_for_timeout(400)
+            username_selector = '#ctl00_MainContent_username'
+            password_selector = '#ctl00_MainContent_password'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                None,
+                None
+            )
+            await self.raise_login_error_if('Login' in self.page.url)  # we should move past the login screen after clicking the login button
+            await wait_after_nav(self.page, wait_until='domcontentloaded', timeout=30000)
 
-            # 2) Fill & submit
-            await self.page.fill("#ctl00_MainContent_username", self.sid)
-            await self.page.fill("#ctl00_MainContent_password", self.pw)
-            await self.page.click("#ctl00_MainContent_Submit1")
-
-            await self.raise_if_login_error('Login' in self.page.url) # we should move past the login screen after clicking the login button
-
-            await self.page.wait_for_timeout(1000) # wait some time to allow settling
-            await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)  # if we are on the home page, wait for it to load
             # ensure that we select the correct student if there may be multiple
             if 'Login_Parent' in self.login_url:
                 await self.select_student(first_name)
