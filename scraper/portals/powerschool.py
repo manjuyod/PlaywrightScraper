@@ -9,6 +9,7 @@ from scraper.portals.base import PortalEngine
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from .utils import *
 DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
 
 def canonicalize_course(text: str) -> str:
@@ -30,20 +31,20 @@ class PowerSchool(PortalEngine):
         retry=retry_if_exception_type(Exception),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        # 1) Load login page
-        await self.page.goto(self.login_url, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(500)
+        username_selector = "#fieldAccount"
+        password_selector = "#fieldPassword"
 
-        if 'microsoft' in self.page.url:
-            await self.microsoft_login()
-        else:
-            # 2) Fill & submit
-            await self.page.fill("#fieldAccount", self.sid)
-            await self.page.fill("#fieldPassword", self.pw)
-            await self.page.click("#btn-enter-sign-in")
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            username_selector,
+            password_selector,
+            microsoft_callback=self.microsoft_login
+        )
 
-        # 3) Give it time to load the gradebook table
-        await self.page.wait_for_timeout(8000)
+        await wait_after_nav(self.page, wait_after_load=3000)
 
     @retry(
         stop=stop_after_attempt(3),

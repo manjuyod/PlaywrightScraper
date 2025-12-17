@@ -9,6 +9,7 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 
 from . import register_portal
 from .base import PortalEngine, PlaywrightTimeout
+from .utils import *
 
 
 @register_portal("aeries")
@@ -28,39 +29,40 @@ class Aeries(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the Aeries parent portal."""
         try:
-            await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.login_url, timeout=60000) # it should never take 60 seconds to reach the page, just for safety
-            # Username
-            await self.page.fill("input#portalAccountUsername", self.sid)
-            await self.page.wait_for_timeout(2000)
-            await self.page.locator("#next").click()
-            # Password or Google Sign in
-            try:
-                await self.page.fill("input#portalAccountPassword", self.pw, timeout=3000)
-                await self.page.wait_for_timeout(2000)
-                await self.page.locator("#LoginButton").click()
-            except PlaywrightTimeout: # password field DNE, must be Google signin
-                await self.page.locator("#LoginButton").click()
-                await self.google_signin()
-
-
-            #handle failed login
-            error_box: Locator = self.page.locator("#errorContainer")
-            await self.raise_if_login_error(await error_box.is_visible())
-
-            # if await error_box.is_visible():
-            #     error_msg = await self.page.locator("#errorMessage").inner_text()
-            #     print(f"Login Error: {error_msg}")
-            #     raise LoginError(error_msg)
-
-            await self.page.wait_for_url('**/Dashboard**', timeout=30000)
-            await self.page.wait_for_load_state(timeout=45000)
+            username_selector = 'input#portalAccountUsername'
+            password_selector = 'input#portalAccountPassword'
+            sso_login_selector = '#LoginButton'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                google_callback=self.google_login,
+                alt_sso_callback = self.iusd_login,
+                sso_login_selector=sso_login_selector
+            )
+            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=30000)
         except Exception as e:
             print(e)
             raise
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
+
+    async def iusd_login(self):
+        username_selector = '#input28'
+        pw_selector = '#input62'
+        await universal_login_flow(
+            self.page,
+            self.page.url,
+            self.sid,
+            self.pw,
+            username_selector,
+            pw_selector
+        )
+
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -72,7 +74,7 @@ class Aeries(PortalEngine):
         print("\nfetching grades")
         try:
             # ensure we have reached the next page
-            await self.raise_if_login_error("Dashboard" not in self.page.url)
+            await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000) # wait some to allow population
 
             soup = await self.get_soup()

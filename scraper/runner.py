@@ -3,6 +3,8 @@ import asyncio
 import argparse
 import json
 import os
+import textwrap
+
 from dotenv import load_dotenv
 import pathlib
 import random
@@ -12,8 +14,9 @@ from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
-from scraper.portals import get_portal, LoginError, get_portal_key_from_url
+from scraper.portals import get_portal, managed_portals, LoginError, get_portal_key_from_url
 from typing import Dict, List
+from notif import send_notification_to_slack, Severity
 
 load_dotenv()
 print("[runner] module import OK", flush=True)
@@ -25,6 +28,7 @@ def _debug_env():
     import sys as _sys
     print("[runner] Python:", _sys.executable, _sys.version, flush=True)
     # Show key DB envs (mask password)
+    print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
     print("[runner] ENV PGHOST:", os.getenv("PGHOST"), flush=True)
     print("[runner] ENV PGDATABASE:", os.getenv("PGDATABASE"), flush=True)
     print("[runner] ENV PGUSER:", os.getenv("PGUSER"), flush=True)
@@ -80,7 +84,7 @@ def get_students_from_db(
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal,
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal2, portal,
                        YearStart, YearEnd, PasswordGood, FranchiseID
                 FROM Student
             """
@@ -138,6 +142,7 @@ def get_students_from_db(
                         "student_name": row["firstname"],
                         "id": row["p1username"],
                         "login_url": login_url,
+                        "alt_login_url": row['portal2'],
                         "password": row["p1password"],
                         "portal": portal_key,  # guaranteed non-empty here
                         "auth_images": auth_images,
@@ -180,6 +185,7 @@ async def scrape_one(pw: Playwright, student: dict):
         student["password"],
         student_name=student.get("student_name"),
         login_url=student.get("login_url"),
+        alt_portal_url=student.get("alt_login_url")
     )
 
     # Only GPS uses pictograph answers
@@ -190,19 +196,13 @@ async def scrape_one(pw: Playwright, student: dict):
         print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
-        except Exception as e:
+        except Exception:
             with db_conn() as conn:
-
                 cur = conn.cursor()
-
                 cur.execute(
-
                     "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-
                     (student["db_id"],)
-
                 )
-
                 conn.commit()
 
             # print("\t\t\tBypassed credentials !good, dont forget to reset")
@@ -256,17 +256,21 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
         label += f", portal={portal}"
     print(f"Found {len(student_list)} students to scrape ({label}).", flush=True)
 
-    success_count = 0
-    error_count = 0
+    # success_count = 0
+    # error_count = 0
+    portal_attempted = {portal: 0 for portal in managed_portals.keys()}
+    portal_success = {portal: 0 for portal in managed_portals.keys()}
     with open(out_file, "w", encoding="utf-8") as f:
         async with async_playwright() as p:
             begin_time = time()
             for student in student_list:
+                portal_attempted[student.get('portal')] += 1
                 try:
                     result = await scrape_one(p, student)
                     f.write(json.dumps(result) + "\n")
-                    success_count += 1
-                    print(f"SUCCESS: {student['id']}, [{success_count + error_count} / {len(student_list)}]", flush=True)
+                    portal_success[student.get("portal")] += 1
+                    # success_count += 1
+                    print(f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
                 except Exception as e:
                     if 'Connection closed while reading from the driver' not in str(e):
                         error_result = {
@@ -276,12 +280,27 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                             "traceback": format_exception_only(type(e), e),
                         }
                         f.write(json.dumps(error_result) + "\n")
-                        error_count += 1
                         print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
 
+    # Compute summary
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / max(1, len(student_list))
+
+    portal_success_rates = {portal: float(success) / attempted * 100 for success, attempted in zip(portal_success.values(), portal_attempted.values()) if attempted != 0}
+    low_success_rates = {portal: success_rate for success_rate in portal_success_rates.values() if success_rate < 75}
+
+    attempted_count = sum(portal_attempted.values())
+    success_count = sum(portal_success.values())
+    error_count = attempted_count - success_count
+    results_log = f"""Scraping complete!\n
+    Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
+    Errors encountered: {error_count}
+    Low success rates\n---------\n{low_success_rates}
+    """
+    if os.getenv('PYTHON_ENV') == 'prod':
+        send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
+
     print(f"\nScraping complete! Results saved to {out_file}", flush=True)
     print(f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student", flush=True)
     print(f"Errors encountered: {error_count}", flush=True)

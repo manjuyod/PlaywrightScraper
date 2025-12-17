@@ -6,6 +6,7 @@ from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from .utils import *
 @register_portal("schoology")
 class Schoology(PortalEngine):
     @retry(
@@ -14,30 +15,31 @@ class Schoology(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        # 1) Load login page
-        await self.page.goto(self.login_url, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(500)
+        try:
+            username_selector = '#edit-mail'
+            password_selector = '#edit-pass'
+            sso_login_selector = 'a[href*="Student"]'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                microsoft_callback=self.microsoft_login,
+                sso_login_selector=sso_login_selector
+            )
+            await wait_after_nav(self.page, wait_after_load=5000)
 
-        # Are we on a login page?
-        if "login" in self.page.url:
-        # If so complete normal flow
-            # 2) Fill & submit
-            await self.page.fill("#edit-mail", self.sid)
-            await self.page.fill("#edit-pass", self.pw)
-            await self.page.click("#edit-submit")
-            # 3) Give it time to load the gradebook table
-            await self.page.wait_for_timeout(8000)
-        else:
-        # If not there should be a "Students" option to select to move forward
-            await self.page.get_by_role('link', name='Students', exact=True).click() # aria label [Students]
-            await self.page.wait_for_timeout(5000)
-            # in this case, the portal uses Microsoft SSO
-            await self.microsoft_login()
-        # navigate to the grades page
-        await self.page.get_by_role('button', name='Grades').click()
-        await self.page.wait_for_timeout(1000) # second delay to prevent 'Too many requests' error
-        await self.page.get_by_text('Grade Report').click()
-        await self.page.wait_for_timeout(3000)
+            # navigate to the grades page
+            await self.page.get_by_role('button', name='Grades').click()
+            await self.page.wait_for_timeout(1000) # second delay to prevent 'Too many requests' error
+            await self.page.get_by_text('Grade Report').click()
+            await self.page.wait_for_timeout(3000)
+        except Exception as e:
+            print(e)
+            await self.page.pause()
+            raise
 
     @retry(
         stop=stop_after_attempt(3),

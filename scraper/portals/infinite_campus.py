@@ -7,6 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from . import register_portal  # helper we'll create in __init__.py
 from .base import PortalEngine, PlaywrightTimeout
+from .utils import *
 
 
 @register_portal("infinite_campus")
@@ -24,21 +25,29 @@ class InfiniteCampus(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
         print(f"searching for {first_name}")
+        username_selector = '#username'
+        password_selector = '#password'
         try:
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(500)
-            await self.page.fill("#username", self.sid)
-            await self.page.fill("#password", self.pw)
-            await self.page.wait_for_timeout(1000) # give time between input and continue
-            await self.page.get_by_role('button', name="Log In").click()
-            await self.page.wait_for_load_state('networkidle')
-            await self.page.wait_for_timeout(1000)
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                microsoft_callback=self.microsoft_login,
+                google_callback=self.google_login
+            )
+            await wait_after_nav(
+                self.page,
+                pattern='**/nav-wrapper**',
+                wait_after_load=3000,
+                wait_until='networkidle'
+            )
 
-            await self.raise_if_login_error('nav-wrapper' not in self.page.url)
+            await self.raise_login_error_if('nav-wrapper' not in self.page.url)
 
             print("Successfully reached the home page")
-            await self.page.wait_for_load_state(timeout=10000)
-            await self.page.wait_for_timeout(1500)
             await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
         except self.LoginError as e:

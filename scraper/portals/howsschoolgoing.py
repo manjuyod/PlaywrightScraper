@@ -6,6 +6,9 @@ from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from scraper.portals.utils import universal_login_flow, wait_after_nav
+
+
 @register_portal("howsschoolgoing")
 class HowsSchoolGoing(PortalEngine):
     @retry(
@@ -15,21 +18,19 @@ class HowsSchoolGoing(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            # 1) Load login page
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(500)
+            sso_login_selector = 'a[href*="google"]'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                '',
+                '',
+                google_callback=self.google_login,
+                sso_login_selector=sso_login_selector
+            )
+            await wait_after_nav(self.page, wait_after_load=4000)
 
-            # Google Sign-in
-            await self.page.get_by_text("Sign In With Google").click()
-            await self.page.wait_for_load_state()
-            # 2) Fill & submit
-            await self.google_signin()
-            # 3) Give it time to load the gradebook table
-            await self.page.wait_for_timeout(3500)
-            # navigate to the grades page
-            # await self.page.get_by_role('button', name='Student', exact=True).click() # student accordion
-            # await self.page.get_by_role('button', name='Grades', exact=True).click()  # grades accordion
-            # await self.page.get_by_role('link', name='Grades Overview').click()  # takes us to the grades page
             await self.page.locator("#data-tab").get_by_role("button", name="Grades").click() # this button on the front page takes us to the grades page
             await self.page.wait_for_timeout(3000)
         except Exception as e:

@@ -8,7 +8,8 @@ from . import register_portal
 from .base import PortalEngine
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from scraper.portals.infinite_campus import InfiniteCampus
-# TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
+from .utils import *
+
 @register_portal("gps")
 class GPS(PortalEngine):
     """Portal scraper for Gilbert Public Schools' portal.
@@ -17,14 +18,6 @@ class GPS(PortalEngine):
     for each course. Grades are returned as a list of course/grade
     dictionaries under the ``parsed_grades`` key.
     """
-
-    LOGIN = "https://gpsportal.gilberted.net/"
-    HOME_WRAPPER = (
-        "https://gilbertaz.infinitecampus.org/campus/nav-wrapper/student/portal/student/home?appName=gilbert"
-    )
-    LOGOFF = (
-        "https://gilbertaz.infinitecampus.org/campus/portal/student/gilbert.jsp?status=logoff"
-    )
 
     @retry(
         stop=stop_after_attempt(3),
@@ -35,33 +28,47 @@ class GPS(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the GPS parent portal."""
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
-        await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
+        username_selector = 'input#identification'
+        password_selector = 'input#ember534'
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            username_selector,
+            password_selector,
+            post_fill_wait=4000
+        )
 
-        # Username
-        await self.page.fill("input#identification", self.sid)
-        await self.page.wait_for_timeout(200)
-        await self.page.click("button#authn-go-button")
+        # Pictograph auth (three picks)
+        print("waiting on pictograph\n")
+        await self.do_gps_auth()
 
-        # Password
-        await self.page.fill("input#ember534", self.pw)
-        await self.page.wait_for_timeout(2000)
-        await self.page.locator("#authn-go-button").evaluate("btn => btn.click()")
+        # nav to infinite campus portal
+        async with self.page.expect_popup(timeout=0) as popup:
+            await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
+            self.page = await popup.value
 
-        # RapidIdentity often doesn't change URL. Wait for pictograph tiles instead.
+        await wait_after_nav(self.page, wait_after_load=5000, wait_until='networkidle')
+        await self.raise_login_error_if('nav-wrapper' not in self.page.url)
+        print("Successfully reached the home page")
+        await self.page.context.tracing.stop()
+
+    # Login Helper
+    async def do_gps_auth(self):
+        assert self.auth_images is not None  # must be provided by caller/DB
+
         await self.page.locator(".pictograph-list img.tile-icon").first.wait_for(
             state="visible", timeout=15_000
         )
         await self.page.wait_for_load_state("networkidle")
-        print("trying pictograph\n")
 
-        # Pictograph auth (three picks)
         for _ in range(0, 3):
             images_alts = await self.page.eval_on_selector_all(
                 ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
             )
-            print("Alt tags: ", images_alts)
-            print("Auth: ", self.auth_images)
-            assert self.auth_images is not None  # must be provided by caller/DB
+            print("Page images: ", images_alts)
+            print("Auth images: ", self.auth_images)
             user_match = next((image for image in self.auth_images if image in images_alts), None)
             if not user_match:
                 raise RuntimeError(f"No pictograph match found in {images_alts} for {self.auth_images}")
@@ -69,22 +76,6 @@ class GPS(PortalEngine):
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()
             await self.page.wait_for_timeout(1000)
-        # nav to infinite campus portal
-        async with self.page.expect_popup(timeout=0) as popup:
-            await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
-            self.page = await popup.value
-            await self.page.wait_for_load_state()
-            # await self.page.wait_for_selector()
-        await self.page.wait_for_load_state('networkidle')
-        await self.page.wait_for_timeout(1000)
-
-        await self.raise_if_login_error('nav-wrapper' not in self.page.url)
-
-        print("Successfully reached the home page")
-        await self.page.wait_for_load_state(timeout=10000)
-        await self.page.wait_for_timeout(1500)
-        await self.page.context.tracing.stop()
-
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -99,7 +90,3 @@ class GPS(PortalEngine):
         finally:
             # await self.page.pause()
             pass
-            # ---------------------- LOGOUT ----------------------
-    async def logout(self) -> None:
-        await self.page.goto(self.LOGOFF)
-        await self.page.wait_for_timeout(500)

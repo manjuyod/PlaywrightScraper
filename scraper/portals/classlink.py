@@ -10,6 +10,7 @@ from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
 from scraper.portals.infinite_campus import InfiniteCampus
+from .utils import *
 
 # TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
 @register_portal("classlink")
@@ -23,21 +24,18 @@ class Classlink(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-
-            # Username
-            await self.page.fill("input#username", self.sid)
-            await self.page.wait_for_timeout(2000)
-            # Password
-            await self.page.fill("input#password", self.pw)
-            await self.page.wait_for_timeout(2000)
-
-            # sign-in button
-            await self.page.get_by_role("button", name="Sign In").click()
-            await self.page.wait_for_url('https://myapps.classlink.com/home')
-
-            await self.page.goto(self.alt_portal_url, wait_until="domcontentloaded")
+            username_selector = 'input#username'
+            pw_selector = 'input#password'
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                pw_selector
+            )
+            await wait_after_nav(self.page, pattern='https://myapps.classlink.com/home')
+            await self.page.goto(url=self.alt_portal_url, wait_until="domcontentloaded")
             if 'infinitecampus' in self.alt_portal_url:
                 # nav to infinite campus portal
                 async with self.page.expect_navigation(url='**/nav-wrapper/student/portal/student/**', wait_until="domcontentloaded", timeout=0) as popup:

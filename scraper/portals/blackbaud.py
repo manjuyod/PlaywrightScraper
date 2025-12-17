@@ -1,0 +1,120 @@
+# scraper/portals/blackbaud_student_bghs.py
+from __future__ import annotations
+import asyncio
+import logging
+import pathlib
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Tuple, List
+
+import re
+from bs4 import BeautifulSoup  # type: ignore
+from playwright.async_api import Locator, Page, Error, expect
+from tenacity import (
+    retry, stop_after_attempt, wait_exponential,
+    retry_if_exception_type, before_sleep_log
+)
+
+from .base import PortalEngine, PlaywrightTimeout
+from . import register_portal
+from .utils import *
+
+logger = logging.getLogger("blackbaud")
+logger.setLevel(logging.INFO)
+@register_portal("blackbaud")
+class Blackbaud(PortalEngine):
+    """Blackbaud portal scraper."""
+
+    # ── LOGIN ─────────────────────────────────────────────────────────────────
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=3, max=15),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,  # <- expose inner exception instead of RetryError
+    )
+    async def login(self, first_name: Optional[str] = None) -> None:
+        try:
+            await self.page.context.tracing.start(screenshots=True, snapshots=True)
+            print("[BBG] starting login()")
+            # Entry page (Blackbaud SSO landing)
+            username_selector = '#Username'
+            password_selector = ''
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                google_callback=self.google_login,
+                pre_fill_wait=3000,
+                post_fill_wait=2000
+            )
+            await wait_after_nav(self.page, pattern='**/app/**', wait_after_load=5000)
+
+        except Exception as e:
+            print(e)
+            raise e
+        finally:
+            print(f"URL post-login: {self.page.url}")
+            await self.page.context.tracing.stop()
+
+    # ── FETCH ────────────────────────────────────────────────────────────────
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=3, max=15),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def fetch_grades(self) -> Dict[str, Any]:
+        """Navigate to My Day → Progress, collect per-course grades via modal."""
+        try:
+            # print(self.page.url)
+            try:
+                await self.page.wait_for_selector("#coursesContainer", timeout=6000)
+            except PlaywrightTimeout:
+                my_day_tab = self.page.get_by_role('link', name='My Day')
+                grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
+                if not await exists(my_day_tab):
+                    await self.page.locator('#site-switcher-change').click()
+                    await self.page.get_by_role('link', name='Student').click()
+                    await self.page.wait_for_load_state()
+                    await self.page.wait_for_timeout(2000)
+                    await expect(my_day_tab).to_be_visible()
+                    grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
+
+                await my_day_tab.click()
+                await grades_tab.click()
+                await wait_after_nav(self.page, pattern='**/progress**', wait_after_load=2000)
+                # await self.page.wait_for_timeout(2000)
+
+            soup = await self.get_soup()
+            courses_table = soup.find("div", id="coursesContainer")
+            # print(courses_table)
+            courses = courses_table.select("div.row")
+            parsed = {}
+            # print(f"Course: {courses[0]}")
+            for course in courses:
+                # print(course)
+                course_name_raw: str = course.find("h3").text
+                course_name = course_name_raw[:course_name_raw.index("-")]
+
+                course_grade_str: str = course.find("h3", class_="showGrade").text
+                try:
+                    course_grade = float(course_grade_str.replace("%", "").strip())
+                except ValueError: # NaN grade
+                    continue
+
+                parsed[course_name] = course_grade
+
+            print(parsed)
+            return {"parsed_grades": parsed}
+        except Exception as e:
+            print(e)
+        finally:
+            # await self.page.pause()
+            pass
+
+    # ── PARSERS ──────────────────────────────────────────────────────────────
+   
