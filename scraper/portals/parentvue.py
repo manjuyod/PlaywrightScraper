@@ -28,8 +28,6 @@ class ParentVUE(PortalEngine):
                 self.pw,
                 username_selector,
                 password_selector,
-                None,
-                None
             )
             await self.raise_login_error_if('Login' in self.page.url)  # we should move past the login screen after clicking the login button
             await wait_after_nav(self.page, wait_until='domcontentloaded', timeout=30000)

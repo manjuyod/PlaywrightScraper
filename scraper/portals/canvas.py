@@ -174,8 +174,8 @@ class CanvasEngine(PortalEngine):
                 self.pw,
                 uid_sel,
                 pwd_sel,
-                self.microsoft_login,
-                self.google_login
+                microsoft_callback=self.microsoft_login,
+                google_callback=self.google_login
             )
 
             await wait_after_nav(self.page, wait_until="domcontentloaded")

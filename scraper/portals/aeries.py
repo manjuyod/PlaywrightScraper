@@ -52,8 +52,8 @@ class Aeries(PortalEngine):
             print("stopped tracing")
 
     async def iusd_login(self):
-        username_selector = ''
-        pw_selector = ''
+        username_selector = '#input28'
+        pw_selector = '#input62'
         await universal_login_flow(
             self.page,
             self.page.url,

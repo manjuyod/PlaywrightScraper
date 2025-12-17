@@ -199,13 +199,13 @@ async def scrape_one(pw: Playwright, student: dict):
         except Exception:
             with db_conn() as conn:
                 cur = conn.cursor()
-                # cur.execute(
-                #     "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-                #     (student["db_id"],)
-                # )
-                # conn.commit()
+                cur.execute(
+                    "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+                    (student["db_id"],)
+                )
+                conn.commit()
 
-            print("\t\t\tBypassed credentials !good, dont forget to reset")
+            # print("\t\t\tBypassed credentials !good, dont forget to reset")
 
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
             raise LoginError(e) # raise once again so we log the error in the output json

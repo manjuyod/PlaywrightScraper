@@ -32,9 +32,9 @@ import asyncio
 if __name__ == '__main__':
     results = asyncio.run(full_test())
 
-    print(results)
+    # print(results)
     print('====[Portal Test Results]====')
     for test_portal, passed in results.items():
         result = 'PASSED' if passed else 'FAILED'
-        print(f"{test_portal} - {result}")
+        print(f"{test_portal} |  {result}")
     print('=============================')

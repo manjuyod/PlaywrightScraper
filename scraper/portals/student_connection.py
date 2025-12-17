@@ -9,7 +9,7 @@ from playwright.async_api import Page, Frame
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
-
+from .utils import *
 
 @register_portal("student_connection")
 class StudentConnection(PortalEngine):
@@ -23,34 +23,31 @@ class StudentConnection(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the StudentConnection portal."""
+        username_selector = "input[name='Pin']"
+        password_selector = "input[name='Password']"
         try:
-            # Start tracing for debugging and audit (screenshots and DOM snapshots)
-            await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            # Navigate to login page
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            await self.page.fill("input[name='Pin']", self.sid)
-            await self.page.fill("input[name='Password']", self.pw)
-            # Wait briefly to ensure values are registered
-            await self.page.wait_for_timeout(500)
-            login_button = self.page.locator("form button:has-text('Login')")
-            # hit enter
-            await self.page.locator("input[name='Password']").press("Enter")
-            await self.page.wait_for_timeout(500) # allow population
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+            )
+
             login_error = False
             try:
                 login_error = await self.page.get_by_text("Login Not Found").count() > 0
-            except: # not a failed login if this errors
+            except PlaywrightTimeout: # not a failed login if this errors
                 pass
             await self.raise_login_error_if(login_error)
-            # Wait until the URL contains 'PortalMainPage' indicating successful login
-            await self.page.wait_for_url(lambda url: "PortalMainPage" in url, timeout=20_000)
-            # Wait for network to be idle to ensure the home page has loaded
-            await self.page.wait_for_load_state("networkidle")
+
+            # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
+            await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
         except Exception as e:
             print(e)
             raise
         finally:
-            # Stop tracing after login
             await self.page.context.tracing.stop()
             # await self.page.pause()
     @retry(
@@ -61,7 +58,7 @@ class StudentConnection(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """
         Scrape the Pulse table on PortalMainPage and return:
-        {"parsed_grades": {"COURSE NAME": 93.4 or "A", ...}}
+        {"parsed_grades": {"COURSE NAME": 93.4, ...}}
         """
         try:
             pulse = True  # default to using the pulse table
@@ -122,15 +119,16 @@ class StudentConnection(PortalEngine):
                 course_name = course_name[9:]
             # grade
             course.find('td').find('b').decompose() # get rid of the extra text in this element
-            grade = course.find('td').text.strip() # may be a pair of letter grade and percentage, or just a letter grade
+            grade = course.find('td').text.strip() # LIKE [A, 98] or [A]
             grade_content = grade.split('(')
             letter_grade_idx = 0
             percent_grade_idx = 1
-            percent_grade = None
             if len(grade_content) < 2:
-                percent_grade = self.percent_from_letter_grade(grade_content[letter_grade_idx])
+                grade = grade_content[letter_grade_idx]
             else:
-                percent_grade = grade_content[percent_grade_idx].replace('%', '').replace(')', '')
+                grade = grade_content[percent_grade_idx]
+
+            percent_grade = canonicalize_grade(grade)
             print(grade_content)
             print(course_name, percent_grade)
             parsed[course_name] = percent_grade

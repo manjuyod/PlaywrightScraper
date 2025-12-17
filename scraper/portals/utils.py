@@ -1,6 +1,6 @@
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any, Callable, Literal
+from typing import Optional, List, Dict, Any, Callable, Literal, Pattern
 from playwright.async_api import Page, Frame, TimeoutError as PlaywrightTimeout, expect, Locator, Error as PlaywrightError
 from bs4 import BeautifulSoup
 
@@ -69,17 +69,19 @@ async def universal_login_flow(
     pw: str,
     username_selector: str,
     password_selector: str,
+    *,
     microsoft_callback: Optional[Callable] = None,
     google_callback: Optional[Callable] = None,
     alt_sso_callback: Optional[Callable] = None,
-    *,
     sso_login_selector: str = None,
     pre_fill_wait: int = 500,
     post_fill_wait: int = 1000,
 ) -> None:
     """
-    Standard login flow for simple username/password forms.
-    
+    Universal login flow for all portals.
+    Default: Username / Password input
+    Handles SSO Logins (must provide a callback to a login function for the target SSO)
+
     Args:
         page: Playwright Page object
         login_url: URL to navigate to
@@ -87,14 +89,16 @@ async def universal_login_flow(
         pw: Password
         username_selector: CSS selector for username input
         password_selector: CSS selector for password input
-        microsoft_callback: Async Microsoft login flow
-        google_callback: Async Google login flow
-        alt_sso_callback: Async SSO login flow for miscellaneous
-        sso_login_selector: CSS selector for an SSO button
+        sso_login_selector: CSS selector for an SSO button (Used if it's necessary to click to nav to a new login screen. i.e. 'Sign in with Google')
+        microsoft_callback: Microsoft login flow
+        google_callback: Google login flow
+        alt_sso_callback: Miscellaneous SSO login flow
         pre_fill_wait: Milliseconds to wait before filling form
         post_fill_wait: Milliseconds to wait after filling form
     """
-    await page.goto(login_url, wait_until="domcontentloaded")
+    print('Entered login flow')
+    if login_url != page.url: # Only nav if we are not at the target page
+        await page.goto(login_url, wait_until="domcontentloaded")
     await page.wait_for_timeout(pre_fill_wait)
 
     username_field = page.locator(username_selector)
@@ -108,7 +112,7 @@ async def universal_login_flow(
         await password_field.fill(pw)
         await page.wait_for_timeout(post_fill_wait)
         await password_field.press("Enter")
-    else: # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google or microsoft)
+    else: # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google/microsoft/misc)
 
         if await exists(username_field): # We may not have moved on from the Username field yet, try to submit on it now
             await username_field.press("Enter")
@@ -118,7 +122,7 @@ async def universal_login_flow(
             await password_field.fill(pw)
             await page.wait_for_timeout(post_fill_wait)
             await password_field.press("Enter")
-            return # abort here if we were able to fill the password field and submit
+            return # exit here if we were able to fill the password field and submit
 
         # otherwise attempt sso
         async def try_sso_login():
@@ -129,27 +133,23 @@ async def universal_login_flow(
             else:
                 raise LoginError('Could not find a suitable SSO login option for student. Maybe you forgot to select an SSO button, or it does not exist')
 
+        if sso_login_selector and await exists(page.locator(sso_login_selector)):
+            print(f'attempt alternate login with {sso_login_selector}')
+            await page.locator(sso_login_selector).click()
+            await wait_after_nav(page)
         try:
+            assert (microsoft_callback is not None) or (google_callback is not None)
             await try_sso_login()
-        except LoginError as e: # at this point we may need to click a new login flow option
-            if sso_login_selector and await exists(page.locator(sso_login_selector)):
-                print(f'attempt alternate login with {sso_login_selector}')
-                assert (microsoft_callback is not None) or (google_callback is not None)
+        except PlaywrightError: # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
+            await alt_sso_callback()
 
-                await page.locator(sso_login_selector).click()
-                await wait_after_nav(page)
-
-                await try_sso_login()
-            else:
-                raise e
 
 async def use_sso_login(
         page: Page,
+        check_microsoft: bool,
+        check_google: bool,
         microsoft_login_callback: Optional[Callable] = None,
         google_login_callback: Optional[Callable] = None,
-        *,
-        check_microsoft: bool = True,
-        check_google: bool = True,
 ) -> bool:
     """
     Apply the appropriate login method based on URL (handles SSO delegation).
@@ -183,14 +183,14 @@ async def use_sso_login(
 async def wait_after_nav(
     page: Page,
     *,
-    pattern: str | None = None,
+    pattern: str | Pattern[str] | Callable[[str], bool] | None = None,
     timeout: int = 15_000,
     wait_after_load: int = 1000,
     wait_until: Literal['load', 'domcontentloaded', 'networkidle'] = 'load'
 ) -> None:
     """
     Wait for page load, or successful login redirect.
-    
+
     Args:
         page: Playwright Page object
         pattern: Pattern to match in the URL
@@ -367,6 +367,28 @@ async def parse_table_to_dict(
     
     return parsed
 
+def percent_from_letter_grade(letter_grade: str) -> int:
+    minus = letter_grade.endswith("-")
+    plus = letter_grade.endswith("+")
+    modifier = -5 if minus else 5 if plus else 0
+    grade = 95
+    if modifier != 0:
+        letter_grade = letter_grade.replace("-", "")
+        letter_grade = letter_grade.replace("+", "")
+    match letter_grade:
+        case 'A':
+            pass
+        case 'B':
+            grade -= 11  # 89
+        case 'C':
+            grade -= 21  # 79
+        case 'D':
+            grade -= 31  # 69
+        case 'F':
+            grade -= 40  # 60
+        case _:
+            grade = -1
+    return grade + modifier if grade > 0 else grade
 
 def canonicalize_grade(grade_text: str) -> float | None:
     """
@@ -379,10 +401,12 @@ def canonicalize_grade(grade_text: str) -> float | None:
         float: Numeric percentage grade
     """
     grade_text = grade_text.strip()
-    
     # Remove % sign if present
-    if "%" in grade_text:
-        return float(grade_text.replace("%", ""))
+    if "%" or "(" or ")" in grade_text.strip():
+        return float(grade_text
+                     .replace("%", "")
+                     .replace("(", "")
+                     .replace(")", ""))
     
     # Check if it's a number
     try:
@@ -391,7 +415,8 @@ def canonicalize_grade(grade_text: str) -> float | None:
         pass
     
     # Must be a letter grade
-    return float(PortalEngine.percent_from_letter_grade(grade_text)) if grade >= 0 else None
+    grade = percent_from_letter_grade(grade_text)
+    return float(grade) if grade >= 0 else None
 
 
 # ============================================================================
