@@ -133,7 +133,7 @@ class Aeries(PortalEngine):
                     course_letter_label.decompose()
                     course_letter = course_letter.get_text(strip=True)
                     print("course: ", course_name, "grade: ", course_letter)
-                    grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
+                    grade = canonicalize_grade(course_letter)
                     if grade > 0: # add to dictionary
                         courses_dict[course_name.upper()] = grade
             print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
