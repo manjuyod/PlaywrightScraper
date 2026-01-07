@@ -118,20 +118,18 @@ class InfiniteCampus(PortalEngine):
         # target_prefix = "Q" if "chandleraz" in self.page.url else "QT"
 
         # target_quarter_tag = target_prefix + str(current_quarter)
-        prefix = "QT"
-        backup_prefix = "Q"
-        try:
-            qt = frame.get_by_role("button", name=prefix + str(current_quarter))
-            if not await exists(qt):
-                qt = frame.get_by_role("button", name=backup_prefix + str(current_quarter))
-            assert await exists(qt)
-            await qt.wait_for(timeout=1000)
-            await qt.click()
+        prefix = ["QT", "Q", "S"]
 
 
-        except PlaywrightTimeout:
-            prefix = backup_prefix
-            pass
+        timeframe = frame.get_by_role("button", name="QT" + str(current_quarter))
+        if not await exists(timeframe):
+            timeframe = frame.get_by_role("button", name="Q" + str(current_quarter))
+        if not await exists(timeframe):
+            timeframe = frame.get_by_role("button", name="S" + str(current_quarter // 2 + 1))
+        assert await exists(timeframe)
+        await timeframe.wait_for(timeout=1000)
+        await timeframe.click()
+
     # ---------------------- LOGOUT ----------------------
     async def logout(self) -> None:
         # await self.page.goto(self.LOGOFF)
