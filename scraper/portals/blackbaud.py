@@ -99,22 +99,6 @@ class Blackbaud(PortalEngine):
                 grade_selector,
                 truncate_title_on=truncate_on
             )
-            # print(f"Course: {courses[0]}")
-            # courses_table = soup.find("div", id="coursesContainer")
-            # # print(courses_table)
-            # courses = courses_table.select("div.row")
-            # for course in courses:
-            #     # print(course)
-            #     course_name_raw: str = course.find("h3").text
-            #     course_name = truncate_title(course_name_raw, '-', False)
-            #
-            #     course_grade_str: str = course.find("h3", class_="showGrade").text
-            #     try:
-            #         course_grade = float(course_grade_str.replace("%", "").strip())
-            #     except ValueError: # NaN grade
-            #         continue
-
-                # parsed[course_name] = course_grade
 
             print(parsed)
             return {"parsed_grades": parsed}

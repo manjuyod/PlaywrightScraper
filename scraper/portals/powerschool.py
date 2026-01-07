@@ -12,17 +12,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from .utils import *
 DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
 
-# def canonicalize_course(text: str) -> str:
-#     """
-#     Normalize Unicode, convert NBSP to space, unify dashes to '-',
-#     collapse whitespace. Does NOT drop prefixes/suffixes.
-#     """
-#     t = unicodedata.normalize("NFKC", text)
-#     t = t.replace("\xa0", " ")
-#     t = re.sub(DASHES, "-", t)
-#     t = re.sub(r"\s+", " ", t).strip()
-#     return t
-
 @register_portal("powerschool")
 class PowerSchool(PortalEngine):
     @retry(
@@ -97,23 +86,6 @@ class PowerSchool(PortalEngine):
                     break
             if grade:
                 results[title] = grade
-            # bold_links = course.select("a.bold")
-            # if not bold_links:
-            #     results[title] = ""
-            #     continue
-            #
-            # link = bold_links[-1]
-            # text = link.get_text("\n", strip=True)
-            # # print()
-            # parts = text.splitlines()
-
-            # value: Any = ""
-            # if len(parts) >= 2:
-            #     m = re.search(r"\d+(?:\.\d+)?", parts[1])  # handles 87 / 87.5 / 87%
-            #     value = float(m.group(0)) if m else ("" if parts[0].upper() in ("N/A", "-", "") else parts[0])
-            # else:
-            #     letter = parts[0].strip() if parts else ""
-            #     value = "" if letter.upper() in ("N/A", "-", "") else letter
 
 
 

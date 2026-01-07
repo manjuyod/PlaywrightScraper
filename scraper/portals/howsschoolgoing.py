@@ -24,8 +24,8 @@ class HowsSchoolGoing(PortalEngine):
                 self.login_url,
                 self.sid,
                 self.pw,
-                '',
-                '',
+                username_selector='',
+                password_selector='',
                 google_callback=self.google_login,
                 sso_login_selector=sso_login_selector
             )

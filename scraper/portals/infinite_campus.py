@@ -13,9 +13,6 @@ from .utils import *
 @register_portal("infinite_campus")
 class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
-
-    # username_field_id = 'username'
-    # password_field_id = 'password'
     # ---------------------- LOGIN (home only) ----------------------
     @retry(
         stop=stop_after_attempt(3),
@@ -110,44 +107,9 @@ class InfiniteCampus(PortalEngine):
                 frame_selector=frame_selector,
                 use_soup=False
             )
-        #
-        #     # 2) select cards
-        #     await frame.wait_for_selector(table_selector, timeout=15000)
-        #     cards = await frame.query_selector_all(table_selector)
-        #     print(f"{len(cards)} cards found:")
-        #
-        #     # 3) now try to parse the table
-        #         # no soup, angular sucks
-        #     parsed_dict = {}
-        #     for card in cards:
-        #         course_elem = await card.query_selector(course_selector)
-        #         grade_elems = await card.query_selector_all(grades_selector)
-        #         if len(grade_elems) == 0:
-        #             print("no class info")
-        #             continue # no class info
-        #
-        #         percent_text: str | None = None
-        #         for elem in reversed(grade_elems):
-        #             text = (await elem.inner_text()).strip()
-        #             if "%" in text:
-        #                 percent_text = text
-        #                 break
-        #
-        #         if percent_text is None:
-        #             print("no percentage grade found")
-        #             continue
-        #
-        #         course = await course_elem.inner_text()
-        #         grade = canonicalize_grade(percent_text)
-        #         if grade:
-        #             parsed_dict[course] = grade
-        #         else: # NaN grade
-        #             continue
-        #     print(parsed_dict)
-        #     return parsed_dict
-        #
-        # except Exception as e:
-        #     print(f"{type(e)}: {e}")
+            
+        except Exception as e:
+            print(f"{type(e)}: {e}")
         finally:
             print("finished fetching")
 
