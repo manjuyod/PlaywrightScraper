@@ -2,10 +2,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Callable, Literal, Pattern
 from playwright.async_api import Page, Frame, TimeoutError as PlaywrightTimeout, expect, Locator, Error as PlaywrightError
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from . import LoginError
-from .base import PortalEngine
 # ============================================================================
 # RETRY DECORATORS
 # ============================================================================
@@ -22,13 +21,6 @@ standard_fetch_retry = retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type(PlaywrightTimeout)
-)
-
-aggressive_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=3, max=15),
-    retry=retry_if_exception_type(PlaywrightTimeout),
-    reraise=True
 )
 
 # ============================================================================
@@ -305,16 +297,51 @@ async def select_student_from_dropdown(
 # ============================================================================
 # PARSING HELPERS
 # ============================================================================
+def decompose_label(element: Tag | None) -> Tag | None:
+    """
+    Attempts to decompose a label from any bs4 tag
 
-async def parse_table_to_dict(
+    Args:
+        element: Any bs4 tag that may or may not contain a label
+
+    Return:
+        The new element if successfully decomposed, otherwise None
+    """
+    if element is None or element.find('label') is None:
+        return None
+    element.find('label').decompose()
+    return element
+
+def truncate_title(title: str, truncate_on: str, truncate_before: bool) -> str:
+    """
+    Truncates a title at a given character
+
+    Args:
+        title: The string to truncate
+        truncate_on: The character that should be cut
+        truncate_before: Bool determing if we should cut off before the target or after
+    Return:
+        The new truncated string
+    """
+    if truncate_on in title:
+        if truncate_before:
+            return title[title.index(truncate_on) + 1:].strip()
+
+        return title[:title.index(truncate_on)].strip()
+    return title
+
+async def grades_table_to_dict(
     page: Page,
     table_selector: str,
-    row_selector: str,
-    key_selector: str,
-    value_selector: str,
+    title_selector: str,
+    grade_selector: str,
     *,
+    pair_selector: str | None = None,
+    frame_selector: str | None = None,
+    truncate_title_on: str | None = None,
+    should_truncate_before: bool = False,
+    decompose_labels: bool = False,
     use_soup: bool = True,
-    strip_whitespace: bool = True
 ) -> Dict[str, str]:
     """
     Generic table parser for grade extraction.
@@ -322,52 +349,100 @@ async def parse_table_to_dict(
     Args:
         page: Playwright Page object
         table_selector: CSS selector for the table container
-        row_selector: CSS selector for table rows
-        key_selector: CSS selector for the key column (e.g., course name)
-        value_selector: CSS selector for the value column (e.g., grade)
+        title_selector: CSS selector for the key column (e.g., course name)
+        grade_selector: CSS selector for the value column (e.g., grade)
+        pair_selector: CSS selector for a pairing, when classes are not contained within the same element
+        frame_selector: CSS selector for a frame object
+        truncate_title_on: String to cut the course title at
+        should_truncate_before: Determines if we should cut off the string before the target or after; after is default
+        decompose_labels: Bool determining whether to decompose labels from tags or not
         use_soup: If True, use BeautifulSoup; if False, use Playwright locators
-        strip_whitespace: If True, strip whitespace from extracted text
     
     Returns:
-        Dict mapping keys to values
+        Dict mapping classes to grades
+
+    IMPORTANT:
+        Ensure the page as fully loaded and the table is present prior to this function's execution
     """
-    if use_soup:
+    if use_soup: # bs4 parsing
         html = await page.content()
         soup = BeautifulSoup(html, "html.parser")
-        
-        container = soup.select_one(table_selector)
-        if not container:
+
+        table = soup.select(table_selector)
+        if not table:
             return {}
-        rows = container.select(row_selector)
-        
+
         parsed = {}
-        for row in rows:
-            key_elem = row.select_one(key_selector)
-            value_elem = row.select_one(value_selector)
-            if key_elem and value_elem:
-                key = key_elem.text.strip() if strip_whitespace else key_elem.text
-                value = value_elem.text.strip() if strip_whitespace else value_elem.text
-                parsed[key] = value
-    else:
-        # Playwright locator version
-        rows = await page.locator(f"{table_selector} {row_selector}").all()
-        
+        for course in table:
+            parent_elem = course
+            class_elem = parent_elem.select_one(title_selector)
+
+            if pair_selector: # this handles pages where a class is not entirely contained within it's own element
+                parent_elem = parent_elem.find_next_sibling("div", class_=pair_selector)
+
+            grade_elem = parent_elem.select_one(grade_selector)
+
+            if decompose_labels:
+                class_elem = decompose_label(class_elem)
+                grade_elem = decompose_label(grade_elem)
+
+            if class_elem and grade_elem:
+                class_title = class_elem.get_text(strip=True)
+                if truncate_title_on is not None:
+                    class_title = truncate_title(class_title, truncate_title_on, should_truncate_before)
+
+                grade = canonicalize_grade(grade_elem.get_text(strip=True))
+                if grade:
+                    parsed[class_title.upper()] = grade
+    else: # Playwright locator version
+        print("Playwright fetching")
+        if frame_selector is not None:
+            page = page.frame(name=frame_selector)
         parsed = {}
+        rows = await page.locator(f"{table_selector}").all()
+        # print(f"Found {len(rows)} courses")
         for row in rows:
             try:
-                key = await row.locator(key_selector).text_content()
-                value = await row.locator(value_selector).text_content()
-                if key and value:
-                    if strip_whitespace:
-                        key = key.strip()
-                        value = value.strip()
-                    parsed[key] = value
-            except: # TODO specify exception
+                class_title = (await row.locator(title_selector).inner_text()).strip()
+                # print("Checking class: " + class_title)
+                grades = await row.locator(grade_selector).all()
+
+                if len(grades) == 0:
+                    # print("no grade info")
+                    continue
+
+                if len(grades) > 1:
+                    grade_text: str | None = None
+                    for grade in reversed(grades):
+                        text = (await grade.inner_text()).strip()
+                        if "%" in text:
+                            grade_text = text
+                            break
+                    if grade_text is None: # bail if we couldn't find a valid grade
+                        print("no percentage grade found")
+                        continue
+                else: # there is only one element in the grades
+                    grade_text = (await grades[0].inner_text()).strip()
+
+                grade = canonicalize_grade(grade_text)
+                if grade:
+                    parsed[class_title.upper()] = grade
+            except (PlaywrightError, PlaywrightTimeout) as e:
+                print(f"{type(e)}: {e}")
                 continue
-    
+            except Exception as e:
+                print(f"{type(e)}: {e}")
+    print(parsed)
     return parsed
 
+
 def percent_from_letter_grade(letter_grade: str) -> int:
+    """
+        Converts letter grades like 'A', 'C+' to a number that represents it
+
+        Args:
+            letter_grade
+    """
     minus = letter_grade.endswith("-")
     plus = letter_grade.endswith("+")
     modifier = -5 if minus else 5 if plus else 0
@@ -401,22 +476,17 @@ def canonicalize_grade(grade_text: str) -> float | None:
         float: Numeric percentage grade
     """
     grade_text = grade_text.strip()
-    # Remove % sign if present
-    if "%" or "(" or ")" in grade_text.strip():
-        return float(grade_text
-                     .replace("%", "")
-                     .replace("(", "")
-                     .replace(")", ""))
-    
-    # Check if it's a number
-    try:
-        return float(grade_text)
-    except ValueError:
+    try: # Remove % sign if present
+        if "%" or "(" or ")" in grade_text.strip():
+            return float(grade_text
+                         .replace("%", "")
+                         .replace("(", "")
+                         .replace(")", ""))
+    except ValueError: # NaN
         pass
-    
-    # Must be a letter grade
+    # Maybe a letter grade
     grade = percent_from_letter_grade(grade_text)
-    return float(grade) if grade >= 0 else None
+    return float(grade) if grade and grade >= 0 else None
 
 
 # ============================================================================
@@ -441,16 +511,6 @@ async def get_frame_by_url_pattern(
     
     Returns:
         Frame object if found, None otherwise
-    
-    Example:
-        frame = await get_frame_by_url_pattern(
-            self.page,
-            "iframe#main-workspace",
-            "/grades",
-            timeout=15_000
-        )
-        if frame:
-            html = await frame.content()
     """
     try:
         await page.wait_for_selector(iframe_selector, timeout=timeout)
@@ -480,16 +540,6 @@ async def get_frame_content_as_soup(
     
     Returns:
         BeautifulSoup object if frame found, None otherwise
-    
-    Example:
-        soup = await get_frame_content_as_soup(
-            self.page,
-            "iframe#grades-frame",
-            "/studentgrades",
-            timeout=10_000
-        )
-        if soup:
-            grades = soup.select(".grade-item")
     """
     frame = await get_frame_by_url_pattern(page, iframe_selector, url_pattern, timeout=timeout)
     if frame:

@@ -49,7 +49,6 @@ class StudentConnection(PortalEngine):
             raise
         finally:
             await self.page.context.tracing.stop()
-            # await self.page.pause()
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),
@@ -98,7 +97,6 @@ class StudentConnection(PortalEngine):
             print(e)
         finally:
             pass
-            # await self.page.pause()
 # HELPERS
     async def collect_from_assignments(self) -> Dict[str, Any]:
         soup = await self.get_soup()
@@ -132,8 +130,6 @@ class StudentConnection(PortalEngine):
             print(grade_content)
             print(course_name, percent_grade)
             parsed[course_name] = percent_grade
-
-        # await self.page.pause()
         return parsed
 
     async def collect_from_pulse(self):

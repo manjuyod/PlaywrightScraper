@@ -38,7 +38,6 @@ class Schoology(PortalEngine):
             await self.page.wait_for_timeout(3000)
         except Exception as e:
             print(e)
-            await self.page.pause()
             raise
 
     @retry(
@@ -47,27 +46,22 @@ class Schoology(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
+        # verify that we reached the grades page
         if 'grades' not in self.page.url:
             raise self.LoginError('No grades page')
+
         parsed = {}
+        table_selector = "div[id^='s-js-gradebook-course']"
+        title_selector = ".gradebook-course-title"
+        grade_selector = "course-grade-value"
+        truncate_title_on = ':'
         try:
-            soup = await self.get_soup()
-            courses = soup.find_all("div", id=re.compile("^s-js-gradebook-course"))
-            print(f'found {len(courses)} courses')
-            for course in courses:
-                title = course.find(class_="gradebook-course-title").text
-                grade = course.find(class_="course-grade-value").text
-                # format course title (like 'title: term - period - room')
-                if ':' in title:
-                    title = title[:title.index(':')]
-                # format grade (like letter (%) or %
-                if grade == 'N/A':
-                    continue
-                if '(' in grade:
-                    grade = grade[grade.index('(')+1:]
-                grade = grade[:grade.index('%')]
-                print(f'found {title}\n\tgrade: {grade}')
-                parsed[title] = grade
+            parsed = await grades_table_to_dict(
+                self.page,
+                table_selector,
+                title_selector,
+                grade_selector,
+                truncate_title_on=truncate_title_on
+            )
         finally:
-            print(parsed)
             return parsed

@@ -238,17 +238,14 @@ class CanvasEngine(PortalEngine):
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
                 grade_str: str = await course_grade.inner_text()
-                if '%' in grade_str:
-                    grade = float(grade_str.replace('%', ''))
-                else: continue # NaN
-
-                parsed[course] = grade
+                grade = canonicalize_grade(grade_str)
+                if grade:
+                    parsed[course] = grade
                 # print(course, grade_str)
             # print(grade_cards)
             return parsed
         finally:
             pass
-            # await self.page.pause()
 
     async def parse_grades_iterative(self):
         try:
