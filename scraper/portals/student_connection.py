@@ -34,6 +34,8 @@ class StudentConnection(PortalEngine):
                 username_selector,
                 password_selector,
             )
+            # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
+            await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
 
             login_error = False
             try:
@@ -42,8 +44,8 @@ class StudentConnection(PortalEngine):
                 pass
             await self.raise_login_error_if(login_error)
 
-            # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
-            await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
+
+
         except Exception as e:
             print(e)
             raise
@@ -196,7 +198,7 @@ class StudentConnection(PortalEngine):
         # Extract rows
         rows = self.page.locator("#SP-Pulse tbody tr")
         n = await rows.count()
-        parsed: Dict[str, str] = {}
+        parsed: Dict[str, any] = {}
 
         for r in range(n):
             cells = rows.nth(r).locator("td")
@@ -222,17 +224,13 @@ class StudentConnection(PortalEngine):
             # Normalize percentage: "82.0%" → 82.0
             value: Any
             if pct_s:
-                pct_norm = pct_s.replace("%", "").replace("(", "").replace(")", "").strip()
-                try:
-                    value = float(pct_norm)
-                except ValueError:
-                    value = pct_s  # unexpected formatting, keep raw
+                grade = canonicalize_grade(pct_s)
             elif letter:
-                value = letter
+                grade = canonicalize_grade(letter)
             else:
                 continue
 
             if course:
-                parsed[course] = value
+                parsed[course] = grade
 
         return parsed

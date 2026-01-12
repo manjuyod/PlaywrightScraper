@@ -1,14 +1,6 @@
 from __future__ import annotations
-
-from typing import Any, Dict, Optional
-
-import bs4
-from playwright.async_api import Locator
-from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential)
-
 from . import register_portal
-from .base import PortalEngine, PlaywrightTimeout
+from .base import PortalEngine
 from .utils import *
 
 
@@ -43,7 +35,7 @@ class Aeries(PortalEngine):
                 alt_sso_callback = self.iusd_login,
                 sso_login_selector=sso_login_selector
             )
-            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=30000)
+            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=5000)
         except Exception as e:
             print(e)
             raise
@@ -94,30 +86,6 @@ class Aeries(PortalEngine):
                 grade_selector,
                 decompose_labels=True
             )
-            # soup = await self.get_soup()
-            # courses_dict = {}
-            #
-            # course_table = soup.select(table_selector)
-            # # print(course_table)
-            # for course in course_table:
-            #     # print(course)
-            #     course_elem: bs4.Tag | None = course.select_one(course_selector)  # course name
-            #     if course_elem is None or course_elem.find('label') is None:
-            #         continue
-            #     course_elem.find('label').decompose()
-            #     course_name = course_elem.get_text(strip=True)
-            #
-            #     grade_elem: bs4.Tag | None = course.select_one(grade_selector)  # course grade
-            #     if grade_elem is None or grade_elem.find('label') is None:
-            #         continue  # skip the courses without a letter
-            #     grade_elem.find('label').decompose()
-            #     course_grade = grade_elem.get_text(strip=True)
-            #
-            #     print(course_name, " grade: ", course_grade)
-            #     grade = canonicalize_grade(course_grade)
-            #     if grade is not None:  # add to dictionary
-            #         courses_dict[course_name.upper()] = grade
-            #
             print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
             return {"parsed_grades": courses_dict}
         except Exception as e:
