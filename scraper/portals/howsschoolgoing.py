@@ -6,7 +6,7 @@ from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from scraper.portals.utils import universal_login_flow, wait_after_nav
+from scraper.portals.utils import universal_login_flow, wait_after_nav, truncate_title, canonicalize_grade
 
 
 @register_portal("howsschoolgoing")
@@ -24,8 +24,8 @@ class HowsSchoolGoing(PortalEngine):
                 self.login_url,
                 self.sid,
                 self.pw,
-                '',
-                '',
+                username_selector='',
+                password_selector='',
                 google_callback=self.google_login,
                 sso_login_selector=sso_login_selector
             )
@@ -37,7 +37,6 @@ class HowsSchoolGoing(PortalEngine):
             print(e)
             raise
         finally:
-            # await self.page.pause()
             pass
     @retry(
         stop=stop_after_attempt(3),
@@ -56,28 +55,23 @@ class HowsSchoolGoing(PortalEngine):
             for course in courses:
                 columns = course.find_all('td')
                 if len(columns) >= 2:
-                    title = columns[0].text
-                    # format title like [title - Mr./Ms. teacher]
-                    index = len(title)
-                    if '- Ms' in title:
-                        index = title.find('- Ms')
-                    elif '- Mr' in title:
-                        index = title.find('- Mr')
-                    if index > 0:
-                        title = title[:index - 1]
+                    title = columns[0].get_text(strip=True)
+                    grade_text = columns[1].get_text(strip=True)
 
+                    # format title like [title - Mr./Ms. teacher]
+                    title = truncate_title(title, '-Ms', False)
+                    title = truncate_title(title, '-Mr', False)
                     # format grade like [letter percent] or [letter]
-                    grade = columns[1].text
-                    grade = grade[2:6]
+                    grades = grade_text.split(' ')
+                    if len(grades) == 2:
+                        grade = canonicalize_grade(grades[1])
+                    else: grade = canonicalize_grade(grades[0])
+                    print(title, grade)
                     # print(f'found {title}\n\tgrade: {grade}')
-                    try:
-                        grade = float(grade)
+                    if grade:
                         parsed[title] = grade
-                    except ValueError: # NaN Grade
-                        continue
         except Exception as e:
             print(e)
         finally:
             print(parsed)
-            # await self.page.pause()
             return parsed

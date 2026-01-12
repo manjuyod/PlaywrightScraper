@@ -88,5 +88,4 @@ class GPS(PortalEngine):
         try:
             return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
         finally:
-            # await self.page.pause()
             pass

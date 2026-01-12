@@ -40,11 +40,11 @@ class ParentVUE(PortalEngine):
             await self.page.get_by_role("listitem").filter(has_text="Grade Book").click()
             await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
         except Exception as e:
-            print(e)
+            print(f"{type(e)}: {e}")
             raise
         finally:
             await self.page.context.tracing.stop()
-            # await self.page.pause()
+
 
 
     @retry(
@@ -108,61 +108,25 @@ class ParentVUE(PortalEngine):
             raise RuntimeError(f"No dropdown student matched '{target}'")
 
     async def fetch_grades(self) -> Dict[str, Any]:
-        soup = await self.get_soup()
-        parsed = self._parse_gradebook(soup)
-        return {"parsed_grades": parsed}
+        try:
+            table_selector = "div.gb-class-header.gb-class-row"
+            title_selector = ".course-title"
+            pair_selector = "gb-class-row"
+            grade_selector = ".score"
 
-    @staticmethod
-    def _parse_gradebook(soup: BeautifulSoup) -> Dict[str, Any]:
-        """
-        Given the Gradebook HTML, extract each course + percentage (float)
-        or letter (str), preferring % over letter.
-        """
-        results: Dict[str, Any] = {}
-
-        # 1) Find each header row for a class
-        headers = soup.select("div.gb-class-header.gb-class-row")
-        for header in headers:
-            # a) extract the course title text, e.g. "1: Chemistry"
-            btn = header.find("button", class_="course-title")
-            if not btn:
-                continue
-            raw = btn.get_text(strip=True)
-            # strip off leading "number: " if present
-            course = re.sub(r"^\d+:\s*", "", raw)
-
-            # b) find the very next row containing the marks/scores
-            row = header.find_next_sibling(
-                lambda tag: tag.name == "div" and "gb-class-row" in tag.get("class", [])
-                                                    and "gb-class-header" not in tag.get("class", [])
+            return await grades_table_to_dict(
+                self.page,
+                table_selector,
+                title_selector,
+                grade_selector,
+                pair_selector=pair_selector,
+                should_truncate_before=True
             )
-            if not row:
-                continue
-
-            # c) look for a <span class="score">63.5%</span>
-            score_tag = row.find("span", class_="score")
-            mark_tag = row.find("span", class_="mark")
-
-            value: Any = None
-            if score_tag and "%" in score_tag.text:
-                txt = score_tag.text.strip().rstrip("%")
-                try:
-                    value = float(txt)
-                except ValueError:
-                    value = txt  # fallback to raw string
-            elif mark_tag:
-                value = mark_tag.text.strip()
-
-            if isinstance(value, str):
-                if value.strip().lower() in {"n/a", "na", "none", "null", ""}:
-                    value = ""
-
-            # only include if we actually got something (float or non-empty string)
-            if value is not None and not (isinstance(value, str) and value == ""):
-                results[course] = value
-
-        print(f"[PARENTVUE] Parsed {len(results)} courses: {list(results.items())}")
-        return results
+        except Exception as e:
+            print(f"{type(e)}: {e}")
+        finally:
+            pass
+        return {}
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(300)

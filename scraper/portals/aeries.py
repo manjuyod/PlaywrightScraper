@@ -1,14 +1,6 @@
 from __future__ import annotations
-
-from typing import Any, Dict, Optional
-
-import bs4
-from playwright.async_api import Locator
-from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential)
-
 from . import register_portal
-from .base import PortalEngine, PlaywrightTimeout
+from .base import PortalEngine
 from .utils import *
 
 
@@ -43,7 +35,7 @@ class Aeries(PortalEngine):
                 alt_sso_callback = self.iusd_login,
                 sso_login_selector=sso_login_selector
             )
-            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=30000)
+            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=5000)
         except Exception as e:
             print(e)
             raise
@@ -62,7 +54,12 @@ class Aeries(PortalEngine):
             username_selector,
             pw_selector
         )
-
+    async def nav_to_grades(self):
+        main_grades_selector = '#NavMainGrades'
+        sub_grades_selector = '#NavSubGrades'
+        await self.page.click(main_grades_selector)
+        await self.page.click(sub_grades_selector)  # sometimes this doesn't exist and we should bail early
+        await wait_after_nav(self.page, pattern='**/Grades**', timeout=5000)
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -76,76 +73,26 @@ class Aeries(PortalEngine):
             # ensure we have reached the next page
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000) # wait some to allow population
+            await self.nav_to_grades()
 
-            soup = await self.get_soup()
-            courses_dict = {}
+            table_selector = "tr[id$='ReadRow1']"
+            course_selector = "td[data-tcfc='CRS.CO']"
+            grade_selector = "td[data-tcfc='GRD.M2']"
 
-            # get class table
-            class_table = soup.find('div', id="divClass")
-            # if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
-            if class_table is None: # failed to find class table
-                await self.page.click("#StudentNameDropDown")
-                await self.page.click("#StudentNameDropDownMenu")
-                await self.page.wait_for_load_state()
-                await self.page.wait_for_timeout(3000)
-                # try again with new page
-                soup = await self.get_soup()
-                class_table = soup.find('div', id='divClass')
-            if class_table is not None and len(class_table.select('div.Card')) > 0:
-                # parse the class table
-                class_cards = class_table.select('div.Card')
-                print(f"[AERIES] found {len(class_cards)}")
-                for card in class_cards:  # parse the cards
-                    # course name
-                    class_link = card.find("a", class_="TextHeading")
-                    course_name: str = class_link.text.strip()
-                    # grade
-                    grade_div = card.find("div", class_="Grade")
-                    grade_span = grade_div.find("span")
-                    if grade_span is not None: # as long as the grade exists
-                        grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-                        grade_str = grade_str.replace("(", "").replace(")", "").replace("%","") if grade_str is not None else None
-                        courses_dict[course_name.upper()] = grade_str # add to dictionary
-            else: # if we dont have grades on the home page
-                await self.page.click('#NavMainGrades')
-                await self.page.click('#NavSubGrades') # sometimes this doesn't exist and we should bail early
-                await self.page.wait_for_url('**/Grades**', timeout=10000)
-                soup = await self.get_soup()
-                # find the table first
-                table = soup.find("table", attrs={"id": "ctl00_MainContent_subGRD_tblEverything"})
-                # classes
-                course_table = table.select("tr[id$='ReadRow1']")
-                # print(course_table)
-                for course in course_table:
-                    # print(course)
-                    course_name: bs4.Tag | None = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
-                    if course_name == None:
-                        continue
-                    course_name.find('label').decompose()
-                    course_name = course_name.get_text(strip=True)
-                    course_letter: bs4.Tag | str | None = course.find('td', {'data-tcfc': 'GRD.M2'}) # course letter
-                    if course_letter == None:
-                        continue # skip the courses without a letter
-                    course_letter_label: bs4.Tag | None = course_letter.find('label')
-                    if course_letter_label == None:
-                        print("Current course letter", course_letter.get_text())
-                        continue
-                    course_letter_label.decompose()
-                    course_letter = course_letter.get_text(strip=True)
-                    print("course: ", course_name, "grade: ", course_letter)
-                    grade = canonicalize_grade(course_letter)
-                    if grade > 0: # add to dictionary
-                        courses_dict[course_name.upper()] = grade
+            courses_dict = await grades_table_to_dict(
+                self.page,
+                table_selector,
+                course_selector,
+                grade_selector,
+                decompose_labels=True
+            )
             print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
             return {"parsed_grades": courses_dict}
         except Exception as e:
             print(e)
             raise
         finally:
-            # await self.page.pause()
             await self.page.context.tracing.stop()
-
-
 
     # ---------------------- LOGOUT ----------------------
     async def logout(self) -> None:

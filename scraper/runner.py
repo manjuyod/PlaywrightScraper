@@ -156,6 +156,18 @@ def get_students_from_db(
     return students_list
 
 
+def filter_students(_students: list[dict[str, str]], key: str, value: str) -> list[dict[str, str]]:
+    """
+    Filters students dictionary by a particular key - value pair.
+    Args:
+        _students: dictionary of students to be filtered
+        key: key to match
+        value: value to match
+    Returns:
+        The filtered dictionary
+    """
+    return [student for student in _students if key in student.keys() and value in student.values()]
+
 def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
 

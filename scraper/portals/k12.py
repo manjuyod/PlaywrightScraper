@@ -18,17 +18,6 @@ class K12(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            # # 1) Load login page
-            # await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            # await self.page.wait_for_timeout(500)
-            # # Fill username
-            # await self.page.fill('#okta-signin-username', self.sid)
-            # # Fill password
-            # await self.page.fill('#okta-signin-password', self.pw)
-            # # Login
-            # # with self.page.expect_navigation()
-            # await self.page.locator('#okta-signin-submit').click()
-            # await self.page.wait_for_timeout(3000)
             username_selector = '#okta-signin-username'
             pw_selector = '#okta-signin-password'
             await universal_login_flow(
@@ -39,12 +28,10 @@ class K12(PortalEngine):
                 username_selector,
                 pw_selector
             )
-            # nav to grades page
         except Exception as e:
             print(e)
             raise
         finally:
-            await self.page.pause()
             pass
     @retry(
         stop=stop_after_attempt(3),
@@ -61,5 +48,4 @@ class K12(PortalEngine):
             print(e)
         finally:
             print(parsed)
-            # await self.page.pause()
             return parsed

@@ -58,7 +58,23 @@ class Blackbaud(PortalEngine):
         finally:
             print(f"URL post-login: {self.page.url}")
             await self.page.context.tracing.stop()
+    async def nav_to_grades(self):
+        try:
+            await self.page.wait_for_selector("#coursesContainer", timeout=6000)
+        except PlaywrightTimeout:
+            my_day_tab = self.page.get_by_role('link', name='My Day')
+            grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
+            if not await exists(my_day_tab):
+                await self.page.locator('#site-switcher-change').click()
+                await self.page.get_by_role('link', name='Student').click()
+                await self.page.wait_for_load_state()
+                await self.page.wait_for_timeout(2000)
+                await expect(my_day_tab).to_be_visible()
+                grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
 
+            await my_day_tab.click()
+            await grades_tab.click()
+            await wait_after_nav(self.page, pattern='**/progress**', wait_after_load=2000)
     # ── FETCH ────────────────────────────────────────────────────────────────
     @retry(
         stop=stop_after_attempt(3),
@@ -70,50 +86,25 @@ class Blackbaud(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         """Navigate to My Day → Progress, collect per-course grades via modal."""
         try:
-            # print(self.page.url)
-            try:
-                await self.page.wait_for_selector("#coursesContainer", timeout=6000)
-            except PlaywrightTimeout:
-                my_day_tab = self.page.get_by_role('link', name='My Day')
-                grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
-                if not await exists(my_day_tab):
-                    await self.page.locator('#site-switcher-change').click()
-                    await self.page.get_by_role('link', name='Student').click()
-                    await self.page.wait_for_load_state()
-                    await self.page.wait_for_timeout(2000)
-                    await expect(my_day_tab).to_be_visible()
-                    grades_tab = self.page.locator("#topnav-containter").get_by_role("link", name="Progress")
-
-                await my_day_tab.click()
-                await grades_tab.click()
-                await wait_after_nav(self.page, pattern='**/progress**', wait_after_load=2000)
-                # await self.page.wait_for_timeout(2000)
-
+            await self.nav_to_grades()
             soup = await self.get_soup()
-            courses_table = soup.find("div", id="coursesContainer")
-            # print(courses_table)
-            courses = courses_table.select("div.row")
-            parsed = {}
-            # print(f"Course: {courses[0]}")
-            for course in courses:
-                # print(course)
-                course_name_raw: str = course.find("h3").text
-                course_name = course_name_raw[:course_name_raw.index("-")]
-
-                course_grade_str: str = course.find("h3", class_="showGrade").text
-                try:
-                    course_grade = float(course_grade_str.replace("%", "").strip())
-                except ValueError: # NaN grade
-                    continue
-
-                parsed[course_name] = course_grade
+            table_selector = "#coursesContainer div.row"
+            title_selector = 'h3'
+            truncate_on = '-'
+            grade_selector = '.showGrade'
+            parsed = await grades_table_to_dict(
+                self.page,
+                table_selector,
+                title_selector,
+                grade_selector,
+                truncate_title_on=truncate_on
+            )
 
             print(parsed)
             return {"parsed_grades": parsed}
         except Exception as e:
             print(e)
         finally:
-            # await self.page.pause()
             pass
 
     # ── PARSERS ──────────────────────────────────────────────────────────────
