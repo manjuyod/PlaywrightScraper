@@ -56,7 +56,8 @@ managed_portals: Dict[str, list[str]] = {
     "schoology": ["schoology"],
     "howsschoolgoing": ["howsschoolgoing"],
     "canvas": ["instructure.com", "canvas"],
-    "k12": ["login.k12"]
+    "k12": ["login.k12"],
+    "google_classroom": ["classroom.google", "accounts.google"]
    }
 # Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():
@@ -67,14 +68,6 @@ for portal in managed_portals.keys():
 # Optional helper: detect portal key from a login URL
 # ---------------------------
 
-def get_portal_key_from_url(url: str) -> str | None:
-    """Sorts portal links into 'buckets' defined from portals that we currently manage"""
-    if not url:
-        return None
-    for portal, rules in managed_portals.items():
-        if any(rule in url for rule in rules):
-            return portal
-    return None
 
 
 __all__ = [
@@ -82,5 +75,5 @@ __all__ = [
     "register_portal",
     "get_portal",
     "managed_portals",
-    "get_portal_key_from_url",
+    # "get_portal_key_from_url",
 ]

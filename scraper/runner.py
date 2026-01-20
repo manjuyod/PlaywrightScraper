@@ -14,7 +14,8 @@ from psycopg2.extras import DictCursor
 import sys
 from traceback import format_exception_only
 from playwright.async_api import async_playwright, Playwright
-from scraper.portals import get_portal, managed_portals, LoginError, get_portal_key_from_url
+from scraper.portals import get_portal, managed_portals, LoginError
+from scraper.portals.utils import get_portal_key_from_url
 from typing import Dict, List
 from notif import send_notification_to_slack, Severity
 
@@ -84,8 +85,8 @@ def get_students_from_db(
             student_auth_map = _load_student_auth_map(conn)
 
             base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, portal2, portal,
-                       YearStart, YearEnd, PasswordGood, FranchiseID
+                SELECT ID, FirstName, P1Username, P1Password, Portal1, p2username, p2password, portal2, portal,
+                       YearStart, YearEnd, PasswordGood, FranchiseID, track_agenda
                 FROM Student
             """
             conditions = [
@@ -140,23 +141,25 @@ def get_students_from_db(
                     {
                         "db_id": row["id"],
                         "student_name": row["firstname"],
-                        "id": row["p1username"],
                         "login_url": login_url,
-                        "alt_login_url": row['portal2'],
+                        "id": row["p1username"],
                         "password": row["p1password"],
+                        "alt_login_url": row['portal2'],
+                        "alt_id": row['p2username'],
+                        "alt_password": row['p2password'],
                         "portal": portal_key,  # guaranteed non-empty here
                         "auth_images": auth_images,
+                        "track_agenda": row["track_agenda"]
                     }
                 )
 
     except pg.Error as e:
         print(f"Database error: {e}", file=sys.stderr, flush=True)
         sys.exit(1)
-
     return students_list
 
 
-def filter_students(_students: list[dict[str, str]], key: str, value: str) -> list[dict[str, str]]:
+def filter_students(_students: list[dict[str, str]], key: str, value) -> list[dict[str, str]]:
     """
     Filters students dictionary by a particular key - value pair.
     Args:

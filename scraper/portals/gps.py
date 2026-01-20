@@ -44,14 +44,6 @@ class GPS(PortalEngine):
         print("waiting on pictograph\n")
         await self.do_gps_auth()
 
-        # nav to infinite campus portal
-        async with self.page.expect_popup(timeout=0) as popup:
-            await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
-            self.page = await popup.value
-
-        await wait_after_nav(self.page, wait_after_load=5000, wait_until='networkidle')
-        await self.raise_login_error_if('nav-wrapper' not in self.page.url)
-        print("Successfully reached the home page")
         await self.page.context.tracing.stop()
 
     # Login Helper
@@ -76,6 +68,16 @@ class GPS(PortalEngine):
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()
             await self.page.wait_for_timeout(1000)
+
+    async def nav_to_ic(self):
+        # nav to infinite campus portal
+        async with self.page.expect_popup(timeout=0) as popup:
+            await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
+            self.page = await popup.value
+
+        await wait_after_nav(self.page, wait_after_load=5000, wait_until='networkidle')
+        await self.raise_login_error_if('nav-wrapper' not in self.page.url)
+        print("Successfully reached the home page")
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -86,6 +88,7 @@ class GPS(PortalEngine):
         """Collect grades from the grade tab"""
         # GPS uses Infinite Campus as their portal, GPS is just a login wrapper
         try:
+            await self.nav_to_ic()
             return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
         finally:
             pass

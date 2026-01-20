@@ -9,14 +9,25 @@ from bs4 import BeautifulSoup
 class PortalEngine(ABC):
     """Interface every portal scraper must implement."""
 
-    def __init__(self, page: Page, student_id: str, password: str, login_url: str, alt_portal_url: str | None = None, student_name: str | None = None, auth_images: list | None = None) -> None:
-        self.page, self.sid, self.pw, self.student_name, self.auth_images, self.login_url, self.alt_portal_url = page, student_id, password, student_name, auth_images, login_url, alt_portal_url
+    def __init__(self, page: Page, student_id: str, password: str, login_url: str, alt_portal_url: str | None = None, alt_student_id: str | None = None, alt_password: str | None = None, student_name: str | None = None, auth_images: list | None = None) -> None:
+        self.page = page
+        self.sid = student_id
+        self.alt_sid = alt_student_id
+        self.pw = password
+        self.alt_pw = alt_password
+        self.student_name = student_name
+        self.auth_images = auth_images
+        self.login_url = login_url
+        self.alt_portal_url = alt_portal_url
         
     @abstractmethod
     async def login(self, first_name: str | None = None) -> None: ...
 
     @abstractmethod
     async def fetch_grades(self) -> Dict[str, Any]: ...
+
+    async def get_agenda(self):
+        pass
 
     # optional shared helpers ↓
     async def wait(self, selector: str, timeout: int = 15_000) -> None:
