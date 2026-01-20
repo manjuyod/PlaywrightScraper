@@ -411,3 +411,63 @@ class CanvasEngine(PortalEngine):
             out["note"] = "No final/total grade detected"
 
         return out
+
+    async def get_agenda(self):
+        await self.page.wait_for_load_state('domcontentloaded')
+        soup = await self.get_soup()
+        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment), ...]}
+        try:
+            all_days = soup.find_all("div", attrs={"data-testid": "day"})
+
+            print(f"Found {len(all_days)} days")
+            today_passed = False
+            for i, day_block in enumerate(all_days):
+                if i > 7: break
+                today_reached = today_passed
+                # parse the date
+                date_elem = day_block.select_one('[data-testid="today-date"]')
+                if not today_passed: # continue until today's date
+                    if date_elem is not None:
+                        today_reached = True
+                    else:
+                        continue
+                
+                assert today_reached
+                if today_passed:
+                    date_elem = day_block.select_one('[data-testid="not-today"]')
+                else: today_passed = True
+                    
+                assert date_elem is not None
+                date = date_elem.get_text(strip=True)
+                # gather assignments
+                assignments: list[tuple] = []
+                class_groups = day_block.select("div.planner-grouping")
+                print(f"Found {len(class_groups)} classes with assignments due on {date}")
+                # iterate on the classes for this day
+                for course in class_groups:
+                    class_title = course.select_one("span.Grouping-styles__title").get_text(strip=True)
+                    print("-", class_title)
+                    if class_title is None:
+                        continue
+                    assignment_items = course.select('div[data-testid="planner-item-raw"]')
+                    print(f"\t{len(assignment_items)} due")
+                    # iterate on assignments due for this class
+                    for assignment in assignment_items:
+                        a = assignment.select_one('a')
+                        assignment_title = a.select_one('span[aria-hidden="true"]').get_text(strip=True)
+
+                        due_time_elem = assignment.select_one(".PlannerItem-styles__due span[aria-hidden='true']")
+                        due_time = due_time_elem.get_text(strip=True) if due_time_elem else None
+
+                        print("\t-", assignment_title)
+                        assignments.append( (class_title, assignment_title, due_time) )
+
+                agenda[date] = assignments
+                # i += 1
+        except Exception as e:
+            print(f"Error while gathering the agenda {type(e)}: {e}")
+        finally:
+            from pprint import pprint
+            pprint(agenda, sort_dicts=False)
+            await self.page.pause()
+            return agenda

@@ -5,6 +5,23 @@ from playwright.async_api import Page, Frame, TimeoutError as PlaywrightTimeout,
 from bs4 import BeautifulSoup, Tag
 
 from . import LoginError
+
+def get_portal_key_from_url(url: str) -> str | None:
+    from scraper.portals import managed_portals
+    """
+    Args:
+        url: The url to match from
+    Returns:
+        A managed portal key by if any portal can be detected in the url | else None
+    """
+    if not url:
+        return None
+    for portal, rules in managed_portals.items():
+        if any(rule in url for rule in rules):
+            return portal
+    return None
+
+
 # ============================================================================
 # RETRY DECORATORS
 # ============================================================================
