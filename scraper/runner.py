@@ -310,7 +310,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     Errors encountered: {error_count}
     Low success rates\n---------\n{low_success_rates}
     """
-    if os.getenv('PYTHON_ENV') == 'prod':
+    if os.getenv('PYTHON_ENV') != 'dev':
         send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
 
     print(f"\nScraping complete! Results saved to {out_file}", flush=True)
