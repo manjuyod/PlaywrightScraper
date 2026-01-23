@@ -412,7 +412,6 @@ async def grades_table_to_dict(
                 if grade:
                     parsed[class_title.upper()] = grade
     else: # Playwright locator version
-        print("Playwright fetching")
         if frame_selector is not None:
             page = page.frame(name=frame_selector)
         parsed = {}
