@@ -275,6 +275,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     # error_count = 0
     portal_attempted = {portal: 0 for portal in managed_portals.keys()}
     portal_success = {portal: 0 for portal in managed_portals.keys()}
+    errors = []
     with open(out_file, "w", encoding="utf-8") as f:
         async with async_playwright() as p:
             begin_time = time()
@@ -295,6 +296,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                             "traceback": format_exception_only(type(e), e),
                         }
                         f.write(json.dumps(error_result) + "\n")
+                        errors.append(error_result)
                         print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
 
     # Compute summary
@@ -308,10 +310,12 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     attempted_count = sum(portal_attempted.values())
     success_count = sum(portal_success.values())
     error_count = attempted_count - success_count
-    results_log = f"""Scraping complete!\n
+    error_summary = pprint.pformat(errors)
+    results_log = f"""Scraping complete! {f"(Franchise {franchise_id})" if franchise_id else ""} {f"(Student {student_id})" if student_id else ""}\n
     Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
     Errors encountered: {error_count}
     Low success rates\n---------\n{low_success_rates}
+    Error summary\n---------\n{error_summary if error_summary else "No errors"}
     """
     if os.getenv('PYTHON_ENV') != 'dev':
         send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
@@ -344,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-stat", "--status",
         type=str,
-        help="Filter for the state of students."
+        help="Filter for the status of students."
     )
     args = parser.parse_args()
     print("[runner] CLI args:", args, flush=True)
