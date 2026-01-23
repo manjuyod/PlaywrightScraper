@@ -245,13 +245,20 @@ async def scrape_one(pw: Playwright, student: dict):
     finally:
         await browser.close()
 
+import queue
+import pprint
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
+
+def project_root() -> pathlib.Path:
+    for parent in pathlib.Path(__file__).resolve().parents:
+        if (parent / '.python-version' ).exists():
+            return parent
+    return pathlib.Path.cwd()
+out_dir = pathlib.Path("output/phase1totuples")
+out_dir.mkdir(parents=True, exist_ok=True)
+out_file = project_root() / out_dir / "grades.jsonl"
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None, job_id: str | None = None, state_q: queue.Queue | None = None):
     print(f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}", flush=True)
-    out_dir = pathlib.Path("output/phase1totuples")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / "grades.jsonl"
-
     student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     print(f"[runner] main(): fetched {len(student_list)} students", flush=True)
 
@@ -271,8 +278,13 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
         label += f", portal={portal}"
     print(f"Found {len(student_list)} students to scrape ({label}).", flush=True)
 
-    # success_count = 0
-    # error_count = 0
+    if job_id:
+        from ui.ext_jobs import JobState # import here to avoid circular imports
+        state = JobState(total=len(student_list), steps=len(student_list) + 2)
+        state.next_step()
+        state_q.put((job_id, state))
+    else: state = None
+        
     portal_attempted = {portal: 0 for portal in managed_portals.keys()}
     portal_success = {portal: 0 for portal in managed_portals.keys()}
     errors = []
@@ -282,10 +294,16 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             for student in student_list:
                 portal_attempted[student.get('portal')] += 1
                 try:
+                    # gather grades
                     result = await scrape_one(p, student)
+                    # post result to output
                     f.write(json.dumps(result) + "\n")
+                    # increment success count
                     portal_success[student.get("portal")] += 1
-                    # success_count += 1
+                    # push state update
+                    if state:
+                        state.next_step()
+                        state_q.put((job_id, state))
                     print(f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
                 except Exception as e:
                     if 'Connection closed while reading from the driver' not in str(e):
@@ -298,7 +316,6 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         f.write(json.dumps(error_result) + "\n")
                         errors.append(error_result)
                         print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
-
     # Compute summary
     end_time = time()
     time_elapsed = int(end_time - begin_time)
@@ -317,6 +334,10 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     Low success rates\n---------\n{low_success_rates}
     Error summary\n---------\n{error_summary if error_summary else "No errors"}
     """
+    if state:
+        state.next_step()
+        state_q.put((job_id, state))
+
     if os.getenv('PYTHON_ENV') != 'dev':
         send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
 

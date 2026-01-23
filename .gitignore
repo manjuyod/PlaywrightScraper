@@ -29,6 +29,7 @@ output/
 captcha.png
 gilbert_parent_portal.html
 *.jsonl
+tmp
 
 # IDE / Editor
 .idea/

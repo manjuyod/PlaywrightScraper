@@ -1,11 +1,13 @@
 # scraper/work_flows/insert_grades.py
 import json
-from scraper.runner import db_conn, DictCursor
+from scraper.runner import db_conn, DictCursor, project_root
 import psycopg2
 import pathlib
 from datetime import date, timedelta
+ 
+PROJECT_ROOT = project_root()
+print(f"Project root: {PROJECT_ROOT}")
 
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
 def get_monday_anchor() -> str:
@@ -35,14 +37,12 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
 
 def insert_grades():
     monday_anchor = get_monday_anchor()
-    print(f"Using Monday anchor date: {monday_anchor}")
+    print(f"Inserting grades for week of {monday_anchor}")
     print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
-
     try:
         with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
             cur = conn.cursor(cursor_factory=DictCursor)
-
             for raw in f:
                 raw = raw.strip()
                 if not raw:
