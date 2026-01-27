@@ -30,6 +30,7 @@ from scraper.runner import db_conn, connection, DictCursor
 from typing import Dict, List
 
 import gspread
+from gspread.cell import Cell
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 
@@ -54,6 +55,16 @@ TRACKED_FIELDS = [
     "passwordgood",
 ]
 
+TRIM_SHEET_FIELDS = [
+    # Only trim left/right whitespace (human entry tends to add trailing spaces).
+    "firstname",
+    "lastname",
+    "portal1",
+    "p1username",
+    "portal2",
+    "p2username",
+]
+
 # ────────────────────────────────────────────────────────────────────────────────
 def _load_sheet_map(conn: connection) -> Dict[int, str]:
     """
@@ -69,7 +80,15 @@ def _load_sheet_map(conn: connection) -> Dict[int, str]:
     """)
     mapping: Dict[int, str] = {}
     for fid, url in cur.fetchall():
-        sheet_id = url.split("/")[-1]
+        # Accept either full Google Sheets URL or a raw spreadsheet ID.
+        # Prefer extracting the /d/<id> token when present.
+        m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
+        if m:
+            sheet_id = m.group(1)
+        else:
+            # Fallback: last path segment, without query/fragment.
+            sheet_id = (url or "").rstrip("/").split("/")[-1]
+            sheet_id = sheet_id.split("?", 1)[0].split("#", 1)[0]
         mapping[int(fid)] = sheet_id
     return mapping
 
@@ -107,6 +126,25 @@ def _open_by_key_retry(gc, sheet_id, retries=5):
                 continue
             raise
 
+def _update_cells_retry(ws: gspread.Worksheet, cells: list[Cell], retries: int = 5, chunk_size: int = 500) -> None:
+    for start in range(0, len(cells), chunk_size):
+        chunk = cells[start:start + chunk_size]
+        for attempt in range(1, retries + 1):
+            try:
+                ws.update_cells(chunk, value_input_option="RAW")
+                break
+            except APIError as e:
+                msg = str(e)
+                if any(code in msg for code in ("503", "500", "502", "429")) and attempt < retries:
+                    sleep = (2 ** attempt) + random.random()
+                    print(
+                        f"[WARN] transient Sheets error ({msg.split(':',1)[0]}) — "
+                        f"retry {attempt}/{retries} in {sleep:.1f}s..."
+                    )
+                    time.sleep(sleep)
+                    continue
+                raise
+
 def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     """
     Read LoginMaster rows from a Google Sheet.
@@ -124,22 +162,62 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     # get_all_records() reads the header row and returns list[dict]
     # rows = ws.get_all_records()  # empty cells -> ''
     values = ws.get_all_values(value_render_option='FORMATTED_VALUE') # this is necessary so that strings are not interpreted as numbers, resulting in the truncation of zeros
-    headers = values[0]
-    rows = [dict(zip(headers, row)) for row in values[1:]] # this replaces get_all_records, formatted as a list of dicts (rows)
+    if not values:
+        print(f"[WARN] Sheet tab '{LOGIN_MASTER_TITLE}' is empty (id={sheet_id}); parsed 0 rows.")
+        return []
+
+    headers = [h.strip() for h in values[0]]
+    col_by_field = {h.lower(): (i + 1) for i, h in enumerate(headers) if h}
+
+    required = {"firstname", "lastname", "grade", "portal1", "p1username", "p1password", "portal2", "p2username", "p2password", "passwordgood"}
+    missing = sorted(required - set(col_by_field.keys()))
+    if missing:
+        print(f"[WARN] '{LOGIN_MASTER_TITLE}' missing required headers {missing} (id={sheet_id}); parsed 0 rows.")
+        return []
+
+    # Pre-trim specific columns in the SHEET itself (ltrim/rtrim only).
+    # This keeps the sheet as the source-of-truth and avoids "phantom diffs" caused by trailing spaces.
+    cells_to_trim: list[Cell] = []
+    for row_num, row_vals in enumerate(values[1:], start=2):  # 1-based row index in Sheets; row 1 is headers
+        for field in TRIM_SHEET_FIELDS:
+            col = col_by_field.get(field)
+            if not col:
+                continue
+            raw = row_vals[col - 1] if (col - 1) < len(row_vals) else ""
+            trimmed = str(raw).strip()
+            if raw != trimmed:
+                cells_to_trim.append(Cell(row_num, col, trimmed))
+
+    if cells_to_trim:
+        print(f"[INFO] Trimming {len(cells_to_trim)} cells in '{LOGIN_MASTER_TITLE}' (id={sheet_id})...")
+        _update_cells_retry(ws, cells_to_trim)
+        # Keep local copy in sync for parsing/logging.
+        for c in cells_to_trim:
+            try:
+                values[c.row - 1][c.col - 1] = c.value
+            except Exception:
+                pass
+
     print("worksheet parsed")
     out: List[dict] = []
-    for r in rows:
+    for row_vals in values[1:]:
+        def _get(field: str) -> str:
+            col = col_by_field.get(field)
+            if not col:
+                return ""
+            return row_vals[col - 1] if (col - 1) < len(row_vals) else ""
+
         rec = {
-            "firstname":   _norm_space(r.get("firstname")),
-            "lastname":    _norm_space(r.get("lastname")),
-            "grade":       _norm_space(r.get("grade")),
-            "portal1":     _norm_space(r.get("portal1")),
-            "p1username":  _norm_space(r.get("p1username")),
-            "p1password":  _norm_space(r.get("p1password")),
-            "portal2":     _norm_space(r.get("portal2")),
-            "p2username":  _norm_space(r.get("p2username")),
-            "p2password":  _norm_space(r.get("p2password")),
-            "passwordgood": _norm_int(r.get("passwordgood")),
+            "firstname":   _norm_space(_get("firstname")),
+            "lastname":    _norm_space(_get("lastname")),
+            "grade":       _norm_space(_get("grade")),
+            "portal1":     _norm_space(_get("portal1")),
+            "p1username":  _norm_space(_get("p1username")),
+            "p1password":  _norm_space(_get("p1password")),
+            "portal2":     _norm_space(_get("portal2")),
+            "p2username":  _norm_space(_get("p2username")),
+            "p2password":  _norm_space(_get("p2password")),
+            "passwordgood": _norm_int(_get("passwordgood")),
         }
         # Must have non-empty names to be considered valid
         if rec["firstname"] or rec["lastname"]:
@@ -250,10 +328,10 @@ def sync_students(target_fid: int | None = None) -> None:
                         cur.execute("""
                             INSERT INTO Student
                               (franchiseid, firstname, lastname, grade,
-                               portal1, p1username, p1password,
-                               portal2, p2username, p2password, portal, weeklydata)
+                                portal1, p1username, p1password,
+                                portal2, p2username, p2password, passwordgood, portal, weeklydata)
                             VALUES
-                              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                              (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             fid,
                             _norm_space(sheet_rec["firstname"]),
@@ -265,6 +343,7 @@ def sync_students(target_fid: int | None = None) -> None:
                             _norm_space(sheet_rec["portal2"]),
                             _norm_space(sheet_rec["p2username"]),
                             _norm_space(sheet_rec["p2password"]),
+                            _norm_int(sheet_rec["passwordgood"]),
                             portal,
                             json.dumps(weeklydata)
                         ))
@@ -280,6 +359,7 @@ def sync_students(target_fid: int | None = None) -> None:
                             SET grade = %s,
                                 portal1 = %s, p1username = %s, p1password = %s,
                                 portal2 = %s, p2username = %s, p2password = %s, 
+                                passwordgood = %s,
                                 portal = %s
                             WHERE id = %s
                         """, (
@@ -290,6 +370,7 @@ def sync_students(target_fid: int | None = None) -> None:
                             _norm_space(sheet_rec["portal2"]),
                             _norm_space(sheet_rec["p2username"]),
                             _norm_space(sheet_rec["p2password"]),
+                            _norm_int(sheet_rec["passwordgood"]),
                             portal,
                             sid,
                         ))
