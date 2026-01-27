@@ -22,10 +22,12 @@ Requirements:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import time
 import random
+from urllib.parse import urlsplit
 from scraper.runner import db_conn, connection, DictCursor
 from typing import Dict, List
 
@@ -64,6 +66,8 @@ TRIM_SHEET_FIELDS = [
     "portal2",
     "p2username",
 ]
+
+SENSITIVE_FIELDS = {"p1password", "p2password"}
 
 # ────────────────────────────────────────────────────────────────────────────────
 def _load_sheet_map(conn: connection) -> Dict[int, str]:
@@ -110,7 +114,13 @@ def _norm_int(x) -> int:
         return int(x)
     except Exception:
         return 0
-    
+
+def _env_flag(name: str) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return False
+    return v.strip().lower() in {"1", "true", "yes", "y", "on"}
+     
 def _open_by_key_retry(gc, sheet_id, retries=5):
     for attempt in range(1, retries + 1):
         try:
@@ -270,13 +280,65 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
                 return True
     return False
 
+def _safe_preview(field: str, value) -> str:
+    if field in {"p1password", "p2password"}:
+        s = _norm_space(value)
+        return "" if not s else f"[REDACTED len={len(s)}]"
+    if field in {"p1username", "p2username"}:
+        s = _norm_space(value)
+        return "" if not s else f"[REDACTED_USER len={len(s)}]"
+    if field in {"portal1", "portal2"}:
+        s = _norm_space(value)
+        if not s:
+            return ""
+        try:
+            parts = urlsplit(s)
+            if parts.scheme and parts.netloc:
+                # Drop query/fragment (these sometimes contain tokens).
+                return f"{parts.scheme}://{parts.netloc}{parts.path}"
+        except Exception:
+            pass
+        return "[REDACTED_URL]"
+    if field == "passwordgood":
+        return str(_norm_int(value))
+    return _norm_space(value)
+
+def _diff_detail(db_row: dict, sheet_row: dict, *, portal_new: str | None = None) -> list[tuple[str, str, str]]:
+    """
+    Return [(field, old, new), ...] using the same normalization semantics as sync logic,
+    but with sensitive fields redacted for logging.
+    """
+    out: list[tuple[str, str, str]] = []
+    if not db_row:
+        for f in TRACKED_FIELDS:
+            out.append((f, "", _safe_preview(f, sheet_row.get(f))))
+        if portal_new is not None:
+            out.append(("portal", "", str(portal_new)))
+        return out
+
+    for f in TRACKED_FIELDS:
+        old = db_row.get(f.lower())
+        new = sheet_row.get(f)
+        if f == "passwordgood":
+            if _norm_int(old) != _norm_int(new):
+                out.append((f, _safe_preview(f, old), _safe_preview(f, new)))
+        else:
+            if _norm_space(old) != _norm_space(new):
+                out.append((f, _safe_preview(f, old), _safe_preview(f, new)))
+
+    if portal_new is not None:
+        portal_old = db_row.get("portal")
+        if (portal_old or None) != (portal_new or None):
+            out.append(("portal", str(portal_old or ""), str(portal_new or "")))
+    return out
+
 from scraper.portals.utils import get_portal_key_from_url
 
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Main sync
 
-def sync_students(target_fid: int | None = None) -> None:
+def sync_students(target_fid: int | None = None, *, debug: bool = False) -> None:
     gc = _gc_client()
     with db_conn() as conn:
         sheet_map = _load_sheet_map(conn)
@@ -287,6 +349,8 @@ def sync_students(target_fid: int | None = None) -> None:
         if target_fid and fid != target_fid:
             continue
         print(f"\n--- Franchise {fid} ---")
+        if debug:
+            print(f"[DEBUG] detailed row logging enabled (FID={fid})")
         sheet_rows = _read_login_master(gc, sheet_id)
         parsed_count = len(sheet_rows)
         print(f"[INFO] Parsed LoginMaster rows: {parsed_count}")
@@ -325,6 +389,14 @@ def sync_students(target_fid: int | None = None) -> None:
                         # INSERT
                         weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
                         portal = get_portal_key_from_url(sheet_rec['portal1'])
+                        if debug:
+                            print(
+                                "[INSERT] "
+                                f"FID={fid} name={sheet_rec['lastname']}, {sheet_rec['firstname']} "
+                                f"grade={_safe_preview('grade', sheet_rec.get('grade'))!r} "
+                                f"passwordgood={_safe_preview('passwordgood', sheet_rec.get('passwordgood'))!r} "
+                                f"portal={portal!r}"
+                            )
                         cur.execute("""
                             INSERT INTO Student
                               (franchiseid, firstname, lastname, grade,
@@ -352,8 +424,23 @@ def sync_students(target_fid: int | None = None) -> None:
 
                     # UPDATE vs SKIP
                     db_row = _fetch_db_row(conn, sid)
-                    if _differs(db_row, sheet_rec) or db_row['portal'] is None:
+                    needs_update = _differs(db_row, sheet_rec)
+                    portal_missing = db_row.get("portal") is None
+                    if needs_update or portal_missing:
                         portal = get_portal_key_from_url(sheet_rec['portal1'])
+                        if debug:
+                            diffs = _diff_detail(db_row, sheet_rec, portal_new=portal)
+                            diff_str = ", ".join(f"{f}:{old!r}->{new!r}" for f, old, new in diffs) or "(no field diffs)"
+                            reason_parts = []
+                            if needs_update:
+                                reason_parts.append("fields")
+                            if portal_missing:
+                                reason_parts.append("portal_missing")
+                            reason = "+".join(reason_parts) if reason_parts else "unknown"
+                            print(
+                                f"[UPDATE] FID={fid} id={sid} name={sheet_rec['lastname']}, {sheet_rec['firstname']} "
+                                f"reason={reason} diffs={diff_str}"
+                            )
                         cur.execute("""
                             UPDATE Student
                             SET grade = %s,
@@ -384,6 +471,10 @@ def sync_students(target_fid: int | None = None) -> None:
                     db_key_set = set(db_key_to_id.keys())
                     to_delete = db_key_set - sheet_key_set
                     for dkey in to_delete:
+                        if debug:
+                            sid = db_key_to_id.get(dkey)
+                            _, first, last = dkey
+                            print(f"[DELETE] FID={fid} id={sid} name={last}, {first}")
                         cur.execute("""
                             DELETE FROM Student
                             WHERE franchiseid = %s
@@ -415,12 +506,14 @@ def _parse_args():
     p = argparse.ArgumentParser(description="Pull grade/login tabs from Google Sheets to DB per franchise.")
     p.add_argument("--franchise-id", "--fid", type=int, default=None,
                    help="Only process this FranchiseID. If omitted, process all known franchises.")
+    p.add_argument("--debug", action="store_true", default=_env_flag("UPDATE_STUDENTS_DEBUG"),
+                   help="Print detailed row-level INSERT/UPDATE/DELETE logs.")
     return p.parse_args()
 
 def main() -> None:
     args = _parse_args()
     target_fid: int | None = args.franchise_id or None
-    sync_students(target_fid)
+    sync_students(target_fid, debug=bool(getattr(args, "debug", False)))
 
 if __name__ == "__main__":
     main()
