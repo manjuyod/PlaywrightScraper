@@ -40,7 +40,6 @@ class CourseGrade(AppObject):
     course: str
     grade: float
     change: Literal[None, '+', '-'] = None
-
 @dataclass
 class Student(AppObject):
     # Student inherits fields from the database plus a few computed fields
@@ -48,7 +47,7 @@ class Student(AppObject):
     grade_level: int 
     first_name: str
     last_name: str
-    grades: dict # weeklydata
+    grades: dict[str, dict] # weeklydata
     status: str
     portal: str
     portal_link: str
@@ -67,7 +66,6 @@ class Student(AppObject):
         # pprint.pprint(db_student)
         grades_json = db_student.get('weeklydata', '{}')
         grades = json.loads(grades_json)
-        
         grades = {k: v for k, v in grades.items() if v != {}} # only rows with grades
         return Student(
             id=db_student['id'],
@@ -99,7 +97,7 @@ def get_students(franchise_id: int | None = None) -> list[Student]:
         students = filter_group(students, 'franchiseid', franchise_id)
     return [Student.create(student) for student in students]
 
-def add_student(fid: int, student: Student):
+def add_student(fid: int, student: Student, master_key: bytes):
     # INSERT
     weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
     portal = get_portal_key_from_url(student.portal_link)
@@ -112,7 +110,7 @@ def add_student(fid: int, student: Student):
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """
-                 
+    
     params = (
         fid,
         student.first_name,
@@ -120,7 +118,7 @@ def add_student(fid: int, student: Student):
         student.grade_level,
         student.portal_link,
         student.portal_username,
-        student.portal_password,
+        encrypt_field(master_key, student.portal_password),
         portal,
         json.dumps(weeklydata),
         # optionals
@@ -137,7 +135,7 @@ def add_student(fid: int, student: Student):
     db_id = cur.fetchone()[0]
     return get_student(db_id)
 
-def update_student(student_id: int, student: Student):
+def update_student(student_id: int, student: Student, master_key: bytes):
     portal = get_portal_key_from_url(student.portal_link)
     query = """
             UPDATE Student SET 
@@ -152,7 +150,7 @@ def update_student(student_id: int, student: Student):
         student.grade_level,
         student.portal_link,
         student.portal_username,
-        student.portal_password,
+        encrypt_field(master_key, student.portal_password),
         portal,
         student.alt_portal_link,
         student.alt_portal_username,
@@ -164,7 +162,7 @@ def update_student(student_id: int, student: Student):
         cur.execute(query, params)
         conn.commit()
 
-def delete_students(student_ids: list[int]):
+def delete_students(student_ids: list[int], master_key: bytes | None = None):
     if not student_ids:
         return
     with db_conn() as conn:
@@ -173,26 +171,109 @@ def delete_students(student_ids: list[int]):
         cur.execute(f"DELETE FROM student WHERE id IN ({format_strings})", tuple(student_ids))
         conn.commit()
         print(f"Deleted students {student_ids}")
-        
-import bcrypt
-# # Passwords and encryption
+
+# # Passwords, hashing and encryption
+import os
+
+from argon2.low_level import hash_secret_raw, Type
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
+
+VERSION = b"\x01" # denotes the version of the encryption scheme
 # To make students' passwords secure and visible
 # 1. We encrypt using AES them using a master password as the key
 # 2. We store the encrypted passwords in the database
 # 3. We hash and store the master password in the database as well (per franchise?)
-def encrypt_password(password: str) -> str:
-    pass
-def decrypt_password(encrypted_password: str) -> str:
-    pass
-def hash_master_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
-def check_master_password(password: str, franchise_id: int) -> bool:
-    master_password_hash = "" # get from db
-    return bcrypt.checkpw(password.encode('utf-8'), master_password_hash.encode('utf-8'))
 
+
+SALT = b'\x17\x19\xce\x12\x8a\x8d\x11\xef\x8a\x0e\x00\x15\x5d\xee\x0b\x00' # temp, should be in db
+
+def derive_key_from_master(password: str, salt: bytes = SALT) -> bytes:
+    return hash_secret_raw(
+        secret=password.encode('utf-8'),
+        salt=salt,
+        time_cost=3,
+        memory_cost=65536, # KiB
+        parallelism=1,
+        hash_len=32, # 256 bits for AES-256
+        type=Type.ID
+    )
+def encrypt_field(key: bytes, plaintext: str, aad: bytes = b"") -> bytes:
+    """
+    Encrypts a string using AES-GCM with random nonce.
+    Follows form:
+        version (1 byte) || nonce (12 bytes) || ciphertext+tag
+    """
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext.encode('utf-8'), aad)
+    return VERSION + nonce + ciphertext
+def decrypt_field(key: bytes, blob: bytes, aad: bytes = b"") -> bytes | None:
+    if not blob:
+        return None
+    if len(blob) < 1 + 12 + 16:
+        raise ValueError("Ciphertext blob too short")
+    version = blob[:1]
+    if version != VERSION:
+        raise ValueError(f"Unsupported version {version!r}")
+    nonce = blob[1:13]
+    cyphertext = blob[13:]
+    try:
+        return AESGCM(key).decrypt(nonce, cyphertext, aad)
+    except InvalidTag:
+        print("Incorrect password (or corrupted data)!")
+        return None
+
+def verify_master_password(franchise_id: int, master_password: str) -> bytes | None:
+    """
+    Verifies the master password by attempting to decrypt a field of an existing student
+    in the franchise. Returns the DEK if successful, else None.
+    """
+    dek = derive_key_from_master(master_password)
+    students = get_students(franchise_id)
+    if not students: return dek
+    # Try to decrypt the first student's password
+    student = students[0]
+    if student.portal_password and isinstance(student.portal_password, (bytes, bytearray)):
+        try:
+            decrypted = decrypt_field(dek, student.portal_password)
+            if decrypted is not None:
+                return dek
+        except (ValueError, InvalidTag):
+            return None
+    else:
+        print("Apparently the student's password has not been encrypted yet.")
+    
+    # If we tried all students and couldn't decrypt anything, it's probably the wrong password
+    # (or they all have empty passwords, which is unlikely)
+    return None
+
+def test_encryption():
+    master_password = "thisismymasterpassword" # just for test
+    salt = os.urandom(16) # STORED per key
+    master_key = derive_key_from_master(master_password, salt) # STORED per franchise
+    assert len(master_key) * 8 == 256
+    
+    secret = "this is my secret. shhhh" # to be encrypted
+    test = encrypt_field(master_key, secret) # STORED
+    
+    print(f"Master PW plaintext: {master_password}")
+    print(f"Master Key: {master_key.hex()}")
+    print(f"Secret plaintext: {secret}")
+    print(f"Encrypted secret: {test.hex()}")
+    
+    u_password = input("Enter password:")
+    kek = derive_key_from_master(u_password, salt)
+    try:
+        decrypted = decrypt_field(kek, test)
+    except InvalidTag:
+        print("Incorrect password (or corrupted data)!")
+        exit(1)
+    print(decrypted.decode('utf-8'))
+    
+    
 from typing import Any, List, Dict
-def filter_group(group: list[Any], key: str | None, value, include=True) -> list[dict[str, str]]:
+def filter_group(group: list[Any], key: str | None, value, include=True) -> list[Any]:
     """
     Filters a list of dictionaries by a particular key - value pair.
     Args:
@@ -220,3 +301,11 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
             filtered.append(obj)
         
     return filtered
+
+if __name__ == "__main__":
+    test_encryption()
+    
+    
+    
+    
+    

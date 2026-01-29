@@ -1,11 +1,12 @@
-import db
+# builtins
 import json
+import pprint
+# external
 from app import app, get_students_from_session, store_students_in_session
 from flask import render_template, redirect, url_for, request, flash, session, Response
 import db
-from db import filter_group, Student
-from controller import *
-from pprint import pprint, pformat
+from db import filter_group
+from controllers import *
 from ext_jobs import start_grade_fetch_job, jobs, get_status, is_running
 from ui.ext_jobs import franchise_from_job_id
 
@@ -25,12 +26,11 @@ async def franchise_view(franchise_id: int):
         Student data is fetched from the database.
         Comprised of the students' first/last name, portal links, most recent grades"""
     session['franchise_id'] = franchise_id
-    
     students = get_students_from_session(franchise_id)
     if students is None:
         students = db.get_students(franchise_id)
         store_students_in_session(franchise_id, students)
-        
+    
     print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
     job_id = f"{franchise_id}"
@@ -56,7 +56,22 @@ async def franchise_view(franchise_id: int):
             return redirect(url_for('index'))
         else:
             # For Add/Edit, we create a student object from the form
+            dek = session.get('dek')
+            if not dek:
+                master_password = request.form.get('master_password')
+                if master_password:
+                    dek = db.verify_master_password(franchise_id, master_password)
+                    if dek:
+                        session['dek'] = dek
+                    else:
+                        flash("Incorrect master password.")
+                        return redirect(url_for('franchise_view', franchise_id=franchise_id))
+                else:
+                    flash("Master password required.")
+                    return redirect(url_for('franchise_view', franchise_id=franchise_id))
+            
             student_id = request.args.get('student_id')
+            student: Student | None = filter_group(students, 'id', student_id)[0] if student_id else None
             db_student = {
                 'id': int(student_id) if student_id else -1,
                 'firstname': request.form['first_name'],
@@ -68,20 +83,20 @@ async def franchise_view(franchise_id: int):
                 'portal2': request.form.get('alt_portal_url'),
                 'p2username': request.form.get('alt_portal_username'),
                 'p2password': request.form.get('alt_portal_password'),
-                'status': 'never',
+                'status': student.status if student else 'never'
             }
-            pprint(db_student)
+            pprint.pprint(db_student)
             student = Student.create(db_student)
             # add
             if 'add_student' in request.form:
                 print(f"Adding student {student.first_name}")
-                new_student = db.add_student(franchise_id, student)
+                new_student = db.add_student(franchise_id, student, dek)
                 flash(f"Added student {new_student.first_name}")
                 return redirect(url_for('student_view', student_id=new_student.id, franchise_id=franchise_id))
             # edit
             elif 'edit_student' in request.form:
                 print(f"Updating student {student_id}, {student.first_name}")
-                db.update_student(student_id=int(student_id), student=student)
+                db.update_student(student_id=int(student_id), student=student, master_key=dek)
                 flash(f"Updated student {student.first_name}")
                 return redirect(url_for('franchise_view', franchise_id=franchise_id))
             else:
@@ -107,7 +122,6 @@ async def student_view(franchise_id: int, student_id: int):
         student = filter_group(students, 'id', student_id)[0]
     if not student:
         return "Student not found", 404
-
     
     if request.method == 'POST': # handle db updates
         # update franchise grades
@@ -122,12 +136,13 @@ async def student_view(franchise_id: int, student_id: int):
             return redirect(url_for('student_view', student_id=student_id, franchise_id=franchise_id))
 
     student_report = compute_student_report(student)
+    graph_html = create_grade_line_graph(student)
     return render_template('student.html', student=student_report, job_id=job_id, franchise_id=franchise_id)
 
 @app.get('/status/<job_id>')
 def status(job_id: str):
     state = get_status(job_id) 
-    pprint(f"Status for job {job_id}: {state}")
+    pprint.pprint(f"Status for job {job_id}: {state}")
     if state:
         if state.step == state.steps:
             session.pop(f'students_{franchise_from_job_id(job_id)}')

@@ -111,7 +111,7 @@
         </thead>
         <tbody>
         {% for student in student_reports %}
-            <tr class="clickable-row" data-url="{{ url_for('student_view', student_id=student.id, franchise_id=session.get('franchise_id')) }}">
+            <tr class="clickable-row" data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}">
                 <td class="checkbox-col" style="display:none;" onclick="event.stopPropagation();"><input type="checkbox" name="student_id" value="{{ student.id }}"></td>
                 <td>{{ student.first_name }} {{ student.last_name }}</td>
                 <td><a href="{{ student.portal_link }}" target="_blank" onclick="event.stopPropagation();">{{ student.portal }}</a></td>
@@ -219,6 +219,7 @@
         <span class="close" onclick="closeModal()">&times;</span>
         <h2 id="modal-title">Add Student</h2>
         <form id="student-form" method="POST">
+            <input type="hidden" name="master_password" id="master_password_input">
             <div class="form-group">
                 <label for="first_name">First Name:</label>
                 <input type="text" name="first_name" id="first_name" required>
@@ -264,16 +265,70 @@
     </div>
 </div>
 
+<!-- Modal for Master Password -->
+<div id="password-modal" class="modal">
+    <div class="modal-content" style="max-width: 400px;">
+        <h2>Master Password Required</h2>
+        <p>Please enter the master password to continue.</p>
+        <div class="form-group">
+            <input type="password" id="master_password_prompt" class="form-control" style="width: 100%; box-sizing: border-box;" placeholder="Enter master password">
+        </div>
+        <div class="form-actions" style="margin-top: 20px;">
+            <button type="button" class="btn btn-primary" onclick="submitWithPassword()">Submit</button>
+            <button type="button" class="btn btn-secondary" onclick="closePasswordModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const modal = document.getElementById("student-modal");
     const form = document.getElementById("student-form");
     const modalTitle = document.getElementById("modal-title");
     const addBtn = document.getElementById("btn-add-submit");
     const editBtn = document.getElementById("btn-edit-submit");
+    const passwordModal = document.getElementById("password-modal");
+    const masterPasswordPrompt = document.getElementById("master_password_prompt");
+    const masterPasswordInput = document.getElementById("master_password_input");
+
+    // We check if dek is in session via a jinja variable
+    let dekExists = {{ "true" if session.get("dek") else "false" }} === true;
+    let pendingAction = null;
+
+    form.onsubmit = function(e) {
+        if (!dekExists) {
+            e.preventDefault();
+            pendingAction = () => form.submit();
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return false;
+        }
+    };
+
+    function submitWithPassword() {
+        masterPasswordInput.value = masterPasswordPrompt.value;
+        dekExists = true; // Temporary allow submit
+        if (pendingAction) {
+            pendingAction();
+            pendingAction = null;
+        } else {
+            form.submit();
+        }
+    }
+
+    function closePasswordModal() {
+        passwordModal.style.display = "none";
+        masterPasswordPrompt.value = "";
+    }
 
     function showAddForm() {
+        if (!dekExists) {
+            pendingAction = () => showAddForm();
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
         form.reset();
-        form.action = "{{ url_for('index') }}";
+        form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}";
         modalTitle.innerText = "Add Student";
         addBtn.style.display = "inline-block";
         editBtn.style.display = "none";
@@ -281,9 +336,15 @@
     }
 
     function showEditForm(btn) {
+        if (!dekExists) {
+            pendingAction = () => showEditForm(btn);
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
         const student = JSON.parse(btn.getAttribute('data-student'));
         modalTitle.innerText = "Edit Student";
-        form.action = "{{ url_for('index') }}?student_id=" + student.id;
+        form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}?student_id=" + student.id;
         document.getElementById("first_name").value = student.first_name;
         document.getElementById("last_name").value = student.last_name;
         document.getElementById("grade").value = student.grade;
@@ -304,6 +365,12 @@
     }
 
     function toggleDeleteMode(enable) {
+        if (enable && !dekExists) {
+            pendingAction = () => toggleDeleteMode(true);
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
         const checkboxCols = document.querySelectorAll('.checkbox-col');
         const addBtnMain = document.getElementById('btn-add-main');
         const deleteModeBtn = document.getElementById('btn-delete-mode');
