@@ -1,28 +1,32 @@
 # -*- coding: utf-8 -*-
+# builtins
 import asyncio
 import argparse
 import json
 import os
 import textwrap
-
-from dotenv import load_dotenv
 import pathlib
 import random
+import sys
+from traceback import format_exception_only
+from dotenv import load_dotenv
+from typing import Dict
+from time import time
+import queue
+import pprint
+# db
 import psycopg2 as pg
 from psycopg2.extensions import connection
 from psycopg2.extras import DictCursor
-import sys
-from traceback import format_exception_only
+# external
 from playwright.async_api import async_playwright, Playwright
 from scraper.portals import get_portal, managed_portals, LoginError
 from scraper.portals.utils import get_portal_key_from_url
-from typing import Dict, List
-from notif import send_notification_to_slack, Severity
+from scraper.notif import send_notification_to_slack, Severity
+
 
 load_dotenv()
 print("[runner] module import OK", flush=True)
-from time import time
-
 
 def _debug_env():
     print("[runner] CWD:", os.getcwd(), flush=True)
@@ -245,8 +249,15 @@ async def scrape_one(pw: Playwright, student: dict):
     finally:
         await browser.close()
 
-
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
+def project_root() -> pathlib.Path:
+    for parent in pathlib.Path(__file__).resolve().parents:
+        if (parent / '.python-version' ).exists():
+            return parent
+    return pathlib.Path.cwd()
+out_dir = pathlib.Path("output/phase1totuples")
+out_dir.mkdir(parents=True, exist_ok=True)
+out_file = project_root() / out_dir / "grades.jsonl"
+async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None, job_id: str | None = None, state_q: queue.Queue | None = None):
     print(f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}", flush=True)
     out_dir = pathlib.Path("output/phase1totuples")
     out_dir.mkdir(parents=True, exist_ok=True)

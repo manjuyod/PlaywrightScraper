@@ -343,9 +343,13 @@ def truncate_title(title: str, truncate_on: str, truncate_before: bool) -> str:
     if truncate_on in title:
         if truncate_before:
             return title[title.index(truncate_on) + 1:].strip()
-
+        
         return title[:title.index(truncate_on)].strip()
     return title
+def canonicalize_course_title(title: str, truncate_on: str | None = None, truncate_before: bool = False) -> str:
+    if truncate_on is not None:
+        title = truncate_title(title, truncate_on, truncate_before)
+    return title.strip().upper()
 
 async def grades_table_to_dict(
     page: Page,
@@ -381,7 +385,7 @@ async def grades_table_to_dict(
     IMPORTANT:
         Ensure the page as fully loaded and the table is present prior to this function's execution
     """
-    if use_soup: # bs4 parsing
+    if use_soup: # bs4 parsing (default)
         html = await page.content()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -405,12 +409,13 @@ async def grades_table_to_dict(
 
             if class_elem and grade_elem:
                 class_title = class_elem.get_text(strip=True)
-                if truncate_title_on is not None:
-                    class_title = truncate_title(class_title, truncate_title_on, should_truncate_before)
+                # if truncate_title_on is not None:
+                #     class_title = truncate_title(class_title, truncate_title_on, should_truncate_before)
 
                 grade = canonicalize_grade(grade_elem.get_text(strip=True))
+                class_title = canonicalize_course_title(class_title, truncate_title_on, should_truncate_before)
                 if grade:
-                    parsed[class_title.upper()] = grade
+                    parsed[class_title] = grade
     else: # Playwright locator version
         if frame_selector is not None:
             page = page.frame(name=frame_selector)

@@ -69,9 +69,8 @@ class PowerSchool(PortalEngine):
             title = title_elem.get_text(strip=True)
             if 'placeholder' in title.lower():
                 continue
-
-            title = truncate_title(title, "Email", False)
-            # print(title)
+            truncate_on = "Email"
+            title = canonicalize_course_title(title, truncate_on=truncate_on)
 
             cols = course.select("td")[:-2] # exclude the absences and tardies rows
             grade: float | None = None

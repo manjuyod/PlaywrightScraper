@@ -80,7 +80,7 @@ class InfiniteCampus(PortalEngine):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> dict[Any, Any] | None:
+    async def fetch_grades(self) -> dict[Any, Any] | None: # TODO: Alter to parse from 'All terms' instead of 'Current term'
         """Collect grades from the grade tab"""
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(1500)
@@ -91,7 +91,7 @@ class InfiniteCampus(PortalEngine):
             await self.nav_to_grades()
             frame = self.page.frame(name=frame_selector)
             # target the correct timeframe
-            current_quarter = 3 # todo: make this dynamic?
+            current_quarter = 3
             await self.select_current_quarter(current_quarter, frame)
 
             # collect grades
