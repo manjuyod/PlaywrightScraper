@@ -192,7 +192,7 @@ def _differs(db_row: dict, sheet_row: dict) -> bool:
                 return True
     return False
 
-from scraper.portals import get_portal_key_from_url
+from scraper.portals.utils import get_portal_key_from_url
 
 
 # ────────────────────────────────────────────────────────────────────────────────
