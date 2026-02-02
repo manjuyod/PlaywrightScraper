@@ -77,6 +77,10 @@ class Aeries(PortalEngine):
             # ensure we have reached the next page
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000) # wait some to allow population
+
+            # TODO: verify that we reached the correct student page as there may be more than one
+
+
             grades_page_exists = await self.nav_to_grades()
             if grades_page_exists:
                 table_selector = "tr[id$='ReadRow1']"
