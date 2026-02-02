@@ -215,7 +215,7 @@ async def scrape_one(pw: Playwright, student: dict):
         print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
-        except Exception:
+        except Exception as e:
             with db_conn() as conn:
                 cur = conn.cursor()
                 cur.execute(
