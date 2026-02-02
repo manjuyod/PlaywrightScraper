@@ -1,3 +1,4 @@
+import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Callable, Literal, Pattern
@@ -111,16 +112,45 @@ async def universal_login_flow(
     await page.wait_for_timeout(pre_fill_wait)
 
     username_field = page.locator(username_selector)
+    password_field = page.locator(password_selector)
+
+    async def wait_for_login_form_to_disappear(timeout: int = 15_000) -> None:
+        """
+        Best-effort wait for login form to disappear after submit.
+        This is intentionally non-fatal to avoid breaking flows.
+        """
+        try:
+            tasks = [
+                asyncio.create_task(username_field.wait_for(state="hidden")),
+                asyncio.create_task(password_field.wait_for(state="hidden")),
+            ]
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            # Swallow any exceptions from completed tasks (timeouts, etc.)
+            for task in done:
+                try:
+                    _ = task.result()
+                except Exception:
+                    pass
+        except Exception:
+            # Do not allow this helper to fail the login flow
+            return
+
     if await exists(username_field):
         await username_field.fill(sid)
         await page.wait_for_timeout(post_fill_wait)
         # unable to click enter here because that may cause a failed login attempt and clear fields
 
-    password_field = page.locator(password_selector)
     if await exists(password_field):
         await password_field.fill(pw)
         await page.wait_for_timeout(post_fill_wait)
         await password_field.press("Enter")
+        await wait_for_login_form_to_disappear()
     else: # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google/microsoft/misc)
 
         if await exists(username_field): # We may not have moved on from the Username field yet, try to submit on it now
@@ -131,6 +161,7 @@ async def universal_login_flow(
             await password_field.fill(pw)
             await page.wait_for_timeout(post_fill_wait)
             await password_field.press("Enter")
+            await wait_for_login_form_to_disappear()
             return # exit here if we were able to fill the password field and submit
 
         # otherwise attempt sso
