@@ -35,19 +35,20 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
     # Only GPS uses pictograph answers
     if student.get("auth_images") and student["portal"] == "gps":
         setattr(scraper, "auth_images", student["auth_images"])
-
+    agenda = {}
     try:
         print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
-            await scraper.get_agenda()
+            agenda = await scraper.get_agenda()
         except:
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']};")
 
         print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
     finally:
         await page.close()
-    return student.get("id")
+        return agenda
+    
 
 async def main(franchise_id: int | None, student_id: int | None):
     if student_id is not None:

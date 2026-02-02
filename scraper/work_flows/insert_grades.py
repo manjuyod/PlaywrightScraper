@@ -35,7 +35,9 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
     except Exception as e:
         print(f"Warning: could not delete {path}: {e}")
 
-def insert_grades():
+def insert_grades(): 
+    # TODO: Here we need to identify if "new" courses are actually new or not
+    # TODO: We will then need to alter jsons in the database to contain one canonical title for each course (separate script)
     monday_anchor = get_monday_anchor()
     print(f"Inserting grades for week of {monday_anchor}")
     print(f"DB: {db_conn().info}")
