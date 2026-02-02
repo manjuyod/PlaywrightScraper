@@ -149,7 +149,7 @@ async def universal_login_flow(
         try:
             assert (microsoft_callback is not None) or (google_callback is not None)
             await try_sso_login()
-        except PlaywrightError: # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
+        except (PlaywrightError, LoginError): # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
             await alt_sso_callback()
 
 
