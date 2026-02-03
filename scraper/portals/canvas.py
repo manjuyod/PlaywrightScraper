@@ -226,7 +226,7 @@ class CanvasEngine(PortalEngine):
                     await show_grades_button.click()
                 else:
                     print('failed to switch to a valid view')
-            # await self.page.wait_for_timeout(2000) # small wait to allow population
+
             await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
             # 2. parse
             course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
@@ -238,9 +238,11 @@ class CanvasEngine(PortalEngine):
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
                 grade_str: str = await course_grade.inner_text()
+                print("Canvas: Grade found", grade_str)
+                if grade_str.lower() == "no grade":
+                    continue
                 grade = canonicalize_grade(grade_str)
-                if grade:
-                    parsed[course] = grade
+                parsed[course] = grade
                 # print(course, grade_str)
             # print(grade_cards)
             return parsed
@@ -254,6 +256,11 @@ class CanvasEngine(PortalEngine):
                 self._base = _origin(cur)
         except Exception:
             pass
+
+
+        term_context = _term_context_from_today()
+        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('sprint_year'), term_context.get('term'))
+
 
         # Open the "Courses" tray
         opened = False
@@ -291,7 +298,7 @@ class CanvasEngine(PortalEngine):
                 continue
 
             container_text = (await self._container_text_for(a))
-            if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+            if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                 continue
 
             full = href if href.startswith("http") else urljoin(self._base, href)
@@ -312,7 +319,7 @@ class CanvasEngine(PortalEngine):
                 if cid in seen:
                     continue
                 container_text = (await self._container_text_for(a))
-                if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+                if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                     continue
                 full = href if href.startswith("http") else urljoin(self._base, href)
                 seen.add(cid)
