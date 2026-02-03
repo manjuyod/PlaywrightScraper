@@ -21,7 +21,7 @@ class InfiniteCampus(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
-        print(f"searching for {first_name}")
+        print(f"[IC] Logging in {first_name}")
         username_selector = '#username'
         password_selector = '#password'
         try:
