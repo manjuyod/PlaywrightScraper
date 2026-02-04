@@ -35,7 +35,7 @@ class Aeries(PortalEngine):
                 alt_sso_callback = self.iusd_login,
                 sso_login_selector=sso_login_selector
             )
-            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=5000)
+            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
         except Exception as e:
             print(e)
             raise
@@ -54,12 +54,17 @@ class Aeries(PortalEngine):
             username_selector,
             pw_selector
         )
-    async def nav_to_grades(self):
+    async def nav_to_grades(self) -> bool:
         main_grades_selector = '#NavMainGrades'
         sub_grades_selector = '#NavSubGrades'
         await self.page.click(main_grades_selector)
-        await self.page.click(sub_grades_selector)  # sometimes this doesn't exist and we should bail early
-        await wait_after_nav(self.page, pattern='**/Grades**', timeout=5000)
+        sub_grades_elem = self.page.locator(sub_grades_selector)
+        if await exists(sub_grades_elem):
+            await self.page.click(sub_grades_selector)
+            await wait_after_nav(self.page, pattern='**/Grades**', timeout=5000)
+            return True
+        return False
+
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
@@ -67,27 +72,67 @@ class Aeries(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
-        """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
         print("\nfetching grades")
         try:
             # ensure we have reached the next page
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000) # wait some to allow population
-            await self.nav_to_grades()
 
-            table_selector = "tr[id$='ReadRow1']"
-            course_selector = "td[data-tcfc='CRS.CO']"
-            grade_selector = "td[data-tcfc='GRD.M2']"
+            # TODO: verify that we reached the correct student page as there may be more than one
 
-            courses_dict = await grades_table_to_dict(
-                self.page,
-                table_selector,
-                course_selector,
-                grade_selector,
-                decompose_labels=True
-            )
-            print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
-            return {"parsed_grades": courses_dict}
+
+            grades_page_exists = await self.nav_to_grades()
+            if grades_page_exists:
+                table_selector = "tr[id$='ReadRow1']"
+                course_selector = "td[data-tcfc='CRS.CO']"
+                grade_selector = "td[data-tcfc='GRD.M2']"
+
+                courses_dict = await grades_table_to_dict(
+                    self.page,
+                    table_selector,
+                    course_selector,
+                    grade_selector,
+                    decompose_labels=True
+                )
+                print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
+                return {"parsed_grades": courses_dict}
+            else: # try to parse the grades from the dashboard
+                print('grades tab DNE, parsing grades from dashboard')
+                await self.page.reload()
+                soup = await self.get_soup()
+                # print("Soup:", soup)
+                courses_dict = {}
+                # get class table
+                class_table = soup.find('div', id="divClass")
+                # print(f"[AERIES] found class table: {class_table}")
+                # if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
+                if class_table is None:  # failed to find class table
+                    await self.page.click("#StudentNameDropDown")
+                    await self.page.click("#StudentNameDropDownMenu")
+                    await self.page.wait_for_load_state()
+                    await self.page.wait_for_timeout(3000)
+                    # try again with new page
+                    soup = await self.get_soup()
+                    class_table = soup.find('div', id='divClass')
+                if class_table is not None and len(class_table.select('div.Card')) > 0:
+                    # parse the class table
+                    class_cards = class_table.select('div.Card')
+                    print(f"[AERIES] found {len(class_cards)}")
+                    for card in class_cards:  # parse the cards
+                        # course name
+                        class_link = card.find("a", class_="TextHeading")
+                        course_name: str = class_link.text.strip()
+                        # grade
+                        grade_div = card.find("div", class_="Grade")
+                        grade_span = grade_div.find("span")
+                        if grade_span is not None:  # as long as the grade exists
+                            grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
+                            title = canonicalize_course_title(course_name)
+                            grade = canonicalize_grade(grade_str)
+                            courses_dict[title] = grade  # add to dictionary
+                import pprint
+                pprint.pprint(courses_dict)
+                return courses_dict
         except Exception as e:
             print(e)
             raise

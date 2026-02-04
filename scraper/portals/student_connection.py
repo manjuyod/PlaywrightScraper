@@ -1,14 +1,6 @@
 from __future__ import annotations
-
-from datetime import datetime, timedelta
-import re
-from typing import List, Dict, Any, Optional, Tuple
-
-from bs4 import BeautifulSoup
-from playwright.async_api import Page, Frame
-from .base import PortalEngine, PlaywrightTimeout
+from .base import PortalEngine
 from . import register_portal  # helper we'll create in __init__.py
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_not_exception_type
 from .utils import *
 
 @register_portal("student_connection")
@@ -95,8 +87,8 @@ class StudentConnection(PortalEngine):
             print(f"[SC] Grades parsed: {parsed}")
             return {"parsed_grades": parsed}
         except Exception as e:
-            raise
             print(e)
+            raise
         finally:
             pass
 # HELPERS
@@ -131,6 +123,8 @@ class StudentConnection(PortalEngine):
             percent_grade = canonicalize_grade(grade)
             print(grade_content)
             print(course_name, percent_grade)
+            truncate_on = ": "
+            course_name = canonicalize_course_title(course_name, truncate_on=truncate_on, truncate_before=True)
             parsed[course_name] = percent_grade
         return parsed
 
@@ -230,6 +224,8 @@ class StudentConnection(PortalEngine):
             else:
                 continue
 
+            truncate_on = ": "
+            course = canonicalize_course_title(course, truncate_on=truncate_on, truncate_before=True)
             if course:
                 parsed[course] = grade
 

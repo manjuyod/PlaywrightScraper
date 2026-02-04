@@ -87,7 +87,6 @@ class Blackbaud(PortalEngine):
         """Navigate to My Day → Progress, collect per-course grades via modal."""
         try:
             await self.nav_to_grades()
-            soup = await self.get_soup()
             table_selector = "#coursesContainer div.row"
             title_selector = 'h3'
             truncate_on = '-'
