@@ -19,7 +19,7 @@ import psycopg2 as pg
 from psycopg2.extensions import connection
 from psycopg2.extras import DictCursor
 # external
-from playwright.async_api import async_playwright, Playwright
+from playwright.async_api import async_playwright, Playwright, Browser
 from scraper.portals import get_portal, managed_portals, LoginError
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.notif import send_notification_to_slack, Severity
@@ -179,18 +179,10 @@ def students(franchise_id: int | None = None, student_id: int | None = None, por
     return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
 
 
-async def scrape_one(pw: Playwright, student: dict):
+async def scrape_one(browser: Browser, student: dict):
     """Scrape a single student using the appropriate portal engine."""
     await asyncio.sleep(random.uniform(0, 1.0))
-    browser_args = [
-        # "--no-sandbox",
-        # "--disable-dev-shm-usage",
-        # "--disable-gpu",
-        # "--disable-web-security",
-        # "--disable-features=VizDisplayCompositor",
-        "--disable-blink-features=AutomationControlled",
-    ]
-    browser = await pw.chromium.launch(headless=False, args=browser_args)
+    # new context prevents cookies from leaking between students
     context = await browser.new_context()
 
     page = await context.new_page()
@@ -214,6 +206,8 @@ async def scrape_one(pw: Playwright, student: dict):
     try:
         print(f"Starting login for {student['id']}", flush=True)
         try:
+            if not scraper.sid or not scraper.pw:  # early check for field population
+                raise ValueError(f"Invalid login credentials for ID={student['db_id']};\nMissing username or password")
             await scraper.login(first_name=student.get("student_name"))
         except Exception as e:
             with db_conn() as conn:
@@ -227,7 +221,7 @@ async def scrape_one(pw: Playwright, student: dict):
             # print("\t\t\tBypassed credentials !good, dont forget to reset")
 
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
-            raise LoginError(e) # raise once again so we log the error in the output json
+            raise LoginError(f"{e}\nLikely bad username/password for student") # raise once again so we log the error in the output json
         print(f"Login successful for {student['id']}, fetching grades…", flush=True)
         grades = await scraper.fetch_grades()
 
@@ -245,9 +239,9 @@ async def scrape_one(pw: Playwright, student: dict):
             html_file.write_text(grades["raw_html"], encoding="utf-8")
 
         return {"db_id": student["db_id"], "id": student["id"], "parsed_grades": parsed}
-
     finally:
-        await browser.close()
+        await page.close()
+        await context.close()
 
 def project_root() -> pathlib.Path:
     for parent in pathlib.Path(__file__).resolve().parents:
@@ -290,14 +284,19 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     with open(out_file, "w", encoding="utf-8") as f:
         async with async_playwright() as p:
             begin_time = time()
+            browser_args = [
+                "--disable-blink-features=AutomationControlled",
+            ]
+            browser = await p.chromium.launch(headless=False, args=browser_args)
             for student in student_list:
                 portal_attempted[student.get('portal')] += 1
                 try:
-                    result = await scrape_one(p, student)
+                    print(f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
+                    result = await scrape_one(browser, student)
                     f.write(json.dumps(result) + "\n")
                     portal_success[student.get("portal")] += 1
                     # success_count += 1
-                    print(f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
+
                 except Exception as e:
                     if 'Connection closed while reading from the driver' not in str(e):
                         error_result = {
@@ -321,12 +320,12 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     attempted_count = sum(portal_attempted.values())
     success_count = sum(portal_success.values())
     error_count = attempted_count - success_count
-    error_summary = pprint.pformat(errors)
-    results_log = f"""Scraping complete! {f"(Franchise {franchise_id})" if franchise_id else ""} {f"(Student {student_id})" if student_id else ""}\n
+    error_summary = pprint.pformat(errors) # this is why newlines don't work properly
+    results_log = f"""Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }\n
     Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
     Errors encountered: {error_count}
     Low success rates\n---------\n{low_success_rates}
-    Error summary\n---------\n{error_summary if error_summary else "No errors"}
+    Error summary\n---------\n{error_summary if error_summary else "No errors encountered"}
     """
     if os.getenv('PYTHON_ENV') != 'dev':
         send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
@@ -336,6 +335,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     print(f"Errors encountered: {error_count}", flush=True)
     print("Script finished.", flush=True)
 
+    # print(results_log)
 
 if __name__ == "__main__":
     print("[runner] __main__ starting", flush=True)
