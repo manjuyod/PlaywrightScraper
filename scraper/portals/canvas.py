@@ -242,6 +242,7 @@ class CanvasEngine(PortalEngine):
                 grade_str: str = await course_grade.inner_text()
                 if grade_str.lower() == "no grade":
                     continue
+                print("Canvas: Grade found", grade_str)
                 grade = canonicalize_grade(grade_str)
                 parsed[course] = grade
                 # print(course, grade_str)
