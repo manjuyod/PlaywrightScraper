@@ -325,12 +325,26 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     success_count = sum(portal_success.values())
     error_count = attempted_count - success_count
     error_summary = pprint.pformat(errors) # this is why newlines don't work properly
-    results_log = f"""Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }\n
+    results_log = f"""
+    Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }
+    
     Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
-    Errors encountered: {error_count}
-    Low success rates\n---------\n{low_success_rates}
-    Error summary\n---------\n{error_summary if error_summary else "No errors encountered"}
+    
+    Low success rates
+    ==================
+    
+    {low_success_rates if len(low_success_rates) > 0 else "No low success rates encountered"}
+    
+    Error summary | Encountered {error_count} errors
+    ==============
+    
+    {error_summary if error_summary else "Nothing to show"}
     """
+
+    results_log = textwrap.dedent(results_log.strip())
+    results_log.replace("'", "")
+    results_log.replace('\\n', '')
+
     if os.getenv('PYTHON_ENV') != 'dev':
         send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
 
@@ -339,7 +353,8 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     print(f"Errors encountered: {error_count}", flush=True)
     print("Script finished.", flush=True)
 
-    # print(results_log)
+
+    print(results_log, flush=True)
 
 if __name__ == "__main__":
     print("[runner] __main__ starting", flush=True)
