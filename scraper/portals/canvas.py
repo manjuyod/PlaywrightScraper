@@ -202,6 +202,8 @@ class CanvasEngine(PortalEngine):
             print(parsed)
             return parsed
         except Exception as e:
+            # import traceback
+            # traceback.print_exc()
             print(f"[Canvas] Error: {e}")
             raise
         finally:
