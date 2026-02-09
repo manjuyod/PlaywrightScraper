@@ -195,6 +195,7 @@ class CanvasEngine(PortalEngine):
           - For each course, open 'Grades' and parse final/total grade
         """
         # Ensure base reflects post-login host
+        # TODO Handle the 'student welcome' popup that sometimes blocks
         try:
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0:
