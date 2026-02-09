@@ -240,7 +240,6 @@ class CanvasEngine(PortalEngine):
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
                 grade_str: str = await course_grade.inner_text()
-                print("Canvas: Grade found", grade_str)
                 if grade_str.lower() == "no grade":
                     continue
                 grade = canonicalize_grade(grade_str)
