@@ -26,15 +26,16 @@ class StudentConnection(PortalEngine):
                 username_selector,
                 password_selector,
             )
+
+            try:
+                login_not_found = await exists(self.page.get_by_text("Login Not Found", exact=False))
+                print("Login found? ", not login_not_found)
+                await self.raise_login_error_if(login_not_found)
+            except PlaywrightTimeout: # not a failed login if this times out
+                pass
             # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
             await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
 
-            login_error = False
-            try:
-                login_error = await self.page.get_by_text("Login Not Found").count() > 0
-            except PlaywrightTimeout: # not a failed login if this errors
-                pass
-            await self.raise_login_error_if(login_error)
 
 
 
