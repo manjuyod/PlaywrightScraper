@@ -261,7 +261,7 @@ class CanvasEngine(PortalEngine):
 
 
         term_context = _term_context_from_today()
-        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('sprint_year'), term_context.get('term'))
+        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('spring_year'), term_context.get('term'))
 
 
         # Open the "Courses" tray
