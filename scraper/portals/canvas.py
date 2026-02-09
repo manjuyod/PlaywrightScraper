@@ -195,6 +195,7 @@ class CanvasEngine(PortalEngine):
           - For each course, open 'Grades' and parse final/total grade
         """
         # Ensure base reflects post-login host
+        # TODO Handle the 'student welcome' popup that sometimes blocks
         try:
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0:
@@ -202,6 +203,8 @@ class CanvasEngine(PortalEngine):
             print(parsed)
             return parsed
         except Exception as e:
+            # import traceback
+            # traceback.print_exc()
             print(f"[Canvas] Error: {e}")
             raise
         finally:
@@ -238,9 +241,9 @@ class CanvasEngine(PortalEngine):
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
                 grade_str: str = await course_grade.inner_text()
-                print("Canvas: Grade found", grade_str)
                 if grade_str.lower() == "no grade":
                     continue
+                print("Canvas: Grade found", grade_str)
                 grade = canonicalize_grade(grade_str)
                 parsed[course] = grade
                 # print(course, grade_str)
@@ -259,7 +262,7 @@ class CanvasEngine(PortalEngine):
 
 
         term_context = _term_context_from_today()
-        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('sprint_year'), term_context.get('term'))
+        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('spring_year'), term_context.get('term'))
 
 
         # Open the "Courses" tray

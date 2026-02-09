@@ -178,6 +178,16 @@ def filter_students(_students: list[dict[str, str]], key: str, value) -> list[di
 def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
     return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
 
+def bad_login(student_id: int):
+    """Set PasswordGood=0 for a student in the database."""
+    print(f"[runner] bad_login(): setting PasswordGood=0 for student ID={student_id}", flush=True)
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
+            (student_id,)
+        )
+        conn.commit()
 
 async def scrape_one(browser: Browser, student: dict):
     """Scrape a single student using the appropriate portal engine."""
@@ -209,17 +219,12 @@ async def scrape_one(browser: Browser, student: dict):
             if not scraper.sid or not scraper.pw:  # early check for field population
                 raise ValueError(f"Invalid login credentials for ID={student['db_id']};\nMissing username or password")
             await scraper.login(first_name=student.get("student_name"))
-        except Exception as e:
-            with db_conn() as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-                    (student["db_id"],)
-                )
-                conn.commit()
-
+        except ValueError:
+            bad_login(int(student['db_id']))
+            raise
+        except Exception as e: # any exception while logging in is considered a bad login
             # print("\t\t\tBypassed credentials !good, dont forget to reset")
-
+            bad_login(int(student['db_id']))
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
             raise LoginError(f"{e}\nLikely bad username/password for student") # raise once again so we log the error in the output json
         print(f"Login successful for {student['id']}, fetching grades…", flush=True)
@@ -244,18 +249,17 @@ async def scrape_one(browser: Browser, student: dict):
         await context.close()
 
 def project_root() -> pathlib.Path:
+    reference_file = '.python-version'
     for parent in pathlib.Path(__file__).resolve().parents:
-        if (parent / '.python-version' ).exists():
+        if (parent / reference_file).exists():
             return parent
     return pathlib.Path.cwd()
 out_dir = pathlib.Path("output/phase1totuples")
 out_dir.mkdir(parents=True, exist_ok=True)
 out_file = project_root() / out_dir / "grades.jsonl"
+
 async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None, job_id: str | None = None, state_q: queue.Queue | None = None):
     print(f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}", flush=True)
-    out_dir = pathlib.Path("output/phase1totuples")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / "grades.jsonl"
 
     student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
     print(f"[runner] main(): fetched {len(student_list)} students", flush=True)
@@ -321,12 +325,26 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     success_count = sum(portal_success.values())
     error_count = attempted_count - success_count
     error_summary = pprint.pformat(errors) # this is why newlines don't work properly
-    results_log = f"""Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }\n
+    results_log = f"""
+    Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }
+    
     Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
-    Errors encountered: {error_count}
-    Low success rates\n---------\n{low_success_rates}
-    Error summary\n---------\n{error_summary if error_summary else "No errors encountered"}
+    
+    Low success rates
+    ==================
+    
+    {low_success_rates if len(low_success_rates) > 0 else "No low success rates encountered"}
+    
+    Error summary | Encountered {error_count} errors
+    ==============
+    
+    {error_summary if error_summary else "Nothing to show"}
     """
+
+    results_log = textwrap.dedent(results_log.strip())
+    results_log.replace("'", "")
+    results_log.replace('\\n', '')
+
     if os.getenv('PYTHON_ENV') != 'dev' or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
         severity = Severity.Crit if error_count > 0 else Severity.Info
         try:
@@ -339,7 +357,8 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     print(f"Errors encountered: {error_count}", flush=True)
     print("Script finished.", flush=True)
 
-    # print(results_log)
+
+    print(results_log, flush=True)
 
 if __name__ == "__main__":
     print("[runner] __main__ starting", flush=True)

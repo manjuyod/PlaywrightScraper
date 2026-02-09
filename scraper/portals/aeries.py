@@ -78,8 +78,15 @@ class Aeries(PortalEngine):
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000) # wait some to allow population
 
-            # TODO: verify that we reached the correct student page as there may be more than one
-
+            # ensure that we are on the correct dashboard, a student may have more than one
+            soup = await self.get_soup()
+            class_table = soup.find('div', id="divClass")
+            if class_table is None:  # failed to find class table
+                await self.page.click("#StudentNameDropDown")
+                await self.page.click("#StudentNameDropDownMenu")
+                await self.page.wait_for_load_state()
+                await self.page.wait_for_timeout(3000)
+            # assert class_table is not None
 
             grades_page_exists = await self.nav_to_grades()
             if grades_page_exists:
@@ -99,21 +106,10 @@ class Aeries(PortalEngine):
             else: # try to parse the grades from the dashboard
                 print('grades tab DNE, parsing grades from dashboard')
                 await self.page.reload()
-                soup = await self.get_soup()
+                # soup = await self.get_soup()
                 # print("Soup:", soup)
                 courses_dict = {}
                 # get class table
-                class_table = soup.find('div', id="divClass")
-                # print(f"[AERIES] found class table: {class_table}")
-                # if 'nmusd' not in self.login_url: # for all aeries but newport mesa, follow this flow
-                if class_table is None:  # failed to find class table
-                    await self.page.click("#StudentNameDropDown")
-                    await self.page.click("#StudentNameDropDownMenu")
-                    await self.page.wait_for_load_state()
-                    await self.page.wait_for_timeout(3000)
-                    # try again with new page
-                    soup = await self.get_soup()
-                    class_table = soup.find('div', id='divClass')
                 if class_table is not None and len(class_table.select('div.Card')) > 0:
                     # parse the class table
                     class_cards = class_table.select('div.Card')
