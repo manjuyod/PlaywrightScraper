@@ -345,8 +345,12 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     results_log.replace("'", "")
     results_log.replace('\\n', '')
 
-    if os.getenv('PYTHON_ENV') != 'dev':
-        send_notification_to_slack(Severity.Info, textwrap.dedent(results_log))
+    if os.getenv('PYTHON_ENV') != 'dev' or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
+        severity = Severity.Crit if error_count > 0 else Severity.Info
+        try:
+            send_notification_to_slack(severity, textwrap.dedent(results_log))
+        except Exception as e:
+            print(f"[runner] Slack notification failed: {e}", flush=True)
 
     print(f"\nScraping complete! Results saved to {out_file}", flush=True)
     print(f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student", flush=True)
