@@ -1,27 +1,31 @@
 """To be used as a final test for each portal currently being managed"""
 
-from scraper.runner import students as get_students, scrape_one, filter_students
+from scraper.runner import students as get_students, scrape_one
+from db import filter_group
 import random
 
-async def test_portal(pw, portal, student: dict | None = None) -> bool:
+async def test_portal(browser, portal, student: dict | None = None) -> bool:
     print(portal)
     if student is None:
-        _students = filter_students(students, 'portal', portal)
-        student = random.choice(_students)
+        _students = filter_group(students, 'portal', portal)
+        student = random.choice(_students) if len(_students) > 0 else None
+        print(student)
+        if student is None: return True
     try:
-        await scrape_one(pw, student)
+        await scrape_one(browser, student)
         return True
-    except:
+    except Exception as e:
+        print(type(e), e, flush=True)
         return False
 
 
-async def batch_portal_test(pw, portal) -> bool:
-    _students = filter_students(students, 'portal', portal)
+async def batch_portal_test(browser, portal) -> bool:
+    _students = filter_group(students, 'portal', portal)
     num_to_sample = min(5, len(_students))
     _students = random.sample(_students, num_to_sample)
 
     # ASYNC
-    tasks = [test_portal(pw, portal, student) for student in _students]
+    tasks = [test_portal(browser, portal, student) for student in _students]
     results = await asyncio.gather(*tasks)
 
     # SYNC
@@ -46,13 +50,14 @@ from playwright.async_api import async_playwright
 from time import time
 async def main(portal: str | None):
     async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=False)
         start_time = time()
         if portal: # one portal
-            result = await batch_portal_test(pw, portal)
+            result = await batch_portal_test(browser, portal)
             print(f"[test] {args.portal}")
             print(f"[test] Success? {result}")
-        else: # full test
-            results = await full_test(pw)
+        else: # all portals
+            results = await full_test(browser)
             print('====[Portal Test Results]====')
             for portal, passed in results.items():
                 result = 'PASSED' if passed else 'FAILED'
