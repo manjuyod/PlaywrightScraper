@@ -139,6 +139,7 @@ def get_students_from_db(
 
                 if not portal_key:
                     print(f"[WARN] Skipping ID={row['id']}: missing portal (login_url={login_url!r})", flush=True)
+                    bad_login(row["id"])
                     continue
 
                 students_list.append(
@@ -219,11 +220,10 @@ async def scrape_one(browser: Browser, student: dict):
             if not scraper.sid or not scraper.pw:  # early check for field population
                 raise ValueError(f"Invalid login credentials for ID={student['db_id']};\nMissing username or password")
             await scraper.login(first_name=student.get("student_name"))
-        except ValueError:
+        except ValueError: # no username/password
             bad_login(int(student['db_id']))
             raise
         except Exception as e: # any exception while logging in is considered a bad login
-            # print("\t\t\tBypassed credentials !good, dont forget to reset")
             bad_login(int(student['db_id']))
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
             raise LoginError(f"{e}\nLikely bad username/password for student") # raise once again so we log the error in the output json
