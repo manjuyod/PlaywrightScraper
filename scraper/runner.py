@@ -318,13 +318,15 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / max(1, len(student_list))
 
-    portal_success_rates = {portal: float(success) / attempted * 100 for success, attempted in zip(portal_success.values(), portal_attempted.values()) if attempted != 0}
-    low_success_rates = {portal: success_rate for success_rate in portal_success_rates.values() if success_rate < 75}
+    portal_success_rates = {portal: float(success) / attempted * 100 for portal, success, attempted in zip(portal_attempted.keys(), portal_success.values(), portal_attempted.values()) if attempted != 0}
+    low_success_rates = {portal: success_rate for portal, success_rate in portal_success_rates.items() if success_rate < 75}
 
     attempted_count = sum(portal_attempted.values())
     success_count = sum(portal_success.values())
     error_count = attempted_count - success_count
-    error_summary = pprint.pformat(errors) # this is why newlines don't work properly
+
+    low_success_rates_summary = pprint.pformat(low_success_rates)
+    error_summary = pprint.pformat(errors)
     results_log = f"""
     Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }
     
@@ -333,7 +335,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     Low success rates
     ==================
     
-    {low_success_rates if len(low_success_rates) > 0 else "No low success rates encountered"}
+    {low_success_rates_summary if len(low_success_rates) > 0 else "No low success rates encountered"}
     
     Error summary | Encountered {error_count} errors
     ==============
@@ -348,7 +350,7 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     if os.getenv('PYTHON_ENV') != 'dev' or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
         severity = Severity.Crit if error_count > 0 else Severity.Info
         try:
-            send_notification_to_slack(severity, textwrap.dedent(results_log))
+            send_notification_to_slack(severity, results_log)
         except Exception as e:
             print(f"[runner] Slack notification failed: {e}", flush=True)
 
