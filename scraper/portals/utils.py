@@ -60,12 +60,14 @@ async def tracing_context(page: Page):
     finally:
         await page.context.tracing.stop()
 
-async def exists(elem: Locator):
+async def exists(elem: Locator, timeout: int = 1000):
     try:
-        await expect(elem).to_be_visible(timeout=1000)
+        await expect(elem).to_be_visible(timeout=timeout)
     except AssertionError: # this will raise when the elem DNE
         return False
     except PlaywrightError: # this will raise when the locator is something unexpected, like an empty string
+        return False
+    except PlaywrightTimeout: # this will raise when the locator is not something that exists
         return False
     return True
 # ============================================================================
@@ -204,6 +206,7 @@ async def use_sso_login(
     Returns:
         True if a SSO was used, otherwise False
     """
+    print('use SSO login')
     current_url = page.url.lower()
     if check_microsoft and 'microsoft' in current_url:
         if microsoft_login_callback:
@@ -467,7 +470,10 @@ async def grades_table_to_dict(
                     grade_text: str | None = None
                     for grade in reversed(grades):
                         text = (await grade.inner_text()).strip()
-                        if "%" in text:
+                        if "%" in text: # this does not catch all, like cases when there is a number but no percentage sign
+                            grade_text = text
+                            break
+                        if text.isdigit(): # this may catch cases that we do not mean to match
                             grade_text = text
                             break
                     if grade_text is None: # bail if we couldn't find a valid grade
@@ -572,29 +578,3 @@ async def get_frame_by_url_pattern(
         return frame
     except PlaywrightTimeout:
         return None
-
-
-async def get_frame_content_as_soup(
-    page: Page,
-    iframe_selector: str,
-    url_pattern: str,
-    *,
-    timeout: int = 15_000
-) -> Optional[BeautifulSoup]:
-    """
-    Get BeautifulSoup object from an iframe's content.
-    
-    Args:
-        page: Playwright Page object
-        iframe_selector: CSS selector for the iframe element
-        url_pattern: String pattern to match in the iframe URL
-        timeout: Maximum milliseconds to wait for iframe
-    
-    Returns:
-        BeautifulSoup object if frame found, None otherwise
-    """
-    frame = await get_frame_by_url_pattern(page, iframe_selector, url_pattern, timeout=timeout)
-    if frame:
-        html = await frame.content()
-        return BeautifulSoup(html, "html.parser")
-    return None
