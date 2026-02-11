@@ -35,15 +35,13 @@ class InfiniteCampus(PortalEngine):
                 microsoft_callback=self.microsoft_login,
                 google_callback=self.google_login
             )
-            await wait_after_nav(
-                self.page,
-                pattern='**/nav-wrapper**',
-                wait_after_load=2000,
-                wait_until='networkidle'
-            )
+            print(f"[IC] Attemped login, waiting for nav-wrapper.")
 
+            invalid_creds_msg = "Incorrect Username and/or Password"
+            login_failed = await exists(self.page.get_by_text(invalid_creds_msg, exact=False))
+            await self.raise_login_error_if(login_failed, "Infinite Campus login failed due to incorrect credentials")
             await self.raise_login_error_if('nav-wrapper' not in self.page.url)
-
+            print("[IC] nav-wrapper found in url, login successful.")
             print("Successfully reached the home page")
             await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
@@ -55,7 +53,7 @@ class InfiniteCampus(PortalEngine):
     # helper
     @staticmethod
     async def select_student(first_name: str, page: Page):
-        frame = page.frame(name="main-workspace")
+        frame = page.frame_locator("main-workspace")
         try:  # click the student with first name if it exists
             await frame.get_by_role('link', name=first_name).click(timeout=2000)
         except PlaywrightTimeout:
@@ -108,8 +106,7 @@ class InfiniteCampus(PortalEngine):
                 use_soup=False
             )
             
-        except Exception as e:
-            print(f"{type(e)}: {e}")
+        # except Exception as e:
         finally:
             print("finished fetching")
 
