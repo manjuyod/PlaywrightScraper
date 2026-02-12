@@ -228,6 +228,8 @@ async def scrape_one(browser: Browser, student: dict):
             print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
             raise LoginError(f"{e}\nLikely bad username/password for student") # raise once again so we log the error in the output json
         print(f"Login successful for {student['id']}, fetching grades…", flush=True)
+
+        # post-login
         grades = await scraper.fetch_grades()
 
         # Normalize payload so we always write top-level "parsed_grades"
