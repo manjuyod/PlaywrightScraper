@@ -176,14 +176,17 @@ async def universal_login_flow(
                 raise LoginError('Could not find a suitable SSO login option for student. Maybe you forgot to select an SSO button, or it does not exist')
 
         if sso_login_selector and await exists(page.locator(sso_login_selector)):
-            print(f'attempt alternate login with {sso_login_selector}')
+            print(f'No username or password fields exist, attempt SSO login with {sso_login_selector}')
             await page.locator(sso_login_selector).click()
             await wait_after_nav(page)
         try:
             assert (microsoft_callback is not None) or (google_callback is not None)
             await try_sso_login()
         except (PlaywrightError, LoginError): # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
-            await alt_sso_callback()
+            print('SSO login failed, attempting alternate SSO login')
+            if alt_sso_callback:
+                await alt_sso_callback()
+            else: raise LoginError('Failed to find a suitable SSO login option for student. Maybe you forgot to select an SSO button, or it does not exist')
 
 
 async def use_sso_login(
