@@ -195,10 +195,17 @@ class CanvasEngine(PortalEngine):
           - For each course, open 'Grades' and parse final/total grade
         """
         # Ensure base reflects post-login host
-        # TODO Handle the 'student welcome' popup that sometimes blocks
+        # Handle the 'student welcome' popup that sometimes blocks
+        student_tour = await exists(self.page.get_by_text('Student Tour'))
+        if student_tour:
+            not_now_button = self.page.get_by_role('button', name='Not Now')
+            await not_now_button.click()
+            done_button = self.page.get_by_role('button', name='Done')
+            if await exists(done_button):
+                await done_button.click()
         try:
             parsed = await self.parse_grades_from_list_view()
-            if len(parsed) == 0:
+            if len(parsed) == 0: # fallback to iterative approach
                 parsed = await self.parse_grades_iterative()
             print(parsed)
             return parsed
@@ -228,7 +235,7 @@ class CanvasEngine(PortalEngine):
                 if await show_grades_button.count() > 0:
                     await show_grades_button.click()
                 else:
-                    print('failed to switch to a valid view')
+                    return parsed
 
             await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
             # 2. parse
