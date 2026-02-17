@@ -46,6 +46,7 @@ class Blackbaud(PortalEngine):
                 self.pw,
                 username_selector,
                 password_selector,
+                sso_login_selector='#sso-continue-button',
                 google_callback=self.google_login,
                 pre_fill_wait=3000,
                 post_fill_wait=2000
@@ -53,7 +54,9 @@ class Blackbaud(PortalEngine):
             await wait_after_nav(self.page, pattern='**/app/**', wait_after_load=5000)
 
         except Exception as e:
+            import traceback
             print(e)
+            traceback.print_exc()
             raise e
         finally:
             print(f"URL post-login: {self.page.url}")

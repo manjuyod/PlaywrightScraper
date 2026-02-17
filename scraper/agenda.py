@@ -3,7 +3,8 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Playwright, BrowserContext
 
 from scraper.portals.utils import get_portal_key_from_url
-from scraper.runner import get_students_from_db, filter_students, get_portal
+from scraper.runner import get_students_from_db, get_portal
+from db import filter_group
 
 load_dotenv()
 async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
@@ -57,7 +58,7 @@ async def main(franchise_id: int | None, student_id: int | None):
     else:
         _students = get_students_from_db()
 
-    students = filter_students(_students, 'track_agenda', True)
+    students = filter_group(_students, 'track_agenda', True)
 
     async with async_playwright() as pw:
         browser_args = [

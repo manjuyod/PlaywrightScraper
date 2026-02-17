@@ -35,6 +35,9 @@ class Aeries(PortalEngine):
                 alt_sso_callback = self.iusd_login,
                 sso_login_selector=sso_login_selector
             )
+
+            if exists(self.page.get_by_role('alert')):
+                raise self.LoginError('Invalid username/password')
             await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
         except Exception as e:
             print(e)

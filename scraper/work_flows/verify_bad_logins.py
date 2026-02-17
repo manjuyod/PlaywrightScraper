@@ -1,6 +1,5 @@
 import asyncio
 from dataclasses import asdict
-
 from scraper.runner import bad_login
 from db import get_students, filter_group, db_conn
 from scraper.portals import get_portal, LoginError
@@ -48,6 +47,8 @@ def good_login(student_id: int):
 import pprint
 async def main():
     students: list[dict] = filter_group(get_students(bare=True), key='passwordgood', value=0)
+    students = filter_group(students, key='portal', value='infinite_campus') # temp filter for ic students
+    print(f"[verify_bad_logins] Found {len(students)} students to verify.")
     async with async_playwright() as p:
         browser_args = [
             "--disable-blink-features=AutomationControlled",
