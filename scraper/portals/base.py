@@ -26,7 +26,7 @@ class PortalEngine(ABC):
     @abstractmethod
     async def fetch_grades(self) -> Dict[str, Any]: ...
 
-    async def get_agenda(self):
+    async def get_agenda(self, **kwargs: Any):
         pass
 
     # optional shared helpers ↓
