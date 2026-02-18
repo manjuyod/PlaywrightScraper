@@ -50,8 +50,11 @@ class InfiniteCampus(PortalEngine):
     async def select_student(first_name: str, page: Page):
         frame = page.frame_locator("main-workspace")
         try:  # click the student with first name if it exists
-            await frame.get_by_role('link', name=first_name).click(timeout=2000)
-        except PlaywrightTimeout:
+            print(f"[IC] Attempting to select student {first_name}")
+            await frame.get_by_role('link', name=first_name, exact=False).click(timeout=2000)
+        except PlaywrightTimeout as e:
+            print(e)
+            print(f"[IC] Could not find student {first_name}, continuing without selecting.")
             pass  # no alternate student
 
     # ---------------------- NAV TO GRADES -------
@@ -114,19 +117,22 @@ class InfiniteCampus(PortalEngine):
             grades_selector = ".grading-score div"
 
             # we will parse the current quarter as well as the next quarter, and keep the grades from the most recent quarter
-            final_sem_quarter = self.term_semester_from_today() * 2 # either 4 or 2
-            await self.select_quarter(final_sem_quarter, frame)
+            current_semester = self.term_semester_from_today() # either 1 or 2 (this only works if the page is using quarters not semesters)
 
-            next_q_grades = await grades_table_to_dict(
-                self.page,
-                table_selector,
-                course_selector,
-                grades_selector,
-                frame_selector=frame_selector,
-                use_soup=False
-            )
+            try: # some ic portals don't populate each quarter, so we need to handle the case where the 'next' quarter doesn't exist
+                await self.select_timeframe(current_semester, frame)
+                next_q_grades = await grades_table_to_dict(
+                    self.page,
+                    table_selector,
+                    course_selector,
+                    grades_selector,
+                    frame_selector=frame_selector,
+                    use_soup=False
+                )
+            except AssertionError:
+                next_q_grades = {}
 
-            await self.select_quarter(final_sem_quarter - 1, frame)
+            await self.select_timeframe(current_semester, frame, q_before=True)
             cur_q_grades = await grades_table_to_dict(
                 self.page,
                 table_selector,
@@ -152,12 +158,12 @@ class InfiniteCampus(PortalEngine):
             print("finished fetching")
 
     @staticmethod
-    async def select_quarter(current_quarter: int, frame: Frame) -> None:
-        timeframe = frame.get_by_role("button", name="QT" + str(current_quarter))
+    async def select_timeframe(current_sem: int, frame: Frame, q_before = False) -> None:
+        timeframe = frame.get_by_role("button", name="QT" + str(current_sem * 2 - 1 if q_before else current_sem * 2))
         if not await exists(timeframe):
-            timeframe = frame.get_by_role("button", name="Q" + str(current_quarter))
+            timeframe = frame.get_by_role("button", name="Q" + str(current_sem * 2 - 1 if q_before else current_sem * 2))
         if not await exists(timeframe):
-            timeframe = frame.get_by_role("button", name="S" + str(current_quarter // 2 + 1))
+            timeframe = frame.get_by_role("button", name="S" + str(current_sem if q_before else current_sem - 1))
         assert await exists(timeframe)
         await timeframe.wait_for(timeout=1000)
         await timeframe.click()
