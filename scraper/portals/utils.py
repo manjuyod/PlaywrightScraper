@@ -496,6 +496,8 @@ async def grades_table_to_dict(
     print(parsed)
     return parsed
 
+def normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
 
 def percent_from_letter_grade(letter_grade: str) -> int:
     """
