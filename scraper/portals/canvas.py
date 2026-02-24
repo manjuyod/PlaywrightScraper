@@ -164,8 +164,8 @@ class CanvasEngine(PortalEngine):
                 raise LoginError("Missing login_url for Canvas")
 
             # Native Canvas selectors
-            uid_sel = "input[name='pseudonym_session[unique_id]']"
-            pwd_sel = "input[name='pseudonym_session[password]']"
+            uid_sel = "#username"
+            pwd_sel = "#password"
 
             await universal_login_flow(
                 self.page,
