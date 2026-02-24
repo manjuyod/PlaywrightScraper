@@ -3,11 +3,13 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Playwright, BrowserContext
 
 from scraper.portals.utils import get_portal_key_from_url
-from scraper.runner import get_students_from_db, get_portal
+from scraper.runner import get_students_from_db, get_portal, db_conn
 from db import filter_group
+import json
 
 load_dotenv()
 async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
+    # logins for canvas and google classroom are stored in the alternate fields, unless the students main login is canvas
     page = await ctx.new_page()
     grade_portal = student.get("portal")
     if grade_portal == 'canvas':
@@ -28,7 +30,7 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
         password,
         alt_student_id=student["alt_id"],
         alt_password=student["alt_password"],
-        login_url=login_url, # use the alternate as this should be where class info resides
+        login_url=login_url,
         alt_portal_url=student.get("alt_login_url"),
         student_name=student.get("student_name"),
     )
@@ -41,23 +43,16 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
         print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
-            await scraper.get_agenda()
+            print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
+            return await scraper.get_agenda() # this method should only exist on Canvas and Google Classroom
         except:
-            print(f"[RUNNER] Invalid credentials for ID={student['db_id']};")
-
-        print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
+            return {}
     finally:
         await page.close()
-    return student.get("id")
+
 
 async def main(franchise_id: int | None, student_id: int | None):
-    if student_id is not None:
-        _students = get_students_from_db(student_id=student_id)
-    elif franchise_id is not None:
-        _students = get_students_from_db(franchise_id=franchise_id)
-    else:
-        _students = get_students_from_db()
-
+    _students = get_students_from_db(student_id=student_id, franchise_id=franchise_id)
     students = filter_group(_students, 'track_agenda', True)
 
     async with async_playwright() as pw:
@@ -72,8 +67,13 @@ async def main(franchise_id: int | None, student_id: int | None):
         tasks = [fetch_agenda(context, student) for student in students]
         results = await asyncio.gather(*tasks)
 
-        for (student, agenda) in zip(students, results):
-            agendas[student.get("student_name")] = agenda
+        for student, agenda in zip(students, results):
+            print(f"Agenda collected for student {student['id']}: {agenda}")
+            # add the agenda to the student in the database
+            with db_conn() as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
+            print(f"Agenda saved for student {student['id']}")
 
 
 import argparse
@@ -91,8 +91,4 @@ if __name__ == '__main__':
         help="Student for which to fetch agenda."
     )
     args = parser.parse_args()
-
-    agendas = {}
     asyncio.run(main(args.franchise_id, args.student))
-
-    print(agendas)
