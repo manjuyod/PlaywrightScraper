@@ -36,6 +36,7 @@ class InfiniteCampus(PortalEngine):
             login_failed = await exists(self.page.get_by_text(invalid_creds_msg, exact=False))
             await self.raise_login_error_if(login_failed, "Infinite Campus login failed due to incorrect credentials")
             await self.raise_login_error_if('nav-wrapper' not in self.page.url)
+            await self.page.wait_for_load_state("networkidle")
             print("[IC] nav-wrapper found in url, login successful.")
             print("Successfully reached the home page")
             await self.select_student(first_name, self.page) # select for student if necessary
@@ -48,10 +49,12 @@ class InfiniteCampus(PortalEngine):
     # helper
     @staticmethod
     async def select_student(first_name: str, page: Page):
-        frame = page.frame_locator("main-workspace")
+        parent = page.frame("main-workspace")
+        if not parent:
+            parent = page
         try:  # click the student with first name if it exists
             print(f"[IC] Attempting to select student {first_name}")
-            await frame.get_by_role('link', name=first_name, exact=False).click(timeout=2000)
+            await parent.get_by_role('link', name=first_name, exact=False).click(timeout=2000)
         except PlaywrightTimeout as e:
             print(e)
             print(f"[IC] Could not find student {first_name}, continuing without selecting.")
