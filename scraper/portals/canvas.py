@@ -175,7 +175,8 @@ class CanvasEngine(PortalEngine):
                 uid_sel,
                 pwd_sel,
                 microsoft_callback=self.microsoft_login,
-                google_callback=self.google_login
+                google_callback=self.google_login,
+                alt_sso_callback=self.alt_login
             )
 
             await wait_after_nav(self.page, wait_until="domcontentloaded")
@@ -186,6 +187,21 @@ class CanvasEngine(PortalEngine):
         except Exception as e:
             print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
+
+
+    async def alt_login(self):
+        uid_sel = "input[name='pseudonym_session[unique_id]']"
+        pwd_sel = "input[name='pseudonym_session[password]']"
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            uid_sel,
+            pwd_sel,
+            microsoft_callback=self.microsoft_login,
+            google_callback=self.google_login
+        )
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
