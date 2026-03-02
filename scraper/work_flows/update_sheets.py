@@ -159,14 +159,18 @@ def _is_hs_grade(grade: str | None) -> bool:
     return False
 
 
-def _safe_json_loads(s: str | None) -> dict:
+def _safe_json_loads(s) -> dict:
     if not s:
         return {}
-    try:
-        v = json.loads(s)
-        return v if isinstance(v, dict) else {}
-    except Exception:
-        return {}
+    if isinstance(s, dict):
+        return s
+    if isinstance(s, str):
+        try:
+            v = json.loads(s)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def _coerce_str(x) -> str:
@@ -327,10 +331,8 @@ def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
 def _collect_weeks(df: pd.DataFrame) -> List[str]:
     weeks: set[str] = set()
     for wd_json in df["weeklydata"]:
-        try:
-            weeks.update(json.loads(wd_json).keys())
-        except Exception:
-            pass
+        wd = _safe_json_loads(wd_json)
+        weeks.update(wd.keys())
     return sorted(weeks)
 
 
@@ -505,7 +507,7 @@ def main() -> None:
                 "MS": (ms_df, False),
                 "Error": (err_df, False),
             })
-            print(f"  ✓ Uploaded to spreadsheet {sheet_map[fid]}")
+            print(f"  Uploaded to spreadsheet {sheet_map[fid]}")
         else:
             print(f"  [SKIP] No spreadsheet configured for FranchiseID {fid}")
 
