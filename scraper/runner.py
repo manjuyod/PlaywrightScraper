@@ -95,8 +95,8 @@ def get_students_from_db(
             """
             conditions = [
                 "PasswordGood = 1",
-                "(YearStart IS NULL OR date(YearStart) <= CURRENT_DATE)",
-                "(YearEnd   IS NULL OR CURRENT_DATE <= date(YearEnd))",
+                "(YearStart IS NULL OR YearStart = '' OR date(YearStart) <= CURRENT_DATE)",
+                "(YearEnd IS NULL OR YearEnd = '' OR CURRENT_DATE <= date(YearEnd))",
             ]
             params: list = []
 
