@@ -35,7 +35,7 @@ async def verify_login(browser: Browser, student: dict):
 def good_login(student_id: int):
     """Set PasswordGood=1 for a student in the database."""
 
-    print(f"[runner] good_login(): setting PasswordGood=1 for student ID={student_id}", flush=True)
+    print(f"[verify_bad_logins] good_login(): setting PasswordGood=1 for student ID={student_id}", flush=True)
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -46,8 +46,8 @@ def good_login(student_id: int):
 
 import pprint
 async def main():
-    students: list[dict] = filter_group(get_students(bare=True), key='passwordgood', value=0)
-    students = filter_group(students, key='portal', value='infinite_campus') # temp filter for ic students
+    students: list[dict] = filter_group(filter_group(get_students(bare=True), key='passwordgood', value=0), key='status', value='error')
+    # students = filter_group(students, key='portal', value='canvas') # temp filter on canvas students
     print(f"[verify_bad_logins] Found {len(students)} students to verify.")
     async with async_playwright() as p:
         browser_args = [

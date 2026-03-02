@@ -164,8 +164,8 @@ class CanvasEngine(PortalEngine):
                 raise LoginError("Missing login_url for Canvas")
 
             # Native Canvas selectors
-            uid_sel = "input[name='pseudonym_session[unique_id]']"
-            pwd_sel = "input[name='pseudonym_session[password]']"
+            uid_sel = "#username"
+            pwd_sel = "#password"
 
             await universal_login_flow(
                 self.page,
@@ -175,16 +175,33 @@ class CanvasEngine(PortalEngine):
                 uid_sel,
                 pwd_sel,
                 microsoft_callback=self.microsoft_login,
-                google_callback=self.google_login
+                google_callback=self.google_login,
+                alt_sso_callback=self.alt_login
             )
 
             await wait_after_nav(self.page, wait_until="domcontentloaded")
             nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
             await self.raise_login_error_if(not nav_ok, "Canvas login did not reach dashboard/global nav")
 
+
         except Exception as e:
             print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
+
+
+    async def alt_login(self):
+        uid_sel = "input[name='pseudonym_session[unique_id]']"
+        pwd_sel = "input[name='pseudonym_session[password]']"
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            uid_sel,
+            pwd_sel,
+            microsoft_callback=self.microsoft_login,
+            google_callback=self.google_login
+        )
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
@@ -429,10 +446,13 @@ class CanvasEngine(PortalEngine):
 
         return out
 
-    async def get_agenda(self):
+    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
         await self.page.wait_for_load_state('domcontentloaded')
         soup = await self.get_soup()
-        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment), ...]}
+        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment, due_time),  ...]}
+        await self.page.locator('[data-testid="dashboard-options-button"]').click()
+        await self.page.locator('[data-testid="list-view-menu-item"]').click()
+        await self.page.wait_for_timeout(1500)
         try:
             all_days = soup.find_all("div", attrs={"data-testid": "day"})
 
@@ -455,11 +475,13 @@ class CanvasEngine(PortalEngine):
                 else: today_passed = True
                     
                 assert date_elem is not None
-                date = date_elem.get_text(strip=True)
+                date_text = date_elem.get_text(strip=True)
+                day, _ = reconcile_day_time(date_text, reference=datetime.now())
+                due_date = day.strftime("%m/%d/%Y")
                 # gather assignments
                 assignments: list[tuple] = []
                 class_groups = day_block.select("div.planner-grouping")
-                print(f"Found {len(class_groups)} classes with assignments due on {date}")
+                print(f"Found {len(class_groups)} classes with assignments due on {due_date}")
                 # iterate on the classes for this day
                 for course in class_groups:
                     class_title = course.select_one("span.Grouping-styles__title").get_text(strip=True)
@@ -478,13 +500,10 @@ class CanvasEngine(PortalEngine):
 
                         print("\t-", assignment_title)
                         assignments.append( (class_title, assignment_title, due_time) )
-
-                agenda[date] = assignments
+                if len(assignments) > 0: agenda[due_date] = assignments
+                else: continue
                 # i += 1
         except Exception as e:
             print(f"Error while gathering the agenda {type(e)}: {e}")
         finally:
-            from pprint import pprint
-            pprint(agenda, sort_dicts=False)
-            await self.page.pause()
             return agenda

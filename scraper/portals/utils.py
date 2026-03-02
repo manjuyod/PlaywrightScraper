@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from contextlib import asynccontextmanager
@@ -496,6 +497,8 @@ async def grades_table_to_dict(
     print(parsed)
     return parsed
 
+def normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
 
 def percent_from_letter_grade(letter_grade: str) -> int:
     """
@@ -581,3 +584,169 @@ async def get_frame_by_url_pattern(
         return frame
     except PlaywrightTimeout:
         return None
+
+
+
+import re
+from datetime import date, datetime, time, timedelta
+from typing import Optional, Tuple
+
+
+_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
+def _clean(s: str) -> str:
+    s = s.replace("\u202f", " ").replace("\u00a0", " ")
+    s = re.sub(r"[\u200b\u200c\u200d]", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _parse_time_anywhere(s: str) -> Optional[time]:
+    s = _clean(s).lower()
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap]\.?\s*m\.?)\b", s)
+    if not m:
+        return None
+
+    hh = int(m.group(1))
+    mm = int(m.group(2) or "0")
+    ampm = re.sub(r"[^apm]", "", m.group(3))  # "a.m." -> "am"
+    if not (1 <= hh <= 12) or not (0 <= mm <= 59):
+        return None
+
+    if ampm == "am":
+        hh = 0 if hh == 12 else hh
+    else:
+        hh = 12 if hh == 12 else hh + 12
+    return time(hour=hh, minute=mm)
+
+
+def _find_weekday(s: str) -> Optional[int]:
+    s = _clean(s).lower()
+    m = re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", s)
+    return _WEEKDAYS[m.group(1)] if m else None
+
+
+def _find_month_day(s: str) -> Optional[Tuple[int, int]]:
+    s = _clean(s).lower().replace(",", " ").replace(";", " ")
+    m = re.search(
+        r"\b("
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")\.?\s+(\d{1,2})\b",
+        s,
+    )
+    if not m:
+        return None
+    month = _MONTHS[m.group(1)]
+    day = int(m.group(2))
+    if not (1 <= day <= 31):
+        return None
+    return month, day
+
+
+def _find_relative_day(s: str) -> Optional[int]:
+    """
+    Returns day offset relative to reference date:
+      yesterday -> -1, today -> 0, tomorrow -> +1
+    """
+    s = _clean(s).lower()
+    if re.search(r"\btomorrow\b", s):
+        return 1
+    if re.search(r"\btoday\b", s):
+        return 0
+    if re.search(r"\byesterday\b", s):
+        return -1
+    return None
+
+
+def reconcile_day_time(
+    raw: str,
+    *,
+    reference: Optional[datetime] = None,
+    year_window_days: int = 180,
+) -> Tuple[date, Optional[time]]:
+    """
+    Resolve date + optional time from strings.
+    Priority for picking the date:
+      1) explicit Month Day (e.g. "March 1")  -> infer year near reference
+      2) relative words (Today/Tomorrow/Yesterday)
+      3) weekday in current week of reference
+    """
+    if reference is None:
+        reference = datetime.now()
+
+    s = _clean(raw)
+    lines = [ln for ln in (_clean(x) for x in s.splitlines()) if ln]
+
+    # time (optional)
+    t = None
+    for ln in lines:
+        t = _parse_time_anywhere(ln)
+        if t is not None:
+            break
+    if t is None:
+        t = _parse_time_anywhere(s)
+
+    # 1) Month Day anywhere
+    md = None
+    for ln in lines:
+        md = _find_month_day(ln)
+        if md is not None:
+            break
+    if md is None:
+        md = _find_month_day(s)
+
+    if md is not None:
+        month, day = md
+        y = reference.date().year
+        cand = date(y, month, day)
+        delta_days = (cand - reference.date()).days
+        if delta_days < -year_window_days:
+            cand = date(y + 1, month, day)
+        elif delta_days > year_window_days:
+            cand = date(y - 1, month, day)
+        return cand, t
+
+    # 2) Today/Tomorrow/Yesterday
+    rel = _find_relative_day(s)
+    if rel is not None:
+        return reference.date() + timedelta(days=rel), t
+
+    # 3) Weekday in current week
+    wd = None
+    for ln in lines:
+        wd = _find_weekday(ln)
+        if wd is not None:
+            break
+    if wd is None:
+        wd = _find_weekday(s)
+    if wd is None:
+        raise ValueError(f"Could not find a weekday/month-day/relative day in input: {raw!r}")
+
+    ref_d = reference.date()
+    start_of_week = ref_d - timedelta(days=ref_d.weekday())  # Monday start
+    return start_of_week + timedelta(days=wd), t
