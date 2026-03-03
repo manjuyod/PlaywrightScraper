@@ -19,12 +19,6 @@ class Microsoft(PortalEngine):
     dictionaries under the ``parsed_grades`` key.
     """
 
-    LOGIN = "https://login.microsoftonline.com/5a455623-db8b-468b-8b34-1c3da9c202cc/oauth2/v2.0/authorize?response_type=code&client_id=23bae2f3-b264-45bf-a7ee-8d5ee9fe849a&scope=openid+profile+email&redirect_uri=https%3A%2F%2Fbenjaminfranklincs.powerschool.com%2Foidc%2Fopenid_connect_login&nonce=27ff76bdc2af2&state=2bdf5a189bdcf&max_age=600"
-    GRADEBOOK = (
-        ""
-    )
-    LOGOFF = ""
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -41,14 +35,8 @@ class Microsoft(PortalEngine):
                 compatibility with the ``PortalEngine`` interface.
         """
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
-        await self.page.goto(self.LOGIN, wait_until="domcontentloaded")
-        # Fill username and password
-        await self.page.fill("input#username", self.sid)
-        await self.page.fill("input#password", self.pw)
-        # Short pause to ensure fields are recognized
-        await self.page.wait_for_timeout(200)
-        # Press Enter in password field to submit the form
-        await self.page.locator('.form-group input[name="password"]').press("Enter")
+        await self.page.goto(self.login_url, wait_until="domcontentloaded")
+        await self.microsoft_login()
         # Wait until the URL contains "home" indicating successful login
         await self.page.wait_for_url(lambda url: "home" in url, timeout=15_000)
         # Wait for network to be idle to ensure the home page is fully loaded

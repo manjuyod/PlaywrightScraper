@@ -12,6 +12,8 @@ env/
 venv/
 .venv/
 scraper/.env
+.env
+*.env
 
 # Config files with secrets
 config/students.*
@@ -29,6 +31,7 @@ output/
 captcha.png
 gilbert_parent_portal.html
 *.jsonl
+tmp
 
 # IDE / Editor
 .idea/

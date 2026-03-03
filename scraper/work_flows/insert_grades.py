@@ -6,7 +6,6 @@ import pathlib
 from datetime import date, timedelta
 
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
-DB_PATH = PROJECT_ROOT / "config/students.db"
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
 def get_monday_anchor() -> str:
@@ -34,10 +33,13 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
     except Exception as e:
         print(f"Warning: could not delete {path}: {e}")
 
-def insert_grades():
+def insert_grades(): 
+    # TODO: Here we need to identify if "new" courses are actually new or not
+    # TODO: We will then need to alter jsons in the database to contain one canonical title for each course (separate script)
+    # "American History" should not be different from "1: AMERICAN HISTORY" although they contain differences
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
-    print(f"DB: {DB_PATH}")
+    print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
 
     try:
@@ -55,21 +57,22 @@ def insert_grades():
                     print(f"Skipping non-JSON line: {raw[:120]}…")
                     continue
 
+                student_id = data.get("db_id")
                 # Skip error payloads
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
+                    update_status(cur, student_id, "error", error_msg=data['error'])
                     continue
 
                 # Accept both NEW and OLD shapes:
                 # NEW: {"db_id": 1, "id": "...", "parsed_grades": {...}}
                 # OLD: {"db_id": 1, "id": "...", "grades": {"parsed_grades": {...}}}
-                student_id = data.get("db_id")
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-
                 if not student_id or not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
+                    update_status(cur, student_id, "missing grades")
                     continue
 
                 # Fetch existing WeeklyData
@@ -83,12 +86,12 @@ def insert_grades():
 
                 # Update current week's bucket
                 weekly_data[monday_anchor] = grades
-
                 # Persist
                 cur.execute(
                     "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
                     (json.dumps(weekly_data, ensure_ascii=False), student_id)
                 )
+                update_status(cur, student_id, 'synced')
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
 
             conn.commit()
@@ -98,6 +101,14 @@ def insert_grades():
     except psycopg2.Error as e:
         print(f"Database error: {e}")
 
+def update_status(cur: DictCursor, student_id: int, status: str, error_msg: str | None = None):
+    """ Modifies a students update status (synced, missing grades, error) in the database
+        If the status is 'error' we will update the error_msg field in the database"""
+    cur.execute("update student set status = %s where ID = %s", (status, student_id,))
+    if status == 'error':
+        cur.execute("update student set error_msg = %s where ID = %s", (error_msg, student_id,))
+    else:
+        cur.execute("update student set error_msg = NULL where ID = %s", (student_id,))
 if __name__ == "__main__":
     try:
         insert_grades()

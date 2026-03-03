@@ -113,7 +113,9 @@ def _query_students(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            error_msg,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
@@ -135,7 +137,8 @@ def _query_login_master(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
@@ -156,14 +159,18 @@ def _is_hs_grade(grade: str | None) -> bool:
     return False
 
 
-def _safe_json_loads(s: str | None) -> dict:
+def _safe_json_loads(s) -> dict:
     if not s:
         return {}
-    try:
-        v = json.loads(s)
-        return v if isinstance(v, dict) else {}
-    except Exception:
-        return {}
+    if isinstance(s, dict):
+        return s
+    if isinstance(s, str):
+        try:
+            v = json.loads(s)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def _coerce_str(x) -> str:
@@ -226,25 +233,12 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
      meta rows (A/B only) → two blanks → subject rows with week columns.
     We align each student’s block to the franchise-wide weeks after computing per-student data.
     """
-    good_pw = row["passwordgood"] == 1
-
     # 1) meta rows (explicit strings, no NaN bleed)
     meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
     meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
 
     # 2) two blank spacer rows
     blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
-
-    if not good_pw:
-        err = pd.DataFrame(
-            [
-                {"Field": "Error", "Value": "invalid entry, check credentials"},
-                {"Field": "", "Value": ""},
-                {"Field": "", "Value": ""},
-            ],
-            columns=["Field", "Value"],
-        )
-        return pd.concat([meta, err], ignore_index=True)
 
     # 3) subject → grades for this student only
     wdata = _safe_json_loads(row["weeklydata"])
@@ -283,24 +277,75 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     # Final block for this student
     return pd.concat([meta, pivot_df, blank], ignore_index=True)
 
+def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
+    """
+    Return one student’s error block:
+     meta rows (A/B only) → two blanks → subject rows with week columns.
+    We align each student’s block to the franchise-wide weeks after computing per-student data.
+    """
+    good_pw = row["passwordgood"] == 1
+    good_fetch = row["status"] == 'synced'
+    # 1) meta rows (explicit strings, no NaN bleed)
+    meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
+    meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
+
+    # 2) two blank spacer rows
+    blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
+    # handle fails / not updated
+    if not good_pw:
+        err = pd.DataFrame(
+            [
+                {"Field": "Bad Password", "Value": "invalid entry, check credentials"},
+            ],
+            columns=["Field", "Value"],
+        )
+        return pd.concat([meta, err, blank], ignore_index=True)
+    if not good_fetch:
+        if row['status'] == 'never':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Never updated", "Value": "Student has never been updated"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        if row['status'] == 'missing grades':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Missing Grades", "Value": "failed to collect grades for student"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        elif row['status'] == 'error':
+            err = pd.DataFrame(
+                [ # there should be more info here
+                    {"Field": "Error", "Value": "something bad happened"},
+                    {"Field": "Message", "Value": row['error_msg']}
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+    raise Exception("This student does not appear to be errored")
 
 def _collect_weeks(df: pd.DataFrame) -> List[str]:
     weeks: set[str] = set()
     for wd_json in df["weeklydata"]:
-        try:
-            weeks.update(json.loads(wd_json).keys())
-        except Exception:
-            pass
+        wd = _safe_json_loads(wd_json)
+        weeks.update(wd.keys())
     return sorted(weeks)
 
 
-def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str]) -> pd.DataFrame:
+def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str], err_group: bool = False) -> pd.DataFrame:
     """Legend + all student blocks in df_sub, aligned to the provided weeks."""
     legend = _build_legend_rows(weeks)
     if df_sub.empty:
         note = pd.DataFrame([{"Field": "", "Value": "(no students)"}])
         return pd.concat([legend, note], ignore_index=True)
-    frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
+    if err_group:
+        frames = [_build_student_err_block(row) for _, row in df_sub.iterrows()]
+    else:
+        frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
     return pd.concat([legend, *frames], ignore_index=True)
 
 
@@ -369,12 +414,11 @@ def _parse_args():
 def main() -> None:
     #ArgParse First
     args = _parse_args()
-    
-    conn = db_conn()
-    sheet_map = _load_sheet_map(conn)
-    df_all = _query_students(conn)       # has WeeklyData for grade blocks
-    df_login_all = _query_login_master(conn)  # flat login rows
-    known_fids = _load_known_franchise_ids(conn)
+    with db_conn() as conn:
+        sheet_map = _load_sheet_map(conn)
+        df_all = _query_students(conn)       # has WeeklyData for grade blocks
+        df_login_all = _query_login_master(conn)  # flat login rows
+        known_fids = _load_known_franchise_ids(conn)
 
     # NEW: compute target set (either the single requested ID, or all known)
     if args.franchise_id is not None:
@@ -414,12 +458,15 @@ def main() -> None:
 
         # Build ID sets for HS / MS / Error from LoginMaster (authoritative for Grade/PasswordGood)
         login_f = df_login_all[df_login_all["franchiseid"] == fid].copy()
-        good = login_f["passwordgood"] == 1
         is_hs = login_f["grade"].apply(_is_hs_grade)
+        good_fetch = login_f["status"] == 'synced'
+        has_been_updated = login_f['status'] != 'never'
+        good_password = login_f["passwordgood"] == 1
+        good = good_fetch & good_password
 
-        hs_ids  = set(login_f.loc[good & is_hs,  "id"].tolist())
-        ms_ids  = set(login_f.loc[good & ~is_hs, "id"].tolist())
-        err_ids = set(login_f.loc[~good,         "id"].tolist())
+        hs_ids  = set(login_f.loc[is_hs & has_been_updated,  "id"].tolist())
+        ms_ids  = set(login_f.loc[~is_hs & has_been_updated, "id"].tolist())
+        err_ids = set(login_f.loc[~good, "id"].tolist())
 
         # Slice the grade-pivot source to those students
         grp_hs  = grp[grp["id"].isin(hs_ids)]
@@ -429,7 +476,7 @@ def main() -> None:
         # Build the 3 grade tabs using the SAME weeks list
         hs_df  = _build_dataframe_for_group(grp_hs,  weeks)
         ms_df  = _build_dataframe_for_group(grp_ms,  weeks)
-        err_df = _build_dataframe_for_group(grp_err, weeks)
+        err_df = _build_dataframe_for_group(grp_err, weeks, err_group=True)
 
         # Assemble sheets with header flags
         frames = {
@@ -460,7 +507,7 @@ def main() -> None:
                 "MS": (ms_df, False),
                 "Error": (err_df, False),
             })
-            print(f"  ✓ Uploaded to spreadsheet {sheet_map[fid]}")
+            print(f"  Uploaded to spreadsheet {sheet_map[fid]}")
         else:
             print(f"  [SKIP] No spreadsheet configured for FranchiseID {fid}")
 

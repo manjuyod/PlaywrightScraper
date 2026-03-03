@@ -12,8 +12,10 @@ from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import Page, TimeoutError
 
-from .base import PortalEngine
+from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal, LoginError
+
+from .utils import *
 
 
 # --------------------- utilities ---------------------
@@ -107,41 +109,6 @@ class CanvasEngine(PortalEngine):
       - login_url (Student.Portal1), e.g. https://<tenant>.instructure.com/login/canvas
     """
 
-    def __init__(
-        self,
-        page: Page,
-        username: str,
-        password: str,
-        *,
-        student_name: Optional[str] = None,
-        login_url: Optional[str] = None,
-    ):
-        super().__init__(page, username, password, login_url=login_url, student_name=student_name)
-
-        # Ensure attributes used here exist (don't shadow self.login)
-        self.page = page
-        self.username = username
-        self.password = password
-        self.user = username
-
-        # Defaults + base
-        self.login_url = login_url or "https://canvas.instructure.com/login/canvas"
-        self._base = _origin(self.login_url)
-
-        # Term context from date or optional override
-        ctx = _term_context_from_today()
-        # Manual override (rarely needed): CANVAS_TERM = FALL|SPRING, CANVAS_FALL_YEAR=YYYY
-        term_override = os.getenv("CANVAS_TERM")
-        fall_override = os.getenv("CANVAS_FALL_YEAR")
-        if term_override in ("FALL", "SPRING") and fall_override and fall_override.isdigit():
-            ctx = {"fall_year": int(fall_override), "spring_year": int(fall_override) + 1, "term": term_override}
-
-        self.fall_year = ctx["fall_year"]
-        self.spring_year = ctx["spring_year"]
-        self.term = ctx["term"]
-        self._allow_regexes, self._deny_regexes = _build_term_regexes(self.fall_year, self.spring_year, self.term)
-        print(f"[CanvasEngine] Term filter: {self.term} {self.fall_year} (cycle {self.fall_year}-{self.spring_year})")
-
     # ----------------- helpers -----------------
     async def _goto(self, url: str):
         await self.page.goto(url, wait_until="domcontentloaded")
@@ -156,9 +123,12 @@ class CanvasEngine(PortalEngine):
 
     async def _exists(self, selector: str, *, timeout: int = 3000) -> bool:
         try:
+            # print(f'locating {selector} |\t')
             await self.page.wait_for_selector(selector, timeout=timeout, state="visible")
+            # print('Elem exists')
             return True
-        except TimeoutError:
+        except PlaywrightTimeout:
+            # print('Failed to find elem')
             return False
 
     async def _container_text_for(self, a_locator) -> str:
@@ -184,7 +154,7 @@ class CanvasEngine(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=0.8, min=0.8, max=3),
-        retry=retry_if_exception_type(LoginError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None):
@@ -193,75 +163,45 @@ class CanvasEngine(PortalEngine):
             if not self.login_url:
                 raise LoginError("Missing login_url for Canvas")
 
-            await self._goto(self.login_url)
-
             # Native Canvas selectors
-            uid_sel = "input[name='pseudonym_session[unique_id]']"
-            pwd_sel = "input[name='pseudonym_session[password]']"
+            uid_sel = "#username"
+            pwd_sel = "#password"
 
-            # Generic SSO fallbacks
-            generic_user = "input[type='email'], input[name='username'], input#username, input[autocomplete='username']"
-            generic_pass = "input[type='password'], input[name='password'], input#password, input[autocomplete='current-password']"
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                uid_sel,
+                pwd_sel,
+                microsoft_callback=self.microsoft_login,
+                google_callback=self.google_login,
+                alt_sso_callback=self.alt_login
+            )
 
-            # Fill fields
-            filled = False
-            if await self._exists(uid_sel, timeout=4000) and await self._exists(pwd_sel, timeout=4000):
-                await self._fill(uid_sel, self.username)
-                await self._fill(pwd_sel, self.password)
-                filled = True
-            else:
-                if await self._exists(generic_user, timeout=2000):
-                    await self._fill(generic_user, self.username)
-                    filled = True
-                if await self._exists(generic_pass, timeout=2000):
-                    await self._fill(generic_pass, self.password)
-                    filled = True
+            await wait_after_nav(self.page, wait_until="domcontentloaded")
+            nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
+            await self.raise_login_error_if(not nav_ok, "Canvas login did not reach dashboard/global nav")
 
-            if not filled:
-                raise LoginError("Could not locate username/password fields")
-
-            # Robust submit
-            submit_selectors = [
-                "button[type='submit']",
-                "button:has-text('Log In')",
-                "button:has-text('Login')",
-                "button:has-text('Sign in')",
-                "input[type='submit']",
-            ]
-            for sel in submit_selectors:
-                if await self._exists(sel, timeout=1200):
-                    await self._click(sel)
-                    break
-            else:
-                try:
-                    await self.page.focus("input[type='password'], input[name='pseudonym_session[password]'], input#password")
-                    await self.page.keyboard.press("Enter")
-                except Exception:
-                    pass
-
-            # Interstitials
-            await self.page.wait_for_load_state("domcontentloaded")
-            nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=15000)
-            if not nav_ok:
-                for btn_txt in ("Continue", "Yes", "Accept", "Allow", "Skip"):
-                    if await self._exists(f"button:has-text('{btn_txt}')", timeout=1200):
-                        await self._click(f"button:has-text('{btn_txt}')")
-                        break
-                nav_ok = await self._exists("nav.ic-app-header__menu-list, [aria-label='Global Navigation']", timeout=8000)
-
-            if not nav_ok:
-                raise LoginError("Canvas login did not reach dashboard/global nav")
-
-            # After login, recompute base in case of redirect
-            try:
-                current = self.page.url
-                if current:
-                    self._base = _origin(current)
-            except Exception:
-                pass
 
         except Exception as e:
+            print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
+
+
+    async def alt_login(self):
+        uid_sel = "input[name='pseudonym_session[unique_id]']"
+        pwd_sel = "input[name='pseudonym_session[password]']"
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            uid_sel,
+            pwd_sel,
+            microsoft_callback=self.microsoft_login,
+            google_callback=self.google_login
+        )
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
@@ -272,12 +212,82 @@ class CanvasEngine(PortalEngine):
           - For each course, open 'Grades' and parse final/total grade
         """
         # Ensure base reflects post-login host
+        # Handle the 'student welcome' popup that sometimes blocks
+        student_tour = await exists(self.page.get_by_text('Student Tour'))
+        if student_tour:
+            not_now_button = self.page.get_by_role('button', name='Not Now')
+            await not_now_button.click()
+            done_button = self.page.get_by_role('button', name='Done')
+            if await exists(done_button):
+                await done_button.click()
+        try:
+            parsed = await self.parse_grades_from_list_view()
+            if len(parsed) == 0: # fallback to iterative approach
+                parsed = await self.parse_grades_iterative()
+            print(parsed)
+            return parsed
+        except Exception as e:
+            # import traceback
+            # traceback.print_exc()
+            print(f"[Canvas] Error: {e}")
+            raise
+        finally:
+            pass
+
+    async def parse_grades_from_list_view(self) -> dict[str, float]:
+        try:
+            parsed: dict[str, float] = {}
+            # 1. show grades
+            show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+            if await show_grades_button.count() > 0:
+                await show_grades_button.click()
+            else: # switch views then try again
+                await self.page.locator('[data-testid="dashboard-options-button"]').click()
+                await self.page.locator('[data-testid="list-view-menu-item"]').click()
+
+                await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+                await self.page.wait_for_timeout(1500)
+                show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+
+                if await show_grades_button.count() > 0:
+                    await show_grades_button.click()
+                else:
+                    return parsed
+
+            await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
+            # 2. parse
+            course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
+            count = len(course_grades)
+            print(f"Found {count} grades")
+            # print("Course cards: ", course_cards)
+            for i in range(count):
+                course_grade = course_grades[i]
+                course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
+                course = await course_card.get_by_role('link').inner_text()
+                grade_str: str = await course_grade.inner_text()
+                if grade_str.lower() == "no grade":
+                    continue
+                print("Canvas: Grade found", grade_str)
+                grade = canonicalize_grade(grade_str)
+                parsed[course] = grade
+                # print(course, grade_str)
+            # print(grade_cards)
+            return parsed
+        finally:
+            pass
+
+    async def parse_grades_iterative(self):
         try:
             cur = self.page.url
             if cur:
                 self._base = _origin(cur)
         except Exception:
             pass
+
+
+        term_context = _term_context_from_today()
+        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('spring_year'), term_context.get('term'))
+
 
         # Open the "Courses" tray
         opened = False
@@ -315,7 +325,7 @@ class CanvasEngine(PortalEngine):
                 continue
 
             container_text = (await self._container_text_for(a))
-            if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+            if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                 continue
 
             full = href if href.startswith("http") else urljoin(self._base, href)
@@ -336,7 +346,7 @@ class CanvasEngine(PortalEngine):
                 if cid in seen:
                     continue
                 container_text = (await self._container_text_for(a))
-                if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+                if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                     continue
                 full = href if href.startswith("http") else urljoin(self._base, href)
                 seen.add(cid)
@@ -391,16 +401,13 @@ class CanvasEngine(PortalEngine):
                 results.append({"course_id": cid, "course_name": course_name, "grades_url": self.page.url, "error": "Timeout"})
             except Exception as e:
                 results.append({"course_id": cid, "course_name": course_name, "grades_url": self.page.url, "error": str(e)})
-
-        return {"parsed_grades": results}
-
     # ----------------- HTML parsing heuristics -----------------
     def _parse_canvas_grades_html(self, html: str) -> Dict[str, Any]:
         soup = BeautifulSoup(html, "html.parser")
         text = soup.get_text(" ", strip=True).lower()
 
         pm = re.search(r"(?:total|current\s*grade|final)\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)\s*%", text)
-        percent = f"{pm.group(1)}%" if pm else None
+        percent = pm.group(1) if pm else None  # strip the percent sign
 
         pmm = re.search(r"(\d{1,5}(?:\.\d+)?)\s*/\s*(\d{1,5}(?:\.\d+)?)", text)
         points = f"{pmm.group(1)}/{pmm.group(2)}" if pmm else None
@@ -420,17 +427,83 @@ class CanvasEngine(PortalEngine):
         if total_value:
             m_pct = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", total_value)
             if m_pct:
-                percent = f"{m_pct.group(1)}%"
+                percent = m_pct.group(1)  # normalized, no '%'
             m_pts = re.search(r"(\d{1,5}(?:\.\d+)?)\s*/\s*(\d{1,5}(?:\.\d+)?)", total_value)
             if m_pts:
                 points = f"{m_pts.group(1)}/{m_pts.group(2)}"
 
         out: Dict[str, Any] = {}
         if percent:
-            out["final_percent"] = percent
+            # Convert string to float for consistent numeric type
+            try:
+                out["final_percent"] = float(percent)
+            except ValueError:
+                out["final_percent"] = percent
         if points:
             out["points"] = points
         if not out:
             out["note"] = "No final/total grade detected"
 
         return out
+
+    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
+        await self.page.wait_for_load_state('domcontentloaded')
+        soup = await self.get_soup()
+        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment, due_time),  ...]}
+        await self.page.locator('[data-testid="dashboard-options-button"]').click()
+        await self.page.locator('[data-testid="list-view-menu-item"]').click()
+        await self.page.wait_for_timeout(1500)
+        try:
+            all_days = soup.find_all("div", attrs={"data-testid": "day"})
+
+            print(f"Found {len(all_days)} days")
+            today_passed = False
+            for i, day_block in enumerate(all_days):
+                if i > 7: break
+                today_reached = today_passed
+                # parse the date
+                date_elem = day_block.select_one('[data-testid="today-date"]')
+                if not today_passed: # continue until today's date
+                    if date_elem is not None:
+                        today_reached = True
+                    else:
+                        continue
+                
+                assert today_reached
+                if today_passed:
+                    date_elem = day_block.select_one('[data-testid="not-today"]')
+                else: today_passed = True
+                    
+                assert date_elem is not None
+                date_text = date_elem.get_text(strip=True)
+                day, _ = reconcile_day_time(date_text, reference=datetime.now())
+                due_date = day.strftime("%m/%d/%Y")
+                # gather assignments
+                assignments: list[tuple] = []
+                class_groups = day_block.select("div.planner-grouping")
+                print(f"Found {len(class_groups)} classes with assignments due on {due_date}")
+                # iterate on the classes for this day
+                for course in class_groups:
+                    class_title = course.select_one("span.Grouping-styles__title").get_text(strip=True)
+                    print("-", class_title)
+                    if class_title is None:
+                        continue
+                    assignment_items = course.select('div[data-testid="planner-item-raw"]')
+                    print(f"\t{len(assignment_items)} due")
+                    # iterate on assignments due for this class
+                    for assignment in assignment_items:
+                        a = assignment.select_one('a')
+                        assignment_title = a.select_one('span[aria-hidden="true"]').get_text(strip=True)
+
+                        due_time_elem = assignment.select_one(".PlannerItem-styles__due span[aria-hidden='true']")
+                        due_time = due_time_elem.get_text(strip=True) if due_time_elem else None
+
+                        print("\t-", assignment_title)
+                        assignments.append( (class_title, assignment_title, due_time) )
+                if len(assignments) > 0: agenda[due_date] = assignments
+                else: continue
+                # i += 1
+        except Exception as e:
+            print(f"Error while gathering the agenda {type(e)}: {e}")
+        finally:
+            return agenda
