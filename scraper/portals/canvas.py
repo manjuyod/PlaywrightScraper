@@ -183,7 +183,7 @@ class CanvasEngine(PortalEngine):
             nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
             await self.raise_login_error_if(not nav_ok, "Canvas login did not reach dashboard/global nav")
 
-
+            await self.post_login()
         except Exception as e:
             print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
@@ -203,6 +203,25 @@ class CanvasEngine(PortalEngine):
             google_callback=self.google_login
         )
 
+    async def post_login(self):
+        # handle student view popup
+        student_tour = await exists(self.page.get_by_text('Student Tour'))
+        if student_tour:
+            not_now_button = self.page.get_by_role('button', name='Not Now')
+            await not_now_button.click()
+            done_button = self.page.get_by_role('button', name='Done')
+            if await exists(done_button):
+                await done_button.click()
+
+        # ensure we are on list view
+        show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+        if await show_grades_button.count() < 0: # no show grades button, switch to list view
+            await self.page.locator('[data-testid="dashboard-options-button"]').click()
+            await self.page.locator('[data-testid="list-view-menu-item"]').click()
+
+            await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+            await self.page.wait_for_timeout(1500)
+
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
         """
@@ -212,14 +231,6 @@ class CanvasEngine(PortalEngine):
           - For each course, open 'Grades' and parse final/total grade
         """
         # Ensure base reflects post-login host
-        # Handle the 'student welcome' popup that sometimes blocks
-        student_tour = await exists(self.page.get_by_text('Student Tour'))
-        if student_tour:
-            not_now_button = self.page.get_by_role('button', name='Not Now')
-            await not_now_button.click()
-            done_button = self.page.get_by_role('button', name='Done')
-            if await exists(done_button):
-                await done_button.click()
         try:
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0: # fallback to iterative approach
@@ -241,18 +252,7 @@ class CanvasEngine(PortalEngine):
             show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
             if await show_grades_button.count() > 0:
                 await show_grades_button.click()
-            else: # switch views then try again
-                await self.page.locator('[data-testid="dashboard-options-button"]').click()
-                await self.page.locator('[data-testid="list-view-menu-item"]').click()
-
-                await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
-                await self.page.wait_for_timeout(1500)
-                show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
-
-                if await show_grades_button.count() > 0:
-                    await show_grades_button.click()
-                else:
-                    return parsed
+            else: return parsed # {}
 
             await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
             # 2. parse
