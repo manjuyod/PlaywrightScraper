@@ -215,7 +215,7 @@ class CanvasEngine(PortalEngine):
 
         # ensure we are on list view
         show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
-        if await show_grades_button.count() < 0: # no show grades button, switch to list view
+        if await show_grades_button.count() == 0: # no show grades button, switch to list view
             await self.page.locator('[data-testid="dashboard-options-button"]').click()
             await self.page.locator('[data-testid="list-view-menu-item"]').click()
 
