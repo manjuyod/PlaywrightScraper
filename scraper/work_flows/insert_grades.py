@@ -39,7 +39,6 @@ def insert_grades():
     # "American History" should not be different from "1: AMERICAN HISTORY" although they contain differences
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
-    print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
 
     try:
@@ -70,7 +69,7 @@ def insert_grades():
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-                if not student_id or not isinstance(grades, dict) or not grades:
+                if not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
                     update_status(cur, student_id, "missing grades")
                     continue
