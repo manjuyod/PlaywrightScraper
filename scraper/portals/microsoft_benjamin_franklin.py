@@ -8,8 +8,6 @@ from .base import PortalEngine
 from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-#TODO: Parse and implement functionality
-
 @register_portal("microsoft_benjamin_franklin")
 class Microsoft(PortalEngine):
     """Portal scraper for Microsoft portals.
