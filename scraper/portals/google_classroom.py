@@ -15,8 +15,8 @@ class GoogleClassroom(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        try: # theoretically should just use the Google sign in
-            # in reality, after inserting the username the page may reroute to some internal portal
+        try: # in theory, we should just use the Google sign in
+            # in reality, after inserting the username, the page may reroute to some internal portal
             if self.login_url != self.page.url:  # Only nav if we are not at the target page
                 await self.page.goto(self.login_url, wait_until="domcontentloaded")
             try:
@@ -111,24 +111,6 @@ class GoogleClassroom(PortalEngine):
                     agenda[due_date] = [(course, title, due_time)]
                 else: agenda[due_date].append((course, title, due_time))
             return agenda
-
-            # items = soup.select('ol.e2urcc > li')
-            # print(f"found {len(items)} items")
-            # for li in items:
-            #     title_elem = li.select_one('p.asQXV') # weird google selectors -- may be unstable
-            #     course_elem = li.select_one('p.tWeh6')
-            #     due_elem = li.select_one('p.pOf0gc')
-            #
-            #     title = normalize_whitespace(title_elem.get_text(strip=True)) if title_elem else None
-            #     course = normalize_whitespace(course_elem.get_text(strip=True)) if course_elem else None
-            #     due = normalize_whitespace(due_elem.get_text(strip=True)) if due_elem else None
-            #
-            #     due_info = reconcile_day_time(due, reference=datetime.now()) if due else (None, None)
-            #
-            #     day: date = due_info[0] if due_info[0] else None
-            #     due_at: time = due_info[1] if due_info[1] else None
-            #
-            #     print(f"{day}, {due_at}: {course} - {title}")
         except Exception as e:
             import traceback
             print(e)
