@@ -37,6 +37,13 @@ class Aeries(PortalEngine):
             )
             
             await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
+
+            # TODO: gate on bad login alert
+            # if await exists(self.page.get_by_text("""
+            #     The Username or Password entered are incorrect.
+            #     Try again with Valid Credentials.
+            # """, exact=False)):
+            #     raise self.LoginError("Invalid credentials")
         except Exception as e:
             print(e)
             raise
