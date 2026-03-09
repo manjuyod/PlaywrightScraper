@@ -52,7 +52,7 @@ managed_portals: Dict[str, list[str]] = {
     "blackbaud": ["myschoolapp, blackbaud"],
     "aeries": ["aeries", "LoginParent.aspx, Dashboard.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],
-    "student_connection": ["studentconnect", "k12.ca.us"],
+    "student_connection": ["studentconnect"],
     "schoology": ["schoology"],
     "howsschoolgoing": ["howsschoolgoing"],
     "canvas": ["instructure.com", "canvas"],

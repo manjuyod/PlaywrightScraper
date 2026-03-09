@@ -164,8 +164,8 @@ class CanvasEngine(PortalEngine):
                 raise LoginError("Missing login_url for Canvas")
 
             # Native Canvas selectors
-            uid_sel = "input[name='pseudonym_session[unique_id]']"
-            pwd_sel = "input[name='pseudonym_session[password]']"
+            uid_sel = "#username"
+            pwd_sel = "#password"
 
             await universal_login_flow(
                 self.page,
@@ -175,16 +175,52 @@ class CanvasEngine(PortalEngine):
                 uid_sel,
                 pwd_sel,
                 microsoft_callback=self.microsoft_login,
-                google_callback=self.google_login
+                google_callback=self.google_login,
+                alt_sso_callback=self.alt_login
             )
 
             await wait_after_nav(self.page, wait_until="domcontentloaded")
             nav_ok = await self._exists("nav.ic-app-header__menu-list, #menu, [aria-label='Global Navigation']", timeout=10000)
             await self.raise_login_error_if(not nav_ok, "Canvas login did not reach dashboard/global nav")
 
+            await self.post_login()
         except Exception as e:
             print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
+
+
+    async def alt_login(self):
+        uid_sel = "input[name='pseudonym_session[unique_id]']"
+        pwd_sel = "input[name='pseudonym_session[password]']"
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            uid_sel,
+            pwd_sel,
+            microsoft_callback=self.microsoft_login,
+            google_callback=self.google_login
+        )
+
+    async def post_login(self):
+        # handle student view popup
+        student_tour = await exists(self.page.get_by_text('Student Tour'))
+        if student_tour:
+            not_now_button = self.page.get_by_role('button', name='Not Now')
+            await not_now_button.click()
+            done_button = self.page.get_by_role('button', name='Done')
+            if await exists(done_button):
+                await done_button.click()
+
+        # ensure we are on list view
+        show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+        if await show_grades_button.count() == 0: # no show grades button, switch to list view
+            await self.page.locator('[data-testid="dashboard-options-button"]').click()
+            await self.page.locator('[data-testid="list-view-menu-item"]').click()
+
+            await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+            await self.page.wait_for_timeout(1500)
 
     # ----------------- grades scraping -----------------
     async def fetch_grades(self) -> Dict[str, Any]:
@@ -197,11 +233,13 @@ class CanvasEngine(PortalEngine):
         # Ensure base reflects post-login host
         try:
             parsed = await self.parse_grades_from_list_view()
-            if len(parsed) == 0:
+            if len(parsed) == 0: # fallback to iterative approach
                 parsed = await self.parse_grades_iterative()
             print(parsed)
             return parsed
         except Exception as e:
+            # import traceback
+            # traceback.print_exc()
             print(f"[Canvas] Error: {e}")
             raise
         finally:
@@ -214,19 +252,8 @@ class CanvasEngine(PortalEngine):
             show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
             if await show_grades_button.count() > 0:
                 await show_grades_button.click()
-            else: # switch views then try again
-                await self.page.locator('[data-testid="dashboard-options-button"]').click()
-                await self.page.locator('[data-testid="list-view-menu-item"]').click()
+            else: return parsed # {}
 
-                await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
-                await self.page.wait_for_timeout(1500)
-                show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
-
-                if await show_grades_button.count() > 0:
-                    await show_grades_button.click()
-                else:
-                    print('failed to switch to a valid view')
-            # await self.page.wait_for_timeout(2000) # small wait to allow population
             await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
             # 2. parse
             course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
@@ -238,9 +265,11 @@ class CanvasEngine(PortalEngine):
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
                 grade_str: str = await course_grade.inner_text()
+                if grade_str.lower() == "no grade":
+                    continue
+                print("Canvas: Grade found", grade_str)
                 grade = canonicalize_grade(grade_str)
-                if grade:
-                    parsed[course] = grade
+                parsed[course] = grade
                 # print(course, grade_str)
             # print(grade_cards)
             return parsed
@@ -254,6 +283,11 @@ class CanvasEngine(PortalEngine):
                 self._base = _origin(cur)
         except Exception:
             pass
+
+
+        term_context = _term_context_from_today()
+        allow_regexes, deny_regexes = _build_term_regexes(term_context.get('fall_year'), term_context.get('spring_year'), term_context.get('term'))
+
 
         # Open the "Courses" tray
         opened = False
@@ -291,7 +325,7 @@ class CanvasEngine(PortalEngine):
                 continue
 
             container_text = (await self._container_text_for(a))
-            if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+            if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                 continue
 
             full = href if href.startswith("http") else urljoin(self._base, href)
@@ -312,7 +346,7 @@ class CanvasEngine(PortalEngine):
                 if cid in seen:
                     continue
                 container_text = (await self._container_text_for(a))
-                if not _matches_current_term(container_text, self._allow_regexes, self._deny_regexes):
+                if not _matches_current_term(container_text, allow_regexes, deny_regexes):
                     continue
                 full = href if href.startswith("http") else urljoin(self._base, href)
                 seen.add(cid)
@@ -412,10 +446,13 @@ class CanvasEngine(PortalEngine):
 
         return out
 
-    async def get_agenda(self):
+    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
         await self.page.wait_for_load_state('domcontentloaded')
         soup = await self.get_soup()
-        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment), ...]}
+        agenda: dict[str, list[tuple]] = {} # dict like {Date: [(class, assignment, due_time),  ...]}
+        await self.page.locator('[data-testid="dashboard-options-button"]').click()
+        await self.page.locator('[data-testid="list-view-menu-item"]').click()
+        await self.page.wait_for_timeout(1500)
         try:
             all_days = soup.find_all("div", attrs={"data-testid": "day"})
 
@@ -438,11 +475,13 @@ class CanvasEngine(PortalEngine):
                 else: today_passed = True
                     
                 assert date_elem is not None
-                date = date_elem.get_text(strip=True)
+                date_text = date_elem.get_text(strip=True)
+                day, _ = reconcile_day_time(date_text, reference=datetime.now())
+                due_date = day.strftime("%m/%d/%Y")
                 # gather assignments
                 assignments: list[tuple] = []
                 class_groups = day_block.select("div.planner-grouping")
-                print(f"Found {len(class_groups)} classes with assignments due on {date}")
+                print(f"Found {len(class_groups)} classes with assignments due on {due_date}")
                 # iterate on the classes for this day
                 for course in class_groups:
                     class_title = course.select_one("span.Grouping-styles__title").get_text(strip=True)
@@ -461,13 +500,10 @@ class CanvasEngine(PortalEngine):
 
                         print("\t-", assignment_title)
                         assignments.append( (class_title, assignment_title, due_time) )
-
-                agenda[date] = assignments
+                if len(assignments) > 0: agenda[due_date] = assignments
+                else: continue
                 # i += 1
         except Exception as e:
             print(f"Error while gathering the agenda {type(e)}: {e}")
         finally:
-            from pprint import pprint
-            pprint(agenda, sort_dicts=False)
-            await self.page.pause()
             return agenda

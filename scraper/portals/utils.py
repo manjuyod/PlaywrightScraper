@@ -1,3 +1,5 @@
+from __future__ import annotations
+import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Callable, Literal, Pattern
@@ -59,12 +61,14 @@ async def tracing_context(page: Page):
     finally:
         await page.context.tracing.stop()
 
-async def exists(elem: Locator):
+async def exists(elem: Locator, timeout: int = 1000):
     try:
-        await expect(elem).to_be_visible(timeout=1000)
+        await expect(elem).to_be_visible(timeout=timeout)
     except AssertionError: # this will raise when the elem DNE
         return False
     except PlaywrightError: # this will raise when the locator is something unexpected, like an empty string
+        return False
+    except PlaywrightTimeout: # this will raise when the locator is not something that exists
         return False
     return True
 # ============================================================================
@@ -107,20 +111,49 @@ async def universal_login_flow(
     """
     print('Entered login flow')
     if login_url != page.url: # Only nav if we are not at the target page
-        await page.goto(login_url, wait_until="domcontentloaded")
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=15_000)
     await page.wait_for_timeout(pre_fill_wait)
 
     username_field = page.locator(username_selector)
+    password_field = page.locator(password_selector)
+
+    async def wait_for_login_form_to_disappear(timeout: int = 15_000) -> None:
+        """
+        Best-effort wait for login form to disappear after submit.
+        This is intentionally non-fatal to avoid breaking flows.
+        """
+        try:
+            tasks = [
+                asyncio.create_task(username_field.wait_for(state="hidden")),
+                asyncio.create_task(password_field.wait_for(state="hidden")),
+            ]
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            # Swallow any exceptions from completed tasks (timeouts, etc.)
+            for task in done:
+                try:
+                    _ = task.result()
+                except Exception:
+                    pass
+        except Exception:
+            # Do not allow this helper to fail the login flow
+            return
+
     if await exists(username_field):
         await username_field.fill(sid)
         await page.wait_for_timeout(post_fill_wait)
         # unable to click enter here because that may cause a failed login attempt and clear fields
 
-    password_field = page.locator(password_selector)
     if await exists(password_field):
         await password_field.fill(pw)
         await page.wait_for_timeout(post_fill_wait)
         await password_field.press("Enter")
+        await wait_for_login_form_to_disappear()
     else: # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google/microsoft/misc)
 
         if await exists(username_field): # We may not have moved on from the Username field yet, try to submit on it now
@@ -131,6 +164,7 @@ async def universal_login_flow(
             await password_field.fill(pw)
             await page.wait_for_timeout(post_fill_wait)
             await password_field.press("Enter")
+            await wait_for_login_form_to_disappear()
             return # exit here if we were able to fill the password field and submit
 
         # otherwise attempt sso
@@ -143,14 +177,17 @@ async def universal_login_flow(
                 raise LoginError('Could not find a suitable SSO login option for student. Maybe you forgot to select an SSO button, or it does not exist')
 
         if sso_login_selector and await exists(page.locator(sso_login_selector)):
-            print(f'attempt alternate login with {sso_login_selector}')
+            print(f'No username or password fields exist, attempt SSO login with {sso_login_selector}')
             await page.locator(sso_login_selector).click()
             await wait_after_nav(page)
         try:
             assert (microsoft_callback is not None) or (google_callback is not None)
             await try_sso_login()
-        except PlaywrightError: # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
-            await alt_sso_callback()
+        except (PlaywrightError, LoginError): # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
+            print('SSO login failed, attempting alternate SSO login')
+            if alt_sso_callback:
+                await alt_sso_callback()
+            else: raise LoginError('Failed to find a suitable SSO login option for student. Maybe you forgot to select an SSO button, or it does not exist')
 
 
 async def use_sso_login(
@@ -173,6 +210,7 @@ async def use_sso_login(
     Returns:
         True if a SSO was used, otherwise False
     """
+    print('use SSO login')
     current_url = page.url.lower()
     if check_microsoft and 'microsoft' in current_url:
         if microsoft_login_callback:
@@ -343,9 +381,13 @@ def truncate_title(title: str, truncate_on: str, truncate_before: bool) -> str:
     if truncate_on in title:
         if truncate_before:
             return title[title.index(truncate_on) + 1:].strip()
-
+        
         return title[:title.index(truncate_on)].strip()
     return title
+def canonicalize_course_title(title: str, truncate_on: str | None = None, truncate_before: bool = False) -> str:
+    if truncate_on is not None:
+        title = truncate_title(title, truncate_on, truncate_before)
+    return title.strip().upper()
 
 async def grades_table_to_dict(
     page: Page,
@@ -381,7 +423,7 @@ async def grades_table_to_dict(
     IMPORTANT:
         Ensure the page as fully loaded and the table is present prior to this function's execution
     """
-    if use_soup: # bs4 parsing
+    if use_soup: # bs4 parsing (default)
         html = await page.content()
         soup = BeautifulSoup(html, "html.parser")
 
@@ -405,12 +447,13 @@ async def grades_table_to_dict(
 
             if class_elem and grade_elem:
                 class_title = class_elem.get_text(strip=True)
-                if truncate_title_on is not None:
-                    class_title = truncate_title(class_title, truncate_title_on, should_truncate_before)
+                # if truncate_title_on is not None:
+                #     class_title = truncate_title(class_title, truncate_title_on, should_truncate_before)
 
                 grade = canonicalize_grade(grade_elem.get_text(strip=True))
+                class_title = canonicalize_course_title(class_title, truncate_title_on, should_truncate_before)
                 if grade:
-                    parsed[class_title.upper()] = grade
+                    parsed[class_title] = grade
     else: # Playwright locator version
         if frame_selector is not None:
             page = page.frame(name=frame_selector)
@@ -431,7 +474,10 @@ async def grades_table_to_dict(
                     grade_text: str | None = None
                     for grade in reversed(grades):
                         text = (await grade.inner_text()).strip()
-                        if "%" in text:
+                        if "%" in text: # this does not catch all, like cases when there is a number but no percentage sign
+                            grade_text = text
+                            break
+                        if text.isdigit(): # this may catch cases that we do not mean to match
                             grade_text = text
                             break
                     if grade_text is None: # bail if we couldn't find a valid grade
@@ -451,6 +497,8 @@ async def grades_table_to_dict(
     print(parsed)
     return parsed
 
+def normalize_whitespace(text: str) -> str:
+    return " ".join(text.split())
 
 def percent_from_letter_grade(letter_grade: str) -> int:
     """
@@ -538,27 +586,167 @@ async def get_frame_by_url_pattern(
         return None
 
 
-async def get_frame_content_as_soup(
-    page: Page,
-    iframe_selector: str,
-    url_pattern: str,
-    *,
-    timeout: int = 15_000
-) -> Optional[BeautifulSoup]:
+
+import re
+from datetime import date, datetime, time, timedelta
+from typing import Optional, Tuple
+
+
+_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
+
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
+def _clean(s: str) -> str:
+    s = s.replace("\u202f", " ").replace("\u00a0", " ")
+    s = re.sub(r"[\u200b\u200c\u200d]", "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _parse_time_anywhere(s: str) -> Optional[time]:
+    s = _clean(s).lower()
+    m = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*([ap]\.?\s*m\.?)\b", s)
+    if not m:
+        return None
+
+    hh = int(m.group(1))
+    mm = int(m.group(2) or "0")
+    ampm = re.sub(r"[^apm]", "", m.group(3))  # "a.m." -> "am"
+    if not (1 <= hh <= 12) or not (0 <= mm <= 59):
+        return None
+
+    if ampm == "am":
+        hh = 0 if hh == 12 else hh
+    else:
+        hh = 12 if hh == 12 else hh + 12
+    return time(hour=hh, minute=mm)
+
+
+def _find_weekday(s: str) -> Optional[int]:
+    s = _clean(s).lower()
+    m = re.search(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", s)
+    return _WEEKDAYS[m.group(1)] if m else None
+
+
+def _find_month_day(s: str) -> Optional[Tuple[int, int]]:
+    s = _clean(s).lower().replace(",", " ").replace(";", " ")
+    m = re.search(
+        r"\b("
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")\.?\s+(\d{1,2})\b",
+        s,
+    )
+    if not m:
+        return None
+    month = _MONTHS[m.group(1)]
+    day = int(m.group(2))
+    if not (1 <= day <= 31):
+        return None
+    return month, day
+
+
+def _find_relative_day(s: str) -> Optional[int]:
     """
-    Get BeautifulSoup object from an iframe's content.
-    
-    Args:
-        page: Playwright Page object
-        iframe_selector: CSS selector for the iframe element
-        url_pattern: String pattern to match in the iframe URL
-        timeout: Maximum milliseconds to wait for iframe
-    
-    Returns:
-        BeautifulSoup object if frame found, None otherwise
+    Returns day offset relative to reference date:
+      yesterday -> -1, today -> 0, tomorrow -> +1
     """
-    frame = await get_frame_by_url_pattern(page, iframe_selector, url_pattern, timeout=timeout)
-    if frame:
-        html = await frame.content()
-        return BeautifulSoup(html, "html.parser")
+    s = _clean(s).lower()
+    if re.search(r"\btomorrow\b", s):
+        return 1
+    if re.search(r"\btoday\b", s):
+        return 0
+    if re.search(r"\byesterday\b", s):
+        return -1
     return None
+
+
+def reconcile_day_time(
+    raw: str,
+    *,
+    reference: Optional[datetime] = None,
+    year_window_days: int = 180,
+) -> Tuple[date, Optional[time]]:
+    """
+    Resolve date + optional time from strings.
+    Priority for picking the date:
+      1) explicit Month Day (e.g. "March 1")  -> infer year near reference
+      2) relative words (Today/Tomorrow/Yesterday)
+      3) weekday in current week of reference
+    """
+    if reference is None:
+        reference = datetime.now()
+
+    s = _clean(raw)
+    lines = [ln for ln in (_clean(x) for x in s.splitlines()) if ln]
+
+    # time (optional)
+    t = None
+    for ln in lines:
+        t = _parse_time_anywhere(ln)
+        if t is not None:
+            break
+    if t is None:
+        t = _parse_time_anywhere(s)
+
+    # 1) Month Day anywhere
+    md = None
+    for ln in lines:
+        md = _find_month_day(ln)
+        if md is not None:
+            break
+    if md is None:
+        md = _find_month_day(s)
+
+    if md is not None:
+        month, day = md
+        y = reference.date().year
+        cand = date(y, month, day)
+        delta_days = (cand - reference.date()).days
+        if delta_days < -year_window_days:
+            cand = date(y + 1, month, day)
+        elif delta_days > year_window_days:
+            cand = date(y - 1, month, day)
+        return cand, t
+
+    # 2) Today/Tomorrow/Yesterday
+    rel = _find_relative_day(s)
+    if rel is not None:
+        return reference.date() + timedelta(days=rel), t
+
+    # 3) Weekday in current week
+    wd = None
+    for ln in lines:
+        wd = _find_weekday(ln)
+        if wd is not None:
+            break
+    if wd is None:
+        wd = _find_weekday(s)
+    if wd is None:
+        raise ValueError(f"Could not find a weekday/month-day/relative day in input: {raw!r}")
+
+    ref_d = reference.date()
+    start_of_week = ref_d - timedelta(days=ref_d.weekday())  # Monday start
+    return start_of_week + timedelta(days=wd), t

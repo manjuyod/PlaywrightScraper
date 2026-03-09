@@ -44,16 +44,16 @@ class CourseGrade(AppObject):
 class Student(AppObject):
     # Student inherits fields from the database plus a few computed fields
     id: int
-    grade_level: int 
+    grade_level: int
     first_name: str
     last_name: str
-    grades: dict[str, dict] # weeklydata
+    grades: dict[str, dict]  # weeklydata
     status: str
     portal: str
-    portal_link: str
+    portal_url: str
     portal_username: str
     portal_password: str
-    alt_portal_link: str | None = None
+    alt_portal_url: str | None = None
     alt_portal_username: str | None = None
     alt_portal_password: str | None = None
     grades_snapshot: list[CourseGrade] | None = None
@@ -72,11 +72,11 @@ class Student(AppObject):
             first_name=db_student['firstname'],
             last_name=db_student['lastname'],
             grade_level=db_student['grade'],
-            portal_link=db_student['portal1'],
+            portal_url=db_student['portal1'],
             portal=db_student.get('portal'),
             portal_username=db_student['p1username'],
             portal_password=db_student['p1password'],
-            alt_portal_link=db_student.get('portal2'),
+            alt_portal_url=db_student.get('portal2'),
             alt_portal_username=db_student.get('p2username'),
             alt_portal_password=db_student.get('p2password'),
             status=db_student.get('status', 'never'),

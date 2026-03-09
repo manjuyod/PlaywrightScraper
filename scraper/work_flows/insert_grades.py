@@ -38,9 +38,9 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
 def insert_grades(): 
     # TODO: Here we need to identify if "new" courses are actually new or not
     # TODO: We will then need to alter jsons in the database to contain one canonical title for each course (separate script)
+    # "American History" should not be different from "1: AMERICAN HISTORY" although they contain differences
     monday_anchor = get_monday_anchor()
-    print(f"Inserting grades for week of {monday_anchor}")
-    print(f"DB: {db_conn().info}")
+    print(f"Using Monday anchor date: {monday_anchor}")
     print(f"Input: {JSONL_PATH}")
     try:
         with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
@@ -69,7 +69,7 @@ def insert_grades():
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-                if not student_id or not isinstance(grades, dict) or not grades:
+                if not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
                     update_status(cur, student_id, "missing grades")
                     continue
