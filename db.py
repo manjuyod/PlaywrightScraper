@@ -88,7 +88,7 @@ class Student(AppObject):
             alt_portal_password=db_student.get('p2password'),
             status=db_student.get('status', 'never'),
             grades=grades,
-            agenda=None
+            agenda=db_student.get('weekly_agenda', None)
         )
 def get_student(student_id: int) -> Student:
     query = f"SELECT * FROM student WHERE id = {student_id}"
@@ -239,11 +239,16 @@ def verify_master_password(franchise_id: int, master_password: str) -> bytes | N
     dek = derive_key_from_master(master_password)
     students = get_students(franchise_id)
     if not students: return dek
-    # Try to decrypt the first student's password
-    student = students[0]
-    if student.portal_password and isinstance(student.portal_password, (bytes, bytearray)):
+    
+    student_pass = None
+    while student_pass is None:
+        # Try to decrypt the first student's password
+        student = students[0]
+        student_pass = student.portal_password
+        
+    if student_pass and isinstance(student_pass, (bytes, bytearray)):
         try:
-            decrypted = decrypt_field(dek, student.portal_password)
+            decrypted = decrypt_field(dek, student_pass)
             if decrypted is not None:
                 return dek
         except (ValueError, InvalidTag):
