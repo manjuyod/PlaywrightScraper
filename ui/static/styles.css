@@ -1,0 +1,399 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #121212;
+    color: #e0e0e0;
+    margin: 0;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    width: 95%;
+    margin: 20px auto;
+    background: #1e1e1e;
+    padding: 30px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.6);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Dashboard specific container override */
+.dashboard-container {
+    max-width: 98%;
+    width: fit-content;
+}
+
+.student-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    align-items: start;
+}
+
+@media (max-width: 1024px) {
+    .student-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.grade-history-section {
+    grid-column: 1 / -1;
+}
+
+.info-card {
+    background: #252525;
+    padding: 20px;
+    border-radius: 8px;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 20px;
+}
+
+.logo {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.logo h1 {
+    color: #ffffff;
+    margin: 10px 0;
+}
+
+.franchise-tag {
+    color: #888;
+    font-size: 0.8rem;
+    text-align: left;
+    margin-bottom: 10px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #333;
+}
+
+th {
+    background-color: #2c2c2c;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+tr:hover {
+    background-color: #2a2a2a;
+}
+
+.clickable-row {
+    cursor: pointer;
+}
+
+.clickable-row:hover {
+    background-color: #333333 !important;
+}
+
+.section-header {
+    margin-top: 30px;
+    border-bottom: 2px solid #333;
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.grade-history-table {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.agenda-content {
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+/* Custom scrollbar for agenda */
+.agenda-content::-webkit-scrollbar {
+    width: 6px;
+}
+.agenda-content::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+.agenda-content::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+.agenda-content::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 20px;
+    color: #4dabf7;
+    text-decoration: none;
+}
+
+.back-link:hover {
+    text-decoration: underline;
+}
+
+a {
+    color: #4dabf7;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+li {
+    font-size: 0.9em;
+    white-space: nowrap;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+}
+
+li:last-child {
+    margin-bottom: 0;
+}
+
+.course-name {
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.course-grade {
+    font-weight: 900; /* Extra bold */
+    display: flex;
+    align-items: center;
+}
+
+.grade-up {
+    color: #4cd964;
+    margin-left: 4px;
+    font-size: 0.8em;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.grade-down {
+    color: #ff3b30;
+    margin-left: 4px;
+    font-size: 0.8em;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.grade-no-change {
+    color: #8e8e93;
+    margin-left: 4px;
+    font-size: 0.6em; /* Slightly smaller for the dot */
+    font-weight: bold;
+    line-height: 1;
+}
+
+.grade-red {
+    color: #e57373; /* Red */
+}
+
+.grade-orange {
+    color: #ffb74d; /* Orange */
+}
+
+.grade-yellow {
+    color: #fff176; /* Yellow */
+}
+
+.grade-green {
+    color: #81c784; /* Green */
+}
+
+.standing-good {
+    color: #81c784;
+    font-weight: bold;
+}
+
+.standing-fair {
+    color: #ffd54f;
+    font-weight: bold;
+}
+
+.standing-poor {
+    color: #e57373;
+    font-weight: bold;
+}
+
+/* Modal and Actions Bar */
+.actions-bar {
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+}
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: none;
+    font-weight: bold;
+}
+
+.btn-add {
+    background-color: #4cd964;
+    color: white;
+}
+
+.btn-delete {
+    background-color: #ff3b30;
+    color: white;
+}
+
+.btn-edit {
+    background-color: #4dabf7;
+    color: white;
+    padding: 4px 8px;
+    font-size: 0.8em;
+}
+
+.btn-primary {
+    background-color: #4dabf7;
+    color: white;
+}
+
+.btn-check {
+    background-color: #f1c40f;
+    color: #121212;
+}
+
+.refresh-icon {
+    margin-left: 5px;
+    font-size: 1.1em;
+}
+
+.progress-container {
+    margin-bottom: 20px;
+    background: #252525;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.progress-label {
+    margin-bottom: 10px;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: #f1c40f;
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background-color: #333;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background-color: #f1c40f;
+    transition: width 0.3s ease;
+}
+
+.btn-secondary {
+    background-color: #444;
+    color: white;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.7);
+}
+
+.modal-content {
+    background-color: #1e1e1e;
+    margin: 5% auto;
+    padding: 20px;
+    border: 1px solid #333;
+    width: 50%;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: white;
+}
+
+.form-group {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    margin-bottom: 5px;
+}
+
+.form-group input {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #333;
+    background-color: #2c2c2c;
+    color: white;
+}
+
+.form-group.optional label::after {
+    content: " (optional)";
+    font-style: italic;
+    font-size: 0.8em;
+    color: #888;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.flash-messages {
+    margin-bottom: 20px;
+}
+
+.flash-message {
+    padding: 10px;
+    background-color: #2c2c2c;
+    border-left: 5px solid #4dabf7;
+    margin-bottom: 10px;
+}

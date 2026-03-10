@@ -38,7 +38,7 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
     # Only GPS uses pictograph answers
     if student.get("auth_images") and student["portal"] == "gps":
         setattr(scraper, "auth_images", student["auth_images"])
-
+    agenda = {}
     try:
         print(f"Starting login for {student['id']}", flush=True)
         try:
