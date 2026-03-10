@@ -68,12 +68,12 @@ async def main(franchise_id: int | None, student_id: int | None):
         results = await asyncio.gather(*tasks)
 
         for student, agenda in zip(students, results):
-            print(f"Agenda collected for student {student['id']}: {agenda}")
+            print(f"Agenda collected for student {student['student_name']}: {agenda}")
             # add the agenda to the student in the database
             with db_conn() as conn:
                 cur = conn.cursor()
                 cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
-            print(f"Agenda saved for student {student['id']}")
+            print(f"Agenda saved for student {student['student_name']}")
 
 
 import argparse
