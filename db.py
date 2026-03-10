@@ -56,11 +56,13 @@ class Student(AppObject):
     alt_portal_url: str | None = None
     alt_portal_username: str | None = None
     alt_portal_password: str | None = None
+    agenda: dict | None = None
+    # computed fields
     grades_snapshot: list[CourseGrade] | None = None
     low_grades: list[CourseGrade] | None = None
     high_grades: list[CourseGrade] | None = None
     standing: Standing | None = None
-    agenda: dict | None = None
+
     @staticmethod
     def create(db_student: dict):
         # pprint.pprint(db_student)
