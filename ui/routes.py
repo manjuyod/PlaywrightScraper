@@ -138,7 +138,7 @@ async def student_view(franchise_id: int, student_id: int):
             return redirect(url_for('student_view', student_id=student_id, franchise_id=franchise_id))
 
     student_report = compute_student_report(student)
-    graph_html = create_grade_line_graph(student)
+    # graph_html = create_grade_line_graph(student)
     return render_template('student.html', student=student_report, job_id=job_id, franchise_id=franchise_id)
 
 @app.get('/status/<job_id>')
