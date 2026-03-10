@@ -2,19 +2,19 @@
 import json
 import pprint
 # external
-from app import app, get_students_from_session, store_students_in_session
 from flask import render_template, redirect, url_for, request, flash, session, Response
-import db
+import db as db
 from db import filter_group
-from controllers import *
-from ext_jobs import start_grade_fetch_job, jobs, get_status, is_running
-from ui.ext_jobs import franchise_from_job_id
+from ui.app import app, get_students_from_session, store_students_in_session
+from ui.controllers import *
+from ui.ext_jobs import start_grade_fetch_job, jobs, get_status, is_running, franchise_from_job_id
 
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         session['franchise_id'] = int(request.form['franchise_id'])
+        print("selected fid", int(request.form['franchise_id']))
         return redirect(url_for('franchise_view', franchise_id=int(request.form['franchise_id'])))
     session.clear()
     return render_template('index.html')
@@ -25,14 +25,20 @@ async def franchise_view(franchise_id: int):
     """Here we show a list of students for the given franchise.
         Student data is fetched from the database.
         Comprised of the students' first/last name, portal links, most recent grades"""
+    print('loading franchise', franchise_id)
+    
     session['franchise_id'] = franchise_id
     students = get_students_from_session(franchise_id)
     if students is None:
         students = db.get_students(franchise_id)
         store_students_in_session(franchise_id, students)
+        
+    assert students is not None
+    print(students)
     
     print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
+    print(student_reports[0:1])
     job_id = f"{franchise_id}"
     if request.method == 'POST': # handle db updates
         # update franchise grades
@@ -101,7 +107,7 @@ async def franchise_view(franchise_id: int):
                 return redirect(url_for('franchise_view', franchise_id=franchise_id))
             else:
                 return "Invalid form submission", 400
-
+    print("Job id", job_id)
     return render_template('franchise.html', student_reports=student_reports, franchise_id=franchise_id, job_id=job_id)
 
 @app.route('/franchise/<int:franchise_id>/student/<int:student_id>', methods=['GET', 'POST'])

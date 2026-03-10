@@ -100,7 +100,7 @@
         <tr>
             <th class="checkbox-col" style="display:none; width: 30px;"></th>
             <th>Student Name</th>
-            <th>Portal Link</th>
+            <th>Portal URL</th>
             <th>Grade Snapshot</th>
             <th>Low Grades</th>
             <th>High Grades</th>
@@ -114,7 +114,7 @@
             <tr class="clickable-row" data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}">
                 <td class="checkbox-col" style="display:none;" onclick="event.stopPropagation();"><input type="checkbox" name="student_id" value="{{ student.id }}"></td>
                 <td>{{ student.first_name }} {{ student.last_name }}</td>
-                <td><a href="{{ student.portal_link }}" target="_blank" onclick="event.stopPropagation();">{{ student.portal }}</a></td>
+                <td><a href="{{ student.portal_url }}" target="_blank" onclick="event.stopPropagation();">{{ student.portal }}</a></td>
                 <td>
                     {% if student.grades_snapshot %}
                         <ul class="grade-list">
@@ -196,10 +196,10 @@
                         "first_name": student.first_name,
                         "last_name": student.last_name,
                         "grade": student.grade_level,
-                        "portal_link": student.portal_link,
+                        "portal_url": student.portal_url,
                         "portal_username": student.portal_username,
                         "portal_password": student.portal_password,
-                        "alt_portal_link": student.alt_portal_link or "",
+                        "alt_portal_url": student.alt_portal_url or "",
                         "alt_portal_username": student.alt_portal_username or "",
                         "alt_portal_password": student.alt_portal_password or ""
                     } %}
@@ -348,10 +348,10 @@
         document.getElementById("first_name").value = student.first_name;
         document.getElementById("last_name").value = student.last_name;
         document.getElementById("grade").value = student.grade;
-        document.getElementById("portal_url").value = student.portal_link;
+        document.getElementById("portal_url").value = student.portal_url;
         document.getElementById("portal_username").value = student.portal_username;
         document.getElementById("portal_password").value = student.portal_password;
-        document.getElementById("alt_portal_url").value = student.alt_portal_link;
+        document.getElementById("alt_portal_url").value = student.alt_portal_url;
         document.getElementById("alt_portal_username").value = student.alt_portal_username;
         document.getElementById("alt_portal_password").value = student.alt_portal_password;
         
