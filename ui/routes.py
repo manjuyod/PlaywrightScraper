@@ -25,8 +25,6 @@ async def franchise_view(franchise_id: int):
     """Here we show a list of students for the given franchise.
         Student data is fetched from the database.
         Comprised of the students' first/last name, portal links, most recent grades"""
-    print('loading franchise', franchise_id)
-    
     session['franchise_id'] = franchise_id
     students = get_students_from_session(franchise_id)
     if students is None:
@@ -34,8 +32,6 @@ async def franchise_view(franchise_id: int):
         store_students_in_session(franchise_id, students)
         
     assert students is not None
-    print(students)
-    
     print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
     print(student_reports[0:1])
