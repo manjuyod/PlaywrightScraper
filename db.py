@@ -298,7 +298,7 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
     """
     if key is not None:
         key_check = lambda elem: key in elem.keys()
-    else: key_check = lambda elem: True
+    else: key_check = lambda _: True
     
     if include:
         value_check = lambda elem: value in elem.values()
