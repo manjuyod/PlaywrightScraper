@@ -65,7 +65,12 @@ class Student(AppObject):
     def create(db_student: dict):
         # pprint.pprint(db_student)
         grades_json = db_student.get('weeklydata', '{}')
-        grades = json.loads(grades_json)
+        if isinstance(grades_json, dict):
+            grades = grades_json
+        elif isinstance(grades_json, str):
+            grades = json.loads(grades_json)
+        else:
+            grades = {}
         grades = {k: v for k, v in grades.items() if v != {}} # only rows with grades
         return Student(
             id=db_student['id'],
