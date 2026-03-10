@@ -1,0 +1,186 @@
+<div class="student-heatmap-tab" data-tab="heatmap">
+	<div class="heatmap-header">
+		<h3>Grade Heatmap</h3>
+		<p class="heatmap-subtitle">Weeks (columns) × Courses (rows)</p>
+	</div>
+
+	<div class="heatmap-table-wrapper" role="region" aria-label="Student grade heatmap">
+		<table class="heatmap-table" id="student-heatmap-table">
+			<thead id="heatmap-header"></thead>
+			<tbody id="heatmap-body"></tbody>
+		</table>
+	</div>
+
+	<div class="heatmap-legend">
+		<span>Low</span>
+		<div class="legend-bar"></div>
+		<span>High</span>
+	</div>
+</div>
+
+<style>
+	.student-heatmap-tab {
+		padding: 12px 4px;
+	}
+
+	.heatmap-header h3 {
+		margin: 0 0 4px 0;
+		color: var(--tutoring-blue, #4472C4);
+	}
+
+	.heatmap-subtitle {
+		margin: 0 0 12px 0;
+		color: #666;
+		font-size: 0.9rem;
+	}
+
+	.heatmap-table-wrapper {
+		overflow: auto;
+		border-radius: 8px;
+		border: 1px solid #e5e7eb;
+		background: #fff;
+		max-width: 100%;
+		padding-bottom: 4px;
+	}
+
+	.heatmap-table {
+		width: max-content;
+		min-width: 100%;
+		border-collapse: collapse;
+		table-layout: auto;
+	}
+
+	.heatmap-table th,
+	.heatmap-table td {
+		border-bottom: 1px solid #e5e7eb;
+		border-right: 1px solid #e5e7eb;
+		padding: 6px;
+		text-align: center;
+		font-size: 0.85rem;
+		white-space: nowrap;
+	}
+
+	.heatmap-table th:first-child,
+	.heatmap-table td:first-child {
+		position: sticky;
+		left: 0;
+		background: #f8fafc;
+		z-index: 2;
+		text-align: left;
+		font-weight: 600;
+		width: max-content;
+		min-width: 260px;
+		padding-right: 14px;
+		white-space: normal;
+	}
+
+	.heatmap-table th {
+		position: sticky;
+		top: 0;
+		background: var(--light-blue, #5ba3c7);
+		color: var(--text-dark, #2c3e50);
+		z-index: 1;
+		font-size: 0.75rem;
+		letter-spacing: 0.3px;
+	}
+
+	.heatmap-cell {
+		color: #0f172a;
+		font-weight: 600;
+		border-radius: 4px;
+		min-width: 48px;
+	}
+
+	.heatmap-cell.empty {
+		background: #f9fafb;
+		color: #9ca3af;
+		font-weight: 400;
+	}
+
+	.heatmap-legend {
+		margin-top: 12px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 0.85rem;
+		color: #666;
+	}
+
+	.legend-bar {
+		width: 140px;
+		height: 8px;
+		border-radius: 4px;
+		background: linear-gradient(90deg, #fca5a5 0%, #fde68a 50%, #86efac 100%);
+		border: 1px solid var(--tutoring-blue, #4472C4);
+	}
+</style>
+
+<script>
+	const gradesData = {{ student.grades | tojson | safe }};
+
+	const weeks = gradesData ? Object.keys(gradesData) : [];
+
+	const courseSet = new Set();
+	weeks.forEach(week => {
+		const courseGrades = gradesData[week] || {};
+		Object.keys(courseGrades).forEach(course => {
+			const value = courseGrades[course];
+			if (typeof value === 'number') {
+				courseSet.add(course);
+			}
+		});
+	});
+
+	const courses = Array.from(courseSet);
+
+	const header = document.getElementById('heatmap-header');
+	const body = document.getElementById('heatmap-body');
+
+	if (header && body) {
+		const headerRow = document.createElement('tr');
+		const corner = document.createElement('th');
+		corner.textContent = 'Course / Week';
+		headerRow.appendChild(corner);
+
+		weeks.forEach(week => {
+			const th = document.createElement('th');
+			th.textContent = week;
+			headerRow.appendChild(th);
+		});
+
+		header.appendChild(headerRow);
+
+		courses.forEach(course => {
+			const row = document.createElement('tr');
+			const courseCell = document.createElement('td');
+			courseCell.textContent = course;
+			row.appendChild(courseCell);
+
+			weeks.forEach(week => {
+				const cell = document.createElement('td');
+				const grade = gradesData?.[week]?.[course];
+
+				if (typeof grade === 'number') {
+					cell.className = 'heatmap-cell';
+					cell.textContent = grade;
+					cell.style.background = gradeToColor(grade);
+					cell.title = `${course} • ${week}: ${grade}`;
+				} else {
+					cell.className = 'heatmap-cell empty';
+					cell.textContent = '—';
+				}
+
+				row.appendChild(cell);
+			});
+
+			body.appendChild(row);
+		});
+	}
+
+	function gradeToColor(grade) {
+		const clamped = Math.max(0, Math.min(100, grade));
+		const normalized = (clamped - 60) / 40;
+		const hue = Math.max(0, Math.min(1, normalized)) * 120;
+		return `hsl(${hue}, 70%, 80%)`;
+	}
+</script>

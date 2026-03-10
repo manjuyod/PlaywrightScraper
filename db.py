@@ -56,11 +56,13 @@ class Student(AppObject):
     alt_portal_url: str | None = None
     alt_portal_username: str | None = None
     alt_portal_password: str | None = None
+    agenda: dict | None = None
+    # computed fields
     grades_snapshot: list[CourseGrade] | None = None
     low_grades: list[CourseGrade] | None = None
     high_grades: list[CourseGrade] | None = None
     standing: Standing | None = None
-    agenda: dict | None = None
+
     @staticmethod
     def create(db_student: dict):
         # pprint.pprint(db_student)
@@ -86,7 +88,7 @@ class Student(AppObject):
             alt_portal_password=db_student.get('p2password'),
             status=db_student.get('status', 'never'),
             grades=grades,
-            agenda=None
+            agenda=db_student.get('weekly_agenda', None)
         )
 def get_student(student_id: int) -> Student:
     query = f"SELECT * FROM student WHERE id = {student_id}"
@@ -105,7 +107,7 @@ def get_students(franchise_id: int | None = None) -> list[Student]:
 def add_student(fid: int, student: Student, master_key: bytes):
     # INSERT
     weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
-    portal = get_portal_key_from_url(student.portal_link)
+    portal = get_portal_key_from_url(student.portal_url)
     
     query = """
             INSERT INTO Student(
@@ -121,13 +123,13 @@ def add_student(fid: int, student: Student, master_key: bytes):
         student.first_name,
         student.last_name,
         student.grade_level,
-        student.portal_link,
+        student.portal_url,
         student.portal_username,
         encrypt_field(master_key, student.portal_password),
         portal,
         json.dumps(weeklydata),
         # optionals
-        student.alt_portal_link,
+        student.alt_portal_url,
         student.alt_portal_username,
         student.alt_portal_password
     )
@@ -141,7 +143,7 @@ def add_student(fid: int, student: Student, master_key: bytes):
     return get_student(db_id)
 
 def update_student(student_id: int, student: Student, master_key: bytes):
-    portal = get_portal_key_from_url(student.portal_link)
+    portal = get_portal_key_from_url(student.portal_url)
     query = """
             UPDATE Student SET 
                 firstname = %s, lastname = %s, grade = %s,
@@ -153,11 +155,11 @@ def update_student(student_id: int, student: Student, master_key: bytes):
         student.first_name,
         student.last_name,
         student.grade_level,
-        student.portal_link,
+        student.portal_url,
         student.portal_username,
         encrypt_field(master_key, student.portal_password),
         portal,
-        student.alt_portal_link,
+        student.alt_portal_url,
         student.alt_portal_username,
         student.alt_portal_password,
         student_id
@@ -237,11 +239,16 @@ def verify_master_password(franchise_id: int, master_password: str) -> bytes | N
     dek = derive_key_from_master(master_password)
     students = get_students(franchise_id)
     if not students: return dek
-    # Try to decrypt the first student's password
-    student = students[0]
-    if student.portal_password and isinstance(student.portal_password, (bytes, bytearray)):
+    
+    student_pass = None
+    while student_pass is None:
+        # Try to decrypt the first student's password
+        student = students[0]
+        student_pass = student.portal_password
+        
+    if student_pass and isinstance(student_pass, (bytes, bytearray)):
         try:
-            decrypted = decrypt_field(dek, student.portal_password)
+            decrypted = decrypt_field(dek, student_pass)
             if decrypted is not None:
                 return dek
         except (ValueError, InvalidTag):
@@ -291,7 +298,7 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
     """
     if key is not None:
         key_check = lambda elem: key in elem.keys()
-    else: key_check = lambda elem: True
+    else: key_check = lambda _: True
     
     if include:
         value_check = lambda elem: value in elem.values()

@@ -87,12 +87,12 @@
     </script>
     
     <div class="student-grid">
-        <div class="info-card">
+        <div class="info-card grade-snapshot-card">
             <div class="section-header" style="margin-top: 0;">
                 <h2>Grade Snapshot (Recent)</h2>
             </div>
             {% if student.grades_snapshot %}
-                <ul class="grade-list">
+                <ul class="grade-list snapshot-list">
                     {% for cg in student.grades_snapshot %}
                         <li>
                             <span class="course-name">{{ cg.course }}:</span>
@@ -120,14 +120,13 @@
             </div>
             <div class="agenda-content">
                 {% if student.agenda %}
-                    {% for item in student.agenda %}
-                        <div class="agenda-item" style="margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px;">
-                            <h3 style="margin: 0;">{{ item.title }}</h3>
-                            <p style="margin: 5px 0; color: #bbb;">{{ item.due_date }} | {{ item.course }}</p>
-                            {% if item.description %}
-                                <p style="margin: 5px 0;">{{ item.description }}</p>
-                            {% endif %}
-                        </div>
+                    {% for due_date, daily in student.agenda.items() %}
+                        {% for assignment in daily %}
+                            <div class="agenda-item" style="margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px;">
+                                <h4 style="margin: 0; color: #F4833D">{{ assignment[1] }}</h4>
+                                <p style="margin: 5px 0; color: #454545;">{{ due_date }} | {{ assignment[0] }}</p>
+                            </div>
+                        {% endfor %}
                     {% endfor %}
                 {% else %}
                     <p>No agenda items found.</p>
@@ -136,46 +135,131 @@
         </div>
 
         <div class="grade-history-section">
-            <div class="section-header">
+            <div class="section-header grade-history-header">
                 <h2>Grade History</h2>
+                <div class="grade-tabs" role="tablist" aria-label="Grade views">
+                    <button type="button" class="grade-tab-button active" data-tab-target="history" role="tab" aria-selected="true">History</button>
+                    <button type="button" class="grade-tab-button" data-tab-target="heatmap" role="tab" aria-selected="false">Heatmap</button>
+                </div>
             </div>
-            <div class="table-container">
-                {% if student.grades %}
-                    <table class="grade-history-table">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Grades</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for date, grade_batch in student.grades.items()|reverse %}
-                                <tr>
-                                    <td style="vertical-align: top; white-space: nowrap;">{{ date }}</td>
-                                    <td>
-                                        <ul class="grade-list">
-                                            {% for course, grade in grade_batch.items() %}
-                                                {% if grade is number %}
-                                                <li>
-                                                    <span class="course-name">{{ course }}:</span>
-                                                    <span class="course-grade {% if grade < 70 %}grade-red{% elif grade < 80 %}grade-orange{% elif grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
-                                                        {{ grade }}
-                                                    </span>
-                                                </li>
-                                                {% endif %}
-                                            {% endfor %}
-                                        </ul>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                {% else %}
-                    <p>No grade history available.</p>
-                {% endif %}
+            <div class="grade-tab-panels">
+                <div class="grade-tab-panel active" data-tab="history" role="tabpanel">
+                    <div class="table-container">
+                        {% if student.grades %}
+                            <table class="grade-history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Grades</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for date, grade_batch in student.grades.items()|reverse %}
+                                        <tr>
+                                            <td style="vertical-align: top; white-space: nowrap;">{{ date }}</td>
+                                            <td>
+                                                <ul class="grade-list">
+                                                    {% for course, grade in grade_batch.items() %}
+                                                        {% if grade is number %}
+                                                        <li>
+                                                            <span class="course-name">{{ course }}:</span>
+                                                            <span class="course-grade {% if grade < 70 %}grade-red{% elif grade < 80 %}grade-orange{% elif grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                                                {{ grade }}
+                                                            </span>
+                                                        </li>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </ul>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No grade history available.</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="grade-tab-panel" data-tab="heatmap" role="tabpanel">
+                    {% include 'student_heatmap.html' %}
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+<style>
+    .grade-history-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .grade-tabs {
+        display: inline-flex;
+        gap: 6px;
+        background: #f1f5f9;
+        padding: 4px;
+        border-radius: 10px;
+    }
+
+    .grade-tab-button {
+        border: none;
+        background: transparent;
+        color: #1f2937;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+
+    .grade-tab-button.active {
+        background: #4472C4;
+        color: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+
+    .grade-tab-panels {
+        margin-top: 16px;
+    }
+
+    .grade-tab-panel {
+        display: none;
+    }
+
+    .grade-tab-panel.active {
+        display: block;
+    }
+
+    @media (max-width: 720px) {
+        .grade-history-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+</style>
+
+<script>
+    const tabButtons = document.querySelectorAll('.grade-tab-button');
+    const tabPanels = document.querySelectorAll('.grade-tab-panel');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const target = button.getAttribute('data-tab-target');
+
+            tabButtons.forEach(btn => {
+                const isActive = btn === button;
+                btn.classList.toggle('active', isActive);
+                btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+
+            tabPanels.forEach(panel => {
+                panel.classList.toggle('active', panel.getAttribute('data-tab') === target);
+            });
+        });
+    });
+</script>
 </body>
 </html>
