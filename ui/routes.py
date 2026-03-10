@@ -5,7 +5,7 @@ import pprint
 from flask import render_template, redirect, url_for, request, flash, session, Response
 import db as db
 from db import filter_group
-from ui.app import app, get_students_from_session, store_students_in_session
+from ui.app import app, get_students_from_session, store_students_in_session, add_student_to_session, update_student_in_session
 from ui.controllers import *
 from ui.ext_jobs import start_grade_fetch_job, jobs, get_status, is_running, franchise_from_job_id
 
@@ -113,21 +113,23 @@ async def student_view(franchise_id: int, student_id: int):
     Contains a full report of their grades and agenda.
     """
     job_id = f'{franchise_id}_{student_id}'
-    students: list[Student] = get_students_from_session(franchise_id)
     
-    if students is None:
+    students: list[Student] = get_students_from_session(franchise_id)
+    if students is None: # no session, get from the database
         print("Fetching student from db")
         student = db.get_student(student_id=student_id)
+        student_report = compute_student_report(student)
         if not is_running(job_id):
             jobs.pop(job_id, None)
-    else:
-        student = filter_group(students, 'id', student_id)[0]
-    if not student:
+        add_student_to_session(franchise_id, student_report)
+    else: # session exists, get the student from the session
+        student_report = filter_group(students, 'id', student_id)[0]
+    if not student_report: # still no report, failure
         return "Student not found", 404
-    
+
+    assert student_report is not None
     if request.method == 'POST': # handle db updates
-        # update franchise grades
-        if 'run_scraper' in request.form:            
+        if 'run_scraper' in request.form: # update franchise grades
             if is_running(job_id):
                 print(f"Job {job_id} already running.")
                 flash("A job is already running for this franchise. Wait for it to finish, then try again.")
@@ -136,9 +138,6 @@ async def student_view(franchise_id: int, student_id: int):
                 flash("Starting grade collection. This may take a few minutes.")
                 start_grade_fetch_job(job_id, total=1)
             return redirect(url_for('student_view', student_id=student_id, franchise_id=franchise_id))
-
-    student_report = compute_student_report(student)
-    # graph_html = create_grade_line_graph(student)
     return render_template('student.html', student=student_report, job_id=job_id, franchise_id=franchise_id)
 
 @app.get('/status/<job_id>')
