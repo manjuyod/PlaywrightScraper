@@ -12,7 +12,7 @@ app.secret_key = os.getenv("SESSION_SECRET", "dev-secret-key")
 
 # Session management
 app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_FILE_DIR'] = './tmp'
+app.config['SESSION_FILE_DIR'] = 'ui/tmp'
 app.config["SESSION_FILE_THRESHOLD"] = 100
 app.config["SESSION_PERMANENT"] = False
 
