@@ -325,12 +325,16 @@ class CanvasEngine(PortalEngine):
 
             await self.post_login()
 
+<<<<<<< HEAD
             ok = await self._is_canvas_logged_in()
             await self.raise_login_error_if(
                 not ok,
                 f"Canvas login did not reach a recognized post-login state (url={self.page.url})",
             )
 
+=======
+            await self.post_login()
+>>>>>>> f705500c1079de9786eefe5e976b4a0445f09940
         except Exception as e:
             print(e)
             raise LoginError(f"Canvas login failed: {e}") from e
@@ -367,6 +371,25 @@ class CanvasEngine(PortalEngine):
             google_callback=self.google_login,
         )
 
+    async def post_login(self):
+        # handle student view popup
+        student_tour = await exists(self.page.get_by_text('Student Tour'))
+        if student_tour:
+            not_now_button = self.page.get_by_role('button', name='Not Now')
+            await not_now_button.click()
+            done_button = self.page.get_by_role('button', name='Done')
+            if await exists(done_button):
+                await done_button.click()
+
+        # ensure we are on list view
+        show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+        if await show_grades_button.count() == 0: # no show grades button, switch to list view
+            await self.page.locator('[data-testid="dashboard-options-button"]').click()
+            await self.page.locator('[data-testid="list-view-menu-item"]').click()
+
+            await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+            await self.page.wait_for_timeout(1500)
+
     # ----------------- grades scraping -----------------
 
     async def fetch_grades(self) -> Dict[str, Any]:
@@ -374,6 +397,7 @@ class CanvasEngine(PortalEngine):
         Prefer dashboard/list view parsing first.
         Fall back to iterative course-by-course parsing.
         """
+<<<<<<< HEAD
         student_tour = await exists(self.page.get_by_text("Student Tour"))
         if student_tour:
             not_now_button = self.page.get_by_role("button", name="Not Now")
@@ -382,6 +406,9 @@ class CanvasEngine(PortalEngine):
             if await exists(done_button):
                 await done_button.click()
 
+=======
+        # Ensure base reflects post-login host
+>>>>>>> f705500c1079de9786eefe5e976b4a0445f09940
         try:
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0:
@@ -408,6 +435,7 @@ class CanvasEngine(PortalEngine):
 
             if await show_grades_button.count() > 0:
                 await show_grades_button.click()
+<<<<<<< HEAD
             else:
                 return parsed
 
@@ -416,6 +444,9 @@ class CanvasEngine(PortalEngine):
         course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
         count = len(course_grades)
         print(f"Found {count} grades")
+=======
+            else: return parsed # {}
+>>>>>>> f705500c1079de9786eefe5e976b4a0445f09940
 
         for i in range(count):
             course_grade = course_grades[i]

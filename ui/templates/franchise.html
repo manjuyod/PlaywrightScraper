@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TC Grade Checker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<div class="container dashboard-container">
+    <div class="logo">
+        <h1>TC Grade Checker</h1>
+    </div>
+
+    <div class="franchise-tag">
+        Franchise: {{ franchise_id }}
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash-messages">
+          {% for message in messages %}
+            <div class="flash-message">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="actions-bar">
+        <button type="button" class="btn btn-add" id="btn-add-main" onclick="showAddForm()">Add Student</button>
+        <button type="button" class="btn btn-delete" id="btn-delete-mode" onclick="toggleDeleteMode(true)">Delete</button>
+        <button type="submit" form="bulk-action-form" name="delete_students" id="btn-confirm-delete" class="btn btn-delete" style="display:none;" onclick="return confirm('Are you sure you want to delete selected students?')">Confirm Deletion</button>
+        <button type="button" id="btn-cancel-delete" class="btn btn-secondary" style="display:none;" onclick="toggleDeleteMode(false)">Cancel</button>
+        
+        <form method="POST" style="margin-left: auto;">
+            <button type="submit" name="run_scraper" class="btn btn-check" onclick="return confirm('This will begin a long job and may take a few minutes. Do you want to continue?')">
+                Check grades <span class="refresh-icon">↻</span>
+            </button>
+        </form>
+    </div>
+
+    <div id="progress-container" class="progress-container" style="display: none;">
+        <div id="progress-label" class="progress-label">
+            Grade collection in progress...
+        </div>
+        <div class="progress-bar-bg">
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+    </div>
+
+    <script>
+        const jobId = "{{ job_id }}";
+        const progressContainer = document.getElementById('progress-container');
+        const progressLabel = document.getElementById('progress-label');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+
+        function pollStatus() {
+            fetch(`/status/${jobId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Job not found or error fetching status');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.step === 0) {
+                        setTimeout(pollStatus, 2000);
+                    }
+                    else if (data.step >= 0 && data.step < data.steps) {
+                        progressContainer.style.display = 'block';
+                        const percentage = Math.round(data.pct * 100);
+                        console.log(`Polling status: ${percentage}%`);
+                        progressBarFill.style.width = `${percentage}%`;
+                        progressLabel.innerText = `Grade collection in progress: ${data.step} / ${data.total + 2}`;
+                        setTimeout(pollStatus, 2000);
+                    } else if (data.step === data.steps) {
+                        progressContainer.style.display = 'block';
+                        progressBarFill.style.width = '100%';
+                        progressLabel.innerText = 'Grade collection complete! Reloading...';
+                        setTimeout(() => window.location.reload(), 2000);
+                    } else {
+                        progressContainer.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.log('Polling stopped or error:', error);
+                    progressContainer.style.display = 'none';
+                });
+        }
+
+        if (jobId) {
+            pollStatus();
+        }
+    </script>
+
+    <div class="table-container">
+    <form id="bulk-action-form" method="POST">
+    <table id="students-table">
+        <thead>
+        <tr>
+            <th class="checkbox-col" style="display:none; width: 30px;"></th>
+            <th>Student Name</th>
+            <th>Portal URL</th>
+            <th>Grade Snapshot</th>
+            <th>Low Grades</th>
+            <th>High Grades</th>
+            <th>Grade Standing</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for student in student_reports %}
+            <tr class="clickable-row" data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}">
+                <td class="checkbox-col" style="display:none;" onclick="event.stopPropagation();"><input type="checkbox" name="student_id" value="{{ student.id }}"></td>
+                <td>{{ student.first_name }} {{ student.last_name }}</td>
+                <td><a href="{{ student.portal_url }}" target="_blank" onclick="event.stopPropagation();">{{ student.portal }}</a></td>
+                <td>
+                    {% if student.grades_snapshot %}
+                        <ul class="grade-list">
+                            {% for cg in student.grades_snapshot %}
+                                <li>
+                                    <span class="course-name">{{ cg.course }}:</span>
+                                    <span class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                        {{ cg.grade }}
+                                        {% if cg.change == '+' %}
+                                            <span class="grade-up">▲</span>
+                                        {% elif cg.change == '-' %}
+                                            <span class="grade-down">▼</span>
+                                        {% else %}
+                                            <span class="grade-no-change">●</span>
+                                        {% endif %}
+                                    </span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
+                <td>
+                    {% if student.low_grades %}
+                        <ul class="grade-list">
+                            {% for cg in student.low_grades %}
+                                <li>
+                                    <span class="course-name">{{ cg.course }}:</span>
+                                    <span class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                        {{ cg.grade }}
+                                        {% if cg.change == '+' %}
+                                            <span class="grade-up">▲</span>
+                                        {% elif cg.change == '-' %}
+                                            <span class="grade-down">▼</span>
+                                        {% else %}
+                                            <span class="grade-no-change">●</span>
+                                        {% endif %}
+                                    </span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if student.high_grades %}
+                        <ul class="grade-list">
+                            {% for cg in student.high_grades %}
+                                <li>
+                                    <span class="course-name">{{ cg.course }}:</span>
+                                    <span class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                        {{ cg.grade }}
+                                        {% if cg.change == '+' %}
+                                            <span class="grade-up">▲</span>
+                                        {% elif cg.change == '-' %}
+                                            <span class="grade-down">▼</span>
+                                        {% else %}
+                                            <span class="grade-no-change">●</span>
+                                        {% endif %}
+                                    </span>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="standing-{{ student.standing|lower }}">
+                        {{ student.standing }}
+                    </span>
+                </td>
+                <td>{{ student.status }}</td>
+                <td onclick="event.stopPropagation();">
+                    {% set student_data = {
+                        "id": student.id,
+                        "first_name": student.first_name,
+                        "last_name": student.last_name,
+                        "grade": student.grade_level,
+                        "portal_url": student.portal_url,
+                        "portal_username": student.portal_username,
+                        "portal_password": student.portal_password,
+                        "alt_portal_url": student.alt_portal_url or "",
+                        "alt_portal_username": student.alt_portal_username or "",
+                        "alt_portal_password": student.alt_portal_password or ""
+                    } %}
+                    <button type="button" class="btn btn-edit" data-student='{{ student_data | tojson | safe }}' onclick='showEditForm(this)'>Edit</button>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </form>
+    </div>
+</div>
+
+<!-- Modal for Add/Edit Student -->
+<div id="student-modal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h2 id="modal-title">Add Student</h2>
+        <form id="student-form" method="POST">
+            <input type="hidden" name="master_password" id="master_password_input">
+            <div class="form-group">
+                <label for="first_name">First Name:</label>
+                <input type="text" name="first_name" id="first_name" required>
+            </div>
+            <div class="form-group">
+                <label for="last_name">Last Name:</label>
+                <input type="text" name="last_name" id="last_name" required>
+            </div>
+            <div class="form-group">
+                <label for="grade">Grade Level:</label>
+                <input type="number" name="grade" id="grade" required>
+            </div>
+            <div class="form-group">
+                <label for="portal_url">Portal URL:</label>
+                <input type="url" name="portal_url" id="portal_url" required>
+            </div>
+            <div class="form-group">
+                <label for="portal_username">Portal Username:</label>
+                <input type="text" name="portal_username" id="portal_username" required>
+            </div>
+            <div class="form-group">
+                <label for="portal_password">Portal Password:</label>
+                <input type="password" name="portal_password" id="portal_password" required>
+            </div>
+            <div class="form-group optional">
+                <label for="alt_portal_url">Alt Portal URL :</label>
+                <input type="url" name="alt_portal_url" id="alt_portal_url">
+            </div>
+            <div class="form-group optional">
+                <label for="alt_portal_username">Alt Portal Username :</label>
+                <input type="text" name="alt_portal_username" id="alt_portal_username">
+            </div>
+            <div class="form-group optional">
+                <label for="alt_portal_password">Alt Portal Password :</label>
+                <input type="password" name="alt_portal_password" id="alt_portal_password">
+            </div>
+            <div class="form-actions">
+                <button type="submit" name="add_student" id="btn-add-submit" class="btn btn-primary">Add Student</button>
+                <button type="submit" name="edit_student" id="btn-edit-submit" class="btn btn-primary" style="display:none;">Update Student</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal for Master Password -->
+<div id="password-modal" class="modal">
+    <div class="modal-content" style="max-width: 400px;">
+        <h2>Master Password Required</h2>
+        <p>Please enter the master password to continue.</p>
+        <div class="form-group">
+            <input type="password" id="master_password_prompt" class="form-control" style="width: 100%; box-sizing: border-box;" placeholder="Enter master password">
+        </div>
+        <div class="form-actions" style="margin-top: 20px;">
+            <button type="button" class="btn btn-primary" onclick="submitWithPassword()">Submit</button>
+            <button type="button" class="btn btn-secondary" onclick="closePasswordModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const modal = document.getElementById("student-modal");
+    const form = document.getElementById("student-form");
+    const modalTitle = document.getElementById("modal-title");
+    const addBtn = document.getElementById("btn-add-submit");
+    const editBtn = document.getElementById("btn-edit-submit");
+    const passwordModal = document.getElementById("password-modal");
+    const masterPasswordPrompt = document.getElementById("master_password_prompt");
+    const masterPasswordInput = document.getElementById("master_password_input");
+
+    // We check if dek is in session via a jinja variable
+    let dekExists = {{ "true" if session.get("dek") else "false" }} === true;
+    let pendingAction = null;
+
+    form.onsubmit = function(e) {
+        if (!dekExists) {
+            e.preventDefault();
+            pendingAction = () => form.submit();
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return false;
+        }
+    };
+
+    function submitWithPassword() {
+        masterPasswordInput.value = masterPasswordPrompt.value;
+        dekExists = true; // Temporary allow submit
+        if (pendingAction) {
+            pendingAction();
+            pendingAction = null;
+        } else {
+            form.submit();
+        }
+    }
+
+    function closePasswordModal() {
+        passwordModal.style.display = "none";
+        masterPasswordPrompt.value = "";
+    }
+
+    function showAddForm() {
+        if (!dekExists) {
+            pendingAction = () => showAddForm();
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
+        form.reset();
+        form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}";
+        modalTitle.innerText = "Add Student";
+        addBtn.style.display = "inline-block";
+        editBtn.style.display = "none";
+        modal.style.display = "block";
+    }
+
+    function showEditForm(btn) {
+        if (!dekExists) {
+            pendingAction = () => showEditForm(btn);
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
+        const student = JSON.parse(btn.getAttribute('data-student'));
+        modalTitle.innerText = "Edit Student";
+        form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}?student_id=" + student.id;
+        document.getElementById("first_name").value = student.first_name;
+        document.getElementById("last_name").value = student.last_name;
+        document.getElementById("grade").value = student.grade;
+        document.getElementById("portal_url").value = student.portal_url;
+        document.getElementById("portal_username").value = student.portal_username;
+        document.getElementById("portal_password").value = student.portal_password;
+        document.getElementById("alt_portal_url").value = student.alt_portal_url;
+        document.getElementById("alt_portal_username").value = student.alt_portal_username;
+        document.getElementById("alt_portal_password").value = student.alt_portal_password;
+        
+        addBtn.style.display = "none";
+        editBtn.style.display = "inline-block";
+        modal.style.display = "block";
+    }
+
+    function closeModal() {
+        modal.style.display = "none";
+    }
+
+    function toggleDeleteMode(enable) {
+        if (enable && !dekExists) {
+            pendingAction = () => toggleDeleteMode(true);
+            passwordModal.style.display = "block";
+            masterPasswordPrompt.focus();
+            return;
+        }
+        const checkboxCols = document.querySelectorAll('.checkbox-col');
+        const addBtnMain = document.getElementById('btn-add-main');
+        const deleteModeBtn = document.getElementById('btn-delete-mode');
+        const confirmDeleteBtn = document.getElementById('btn-confirm-delete');
+        const cancelDeleteBtn = document.getElementById('btn-cancel-delete');
+        const editButtons = document.querySelectorAll('.btn-edit');
+        
+        checkboxCols.forEach(col => {
+            col.style.display = enable ? 'table-cell' : 'none';
+        });
+        
+        if (enable) {
+            addBtnMain.style.display = 'none';
+            deleteModeBtn.style.display = 'none';
+            confirmDeleteBtn.style.display = 'inline-block';
+            cancelDeleteBtn.style.display = 'inline-block';
+            editButtons.forEach(btn => btn.style.display = 'none');
+        } else {
+            addBtnMain.style.display = 'inline-block';
+            deleteModeBtn.style.display = 'inline-block';
+            confirmDeleteBtn.style.display = 'none';
+            cancelDeleteBtn.style.display = 'none';
+            editButtons.forEach(btn => btn.style.display = 'inline-block');
+            // Clear selections when canceling
+            document.querySelectorAll('input[name="student_id"]').forEach(cb => cb.checked = false);
+        }
+    }
+
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            closeModal();
+        }
+    }
+
+
+    document.querySelectorAll('.clickable-row').forEach(row => {
+        row.addEventListener('click', () => {
+            // Only navigate if NOT in delete mode
+            const isDeleteMode = document.getElementById('btn-confirm-delete').style.display !== 'none';
+            if (!isDeleteMode) {
+                window.location = row.dataset.url;
+            } else {
+                // In delete mode, clicking the row toggles the checkbox
+                const checkbox = row.querySelector('input[name="student_id"]');
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                }
+            }
+        });
+    });
+</script>
+</body>
+</html>

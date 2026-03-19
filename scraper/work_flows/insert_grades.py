@@ -1,11 +1,13 @@
 # scraper/work_flows/insert_grades.py
 import json
-from scraper.runner import db_conn, DictCursor
+from scraper.runner import db_conn, DictCursor, project_root
 import psycopg2
 import pathlib
 from datetime import date, timedelta
+ 
+PROJECT_ROOT = project_root()
+print(f"Project root: {PROJECT_ROOT}")
 
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
 def get_monday_anchor() -> str:
@@ -39,13 +41,10 @@ def insert_grades():
     # "American History" should not be different from "1: AMERICAN HISTORY" although they contain differences
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
-    print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
-
     try:
         with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
             cur = conn.cursor(cursor_factory=DictCursor)
-
             for raw in f:
                 raw = raw.strip()
                 if not raw:
@@ -70,7 +69,7 @@ def insert_grades():
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-                if not student_id or not isinstance(grades, dict) or not grades:
+                if not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
                     update_status(cur, student_id, "missing grades")
                     continue

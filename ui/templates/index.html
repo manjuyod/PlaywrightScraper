@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TC Grade Checker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>TC Grade Checker</h1>
+        <form method="POST">
+            <label for="franchise_id">Select a franchise</label>
+            <input type="number" id="franchise_id" name="franchise_id" required>
+            <button type="submit">Go</button>
+        </form>
+    </div>
+</body>
+</html>
