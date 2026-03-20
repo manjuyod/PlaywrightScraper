@@ -13,11 +13,18 @@ def get_monday_anchor() -> str:
     monday = today - timedelta(days=today.weekday())
     return monday.strftime("%Y-%m-%d")
 
-def safe_load_json(s: str):
-    try:
-        return json.loads(s) if s else {}
-    except Exception:
+def safe_load_json(value):
+    if not value:
         return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
     """
@@ -82,6 +89,7 @@ def insert_grades():
                     print(f"Student with ID '{student_id}' not found.")
                     continue
 
+                # Postgres JSON columns may come back as either a string or a native dict.
                 weekly_data = safe_load_json(row["weeklydata"])
 
                 # Update current week's bucket
