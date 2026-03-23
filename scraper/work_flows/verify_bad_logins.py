@@ -6,7 +6,17 @@ from scraper.portals import get_portal, LoginError
 
 from playwright.async_api import Browser, async_playwright
 
-
+async def test_login(browser: Browser, student: dict):
+    student = dict(student)
+    student['db_id'] = student.pop('id')
+    print(f"[verify_bad_logins] Verifying student ID={student['db_id']} PasswordGood={student['passwordgood']}")
+    try:
+        await verify_login(browser, student)
+    except Exception as e:
+        print(f"[verify_bad_logins] Error logging in student ID={student['db_id']}: {e}")
+        return
+    good_login(int(student['db_id']))
+    
 async def verify_login(browser: Browser, student: dict):
     context = await browser.new_context()
 
@@ -53,17 +63,15 @@ async def main():
         browser_args = [
             "--disable-blink-features=AutomationControlled",
         ]
-        browser = await p.chromium.launch(headless=False, args=browser_args)
-        for student in students:
-            student = dict(student)
-            student['db_id'] = student.pop('id')
-            print(f"[verify_bad_logins] Verifying student ID={student['db_id']} PasswordGood={student['passwordgood']}")
-            try:
-                await verify_login(browser, student)
-            except Exception as e:
-                print(f"[verify_bad_logins] Error logging in student ID={student['db_id']}: {e}")
-                continue
-            good_login(int(student['db_id']))
+        browser = await p.chromium.launch(headless=True, args=browser_args)
+        i = 0
+        while i < len(students):
+            student_batch = students[i:i+5] # process 5 students at a time
+            print(f"[verify_bad_logins] Processing students {i} to {i+len(student_batch)-1}...")
+            i += 5
+            tasks = [test_login(browser, student) for student in student_batch]
+            await asyncio.gather(*tasks)
+            
 
 if __name__ == "__main__":
     asyncio.run(main())
