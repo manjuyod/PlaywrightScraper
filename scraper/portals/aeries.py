@@ -35,10 +35,15 @@ class Aeries(PortalEngine):
                 alt_sso_callback = self.iusd_login,
                 sso_login_selector=sso_login_selector
             )
-
-            if exists(self.page.get_by_role('alert')):
-                raise self.LoginError('Invalid username/password')
+            
             await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
+
+            # TODO: gate on bad login alert
+            # if await exists(self.page.get_by_text("""
+            #     The Username or Password entered are incorrect.
+            #     Try again with Valid Credentials.
+            # """, exact=False)):
+            #     raise self.LoginError("Invalid credentials")
         except Exception as e:
             print(e)
             raise

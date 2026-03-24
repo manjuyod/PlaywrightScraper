@@ -22,7 +22,7 @@ class GPS(PortalEngine):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(TimeoutError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:

@@ -111,7 +111,7 @@ async def universal_login_flow(
     """
     print('Entered login flow')
     if login_url != page.url: # Only nav if we are not at the target page
-        await page.goto(login_url, wait_until="domcontentloaded")
+        await page.goto(login_url, wait_until="domcontentloaded", timeout=15_000)
     await page.wait_for_timeout(pre_fill_wait)
 
     username_field = page.locator(username_selector)
