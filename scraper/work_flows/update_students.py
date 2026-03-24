@@ -425,7 +425,7 @@ def sync_students(target_fid: int | None = None, *, debug: bool = False) -> None
                     # UPDATE vs SKIP
                     db_row = _fetch_db_row(conn, sid)
                     needs_update = _differs(db_row, sheet_rec)
-                    portal_missing = db_row.get("portal") is None
+                    portal_missing = db_row.get("portal") is None or len(db_row.get("portal")) == 0
                     if needs_update or portal_missing:
                         portal = get_portal_key_from_url(sheet_rec['portal1'])
                         if debug:

@@ -91,9 +91,9 @@ async def universal_login_flow(
     post_fill_wait: int = 1000,
 ) -> None:
     """
-    Universal login flow for all portals.
-    Default: Username / Password input
-    Handles SSO Logins (must provide a callback to a login function for the target SSO)
+    - Universal login flow for all portals.
+    - Default: Username / Password input
+    - Handles SSO Logins (must provide a callback to a login function for the target SSO)
 
     Args:
         page: Playwright Page object
@@ -183,7 +183,7 @@ async def universal_login_flow(
         try:
             assert (microsoft_callback is not None) or (google_callback is not None)
             await try_sso_login()
-        except (PlaywrightError, LoginError): # Normal SSO didn't work, at this point we may need to try to use the alt_sso_callback
+        except (PlaywrightError, LoginError, PlaywrightTimeout): # Normal SSO didn't get us through, at this point we may need to try to use the alt_sso_callback
             print('SSO login failed, attempting alternate SSO login')
             if alt_sso_callback:
                 await alt_sso_callback()
