@@ -38,6 +38,7 @@ tmp
 .vscode/
 *.swp
 *.swo
+.replit
 
 # OS-specific
 .DS_Store
