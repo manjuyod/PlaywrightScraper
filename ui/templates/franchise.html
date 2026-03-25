@@ -95,6 +95,10 @@
         }
     </script>
 
+    <div class="search-bar-container">
+        <input type="text" id="student-search" class="student-search-input" placeholder="Search by student name...">
+    </div>
+
     <div class="table-container">
     <form id="bulk-action-form" method="POST">
     <table id="students-table">
@@ -447,14 +451,20 @@
         });
 
         rows.sort((a, b) => {
-            let aVal, bVal;
             if (col === 'name') {
-                aVal = a.dataset.name || '';
-                bVal = b.dataset.name || '';
+                const aVal = a.dataset.name || '';
+                const bVal = b.dataset.name || '';
                 return nextDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
             } else if (col === 'standing') {
-                aVal = standingOrder[a.dataset.standing] ?? -1;
-                bVal = standingOrder[b.dataset.standing] ?? -1;
+                const aRaw = a.dataset.standing;
+                const bRaw = b.dataset.standing;
+                const aNone = !(aRaw in standingOrder);
+                const bNone = !(bRaw in standingOrder);
+                if (aNone && bNone) return 0;
+                if (aNone) return 1;
+                if (bNone) return -1;
+                const aVal = standingOrder[aRaw];
+                const bVal = standingOrder[bRaw];
                 return nextDir === 'asc' ? aVal - bVal : bVal - aVal;
             }
             return 0;
@@ -465,6 +475,15 @@
         document.getElementById('sort-indicator-name').textContent = col === 'name' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
         document.getElementById('sort-indicator-standing').textContent = col === 'standing' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
     }
+
+    const searchInput = document.getElementById('student-search');
+    searchInput.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+        document.querySelectorAll('#students-table tbody tr').forEach(row => {
+            const name = row.dataset.name || '';
+            row.style.display = (!query || name.includes(query)) ? '' : 'none';
+        });
+    });
 </script>
 </body>
 </html>
