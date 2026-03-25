@@ -73,7 +73,17 @@ class Student(AppObject):
             grades = json.loads(grades_json)
         else:
             grades = {}
+            
+        agenda_json = db_student.get('weekly_agenda', '{}')
+        if isinstance(agenda_json, dict):
+            agenda = agenda_json
+        elif isinstance(agenda_json, str):
+            agenda = json.loads(agenda_json)
+        else:
+            agenda = {}
+            
         grades = {k: v for k, v in grades.items() if v != {}} # only rows with grades
+        print("Agenda:", agenda)
         return Student(
             id=db_student['id'],
             first_name=db_student['firstname'],
@@ -88,7 +98,7 @@ class Student(AppObject):
             alt_portal_password=db_student.get('p2password'),
             status=db_student.get('status', 'never'),
             grades=grades,
-            agenda=db_student.get('weekly_agenda', None)
+            agenda=agenda
         )
 def get_student(student_id: int) -> Student:
     query = f"SELECT * FROM student WHERE id = {student_id}"

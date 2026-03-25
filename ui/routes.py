@@ -14,7 +14,7 @@ from ui.ext_jobs import start_grade_fetch_job, jobs, get_status, is_running, fra
 def index():
     if request.method == 'POST':
         session['franchise_id'] = int(request.form['franchise_id'])
-        print("selected fid", int(request.form['franchise_id']))
+        # print("selected fid", int(request.form['franchise_id']))
         return redirect(url_for('franchise_view', franchise_id=int(request.form['franchise_id'])))
     session.clear()
     return render_template('index.html')
@@ -32,25 +32,25 @@ async def franchise_view(franchise_id: int):
         store_students_in_session(franchise_id, students)
         
     assert students is not None
-    print(f"Session active keys: {session.keys()}")
+    # print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
-    print(student_reports[0:1])
+    # print(student_reports[0:1])
     job_id = f"{franchise_id}"
     if request.method == 'POST': # handle db updates
         # update franchise grades
         if 'run_scraper' in request.form:
             if is_running(job_id):
-                print(f"Job {job_id} already running here, or elsewhere.")
+                # print(f"Job {job_id} already running here, or elsewhere.")
                 flash("A job is already running for this franchise. Wait for it to finish, then try again.")
             else:
-                print("Running scraper")
+                # print("Running scraper")
                 flash("Starting grade collection. This may take a few minutes.")
                 start_grade_fetch_job(job_id=job_id, total=len(students))
         # delete
         elif 'delete_students' in request.form:
             student_ids = request.form.getlist('student_id')
             if student_ids:
-                print(f"Deleting students: {student_ids}")
+                # print(f"Deleting students: {student_ids}")
                 db.delete_students([int(sid) for sid in student_ids])
                 flash(f"Deleted {len(student_ids)} students.")
             else:
@@ -91,19 +91,19 @@ async def franchise_view(franchise_id: int):
             student = Student.create(db_student)
             # add
             if 'add_student' in request.form:
-                print(f"Adding student {student.first_name}")
+                # print(f"Adding student {student.first_name}")
                 new_student = db.add_student(franchise_id, student, dek)
                 flash(f"Added student {new_student.first_name}")
                 return redirect(url_for('student_view', student_id=new_student.id, franchise_id=franchise_id))
             # edit
             elif 'edit_student' in request.form:
-                print(f"Updating student {student_id}, {student.first_name}")
+                # print(f"Updating student {student_id}, {student.first_name}")
                 db.update_student(student_id=int(student_id), student=student, master_key=dek)
                 flash(f"Updated student {student.first_name}")
                 return redirect(url_for('franchise_view', franchise_id=franchise_id))
             else:
                 return "Invalid form submission", 400
-    print("Job id", job_id)
+    # print("Job id", job_id)
     return render_template('franchise.html', student_reports=student_reports, franchise_id=franchise_id, job_id=job_id)
 
 @app.route('/franchise/<int:franchise_id>/student/<int:student_id>', methods=['GET', 'POST'])
@@ -116,7 +116,7 @@ async def student_view(franchise_id: int, student_id: int):
     
     students: list[Student] = get_students_from_session(franchise_id)
     if students is None: # no session, get from the database
-        print("Fetching student from db")
+        # print("Fetching student from db")
         student = db.get_student(student_id=student_id)
         student_report = compute_student_report(student)
         if not is_running(job_id):
@@ -131,10 +131,10 @@ async def student_view(franchise_id: int, student_id: int):
     if request.method == 'POST': # handle db updates
         if 'run_scraper' in request.form: # update franchise grades
             if is_running(job_id):
-                print(f"Job {job_id} already running.")
+                # print(f"Job {job_id} already running.")
                 flash("A job is already running for this franchise. Wait for it to finish, then try again.")
             else:
-                print("Running scraper")
+                # print("Running scraper")
                 flash("Starting grade collection. This may take a few minutes.")
                 start_grade_fetch_job(job_id, total=1)
             return redirect(url_for('student_view', student_id=student_id, franchise_id=franchise_id))
@@ -143,7 +143,7 @@ async def student_view(franchise_id: int, student_id: int):
 @app.get('/status/<job_id>')
 def status(job_id: str):
     state = get_status(job_id) 
-    pprint.pprint(f"Status for job {job_id}: {state}")
+    # pprint.pprint(f"Status for job {job_id}: {state}")
     if state:
         if state.step == state.steps:
             session.pop(f'students_{franchise_from_job_id(job_id)}')
