@@ -90,7 +90,6 @@ class Aeries(PortalEngine):
                 alt_sso_callback=self.iusd_login,
                 sso_login_selector=sso_login_selector,
             )
-<<<<<<< HEAD
 
             login_ok = await self._wait_for_login_result(timeout_ms=14000)
             if not login_ok:
@@ -101,8 +100,6 @@ class Aeries(PortalEngine):
             except Exception:
                 if not await self._is_logged_in():
                     raise
-
-=======
             
             await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
 
@@ -112,7 +109,6 @@ class Aeries(PortalEngine):
             #     Try again with Valid Credentials.
             # """, exact=False)):
             #     raise self.LoginError("Invalid credentials")
->>>>>>> f705500c1079de9786eefe5e976b4a0445f09940
         except Exception as e:
             print(e)
             raise
