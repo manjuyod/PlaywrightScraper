@@ -6,12 +6,14 @@ import psycopg2 as pg
 from psycopg2.extensions import connection
 from psycopg2.extras import DictCursor, DictRow
 from dataclasses import dataclass, asdict
-from typing import Literal
+from typing import Literal, Optional
 from enum import StrEnum
 import json
 
 def db_conn() -> connection:
     print("db_conn(): creating connection...", flush=True)
+    print("PGHOST:", os.getenv("PGHOST"), flush=True)
+    print("PGDATABASE:", os.getenv("PGDATABASE"), flush=True)
     return pg.connect(
         host=os.getenv("PGHOST"),
         database=os.getenv("PGDATABASE"),
@@ -21,12 +23,18 @@ def db_conn() -> connection:
         sslmode='require'
     )
 
-def fetch(query: str, one=False) -> list | dict | None:
+def fetch(query: str) -> Optional[list]:
     with db_conn() as conn:
         cur = conn.cursor(cursor_factory=DictCursor)
         cur.execute(query)
-        return cur.fetchone() if one else cur.fetchall()
-        
+        return cur.fetchall()
+
+def fetchone(query: str, one=False) -> Optional[dict]:
+    with db_conn() as conn:
+        cur = conn.cursor(cursor_factory=DictCursor)
+        cur.execute(query)
+        return cur.fetchone()
+
 # # Data Types used within the app
 class Standing(StrEnum):
     Good = 'Good'
@@ -83,14 +91,14 @@ class Student(AppObject):
             agenda = {}
             
         grades = {k: v for k, v in grades.items() if v != {}} # only rows with grades
-        print("Agenda:", agenda)
+        # print("Agenda:", agenda)
         return Student(
             id=db_student['id'],
             first_name=db_student['firstname'],
             last_name=db_student['lastname'],
             grade_level=db_student['grade'],
             portal_url=db_student['portal1'],
-            portal=db_student.get('portal'),
+            portal=db_student['portal'],
             portal_username=db_student['p1username'],
             portal_password=db_student['p1password'],
             alt_portal_url=db_student.get('portal2'),
@@ -102,7 +110,9 @@ class Student(AppObject):
         )
 def get_student(student_id: int) -> Student:
     query = f"SELECT * FROM student WHERE id = {student_id}"
-    db_student = fetch(query, one=True)
+    db_student = fetchone(query)
+    if db_student is None:
+        raise ValueError(f"Student with ID {student_id} not found.")    
     student = Student.create(db_student)
     return student
 
@@ -110,6 +120,7 @@ def get_students(franchise_id: int | None = None) -> list[Student]:
     print("fetching students for franchise ID:", franchise_id)
     query = "SELECT * FROM student"
     students = fetch(query)
+    assert students is not None
     if franchise_id is not None:
         students = filter_group(students, 'franchiseid', franchise_id)
     return [Student.create(student) for student in students]
@@ -307,12 +318,12 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
         The filtered group
     """
     if key is not None:
-        key_check = lambda elem: key in elem.keys()
+        key_check = lambda group: key in group.keys()
     else: key_check = lambda _: True
     
     if include:
-        value_check = lambda elem: value in elem.values()
-    else: value_check = lambda elem: value not in elem.values()
+        value_check = lambda group: group[key] == value
+    else: value_check = lambda group: group[key] != value
     
     filtered = []
     for obj in group:

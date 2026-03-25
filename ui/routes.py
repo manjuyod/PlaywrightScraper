@@ -113,8 +113,9 @@ async def student_view(franchise_id: int, student_id: int):
     Contains a full report of their grades and agenda.
     """
     job_id = f'{franchise_id}_{student_id}'
-    
-    students: list[Student] = get_students_from_session(franchise_id)
+
+    # load from session, fallback to db
+    students = get_students_from_session(franchise_id)
     if students is None: # no session, get from the database
         # print("Fetching student from db")
         student = db.get_student(student_id=student_id)
@@ -127,7 +128,8 @@ async def student_view(franchise_id: int, student_id: int):
     if not student_report: # still no report, failure
         return "Student not found", 404
 
-    assert student_report is not None
+    pprint.pprint(f"Student Snapshot:{student_report.grades_snapshot}")
+    pprint.pprint(f"Student Grades: {student_report.grades}")
     if request.method == 'POST': # handle db updates
         if 'run_scraper' in request.form: # update franchise grades
             if is_running(job_id):

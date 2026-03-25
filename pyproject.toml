@@ -23,6 +23,8 @@ dependencies = [
     "pyodbc>=5.2.0",
     "sqlalchemy>=2.0.42",
     "tenacity>=9.1.2",
+    "argon2>=0.1.10",
+    "rapidfuzz>=3.14.3",
 ]
 
 [dependency-groups]

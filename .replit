@@ -1,0 +1,20 @@
+modules = ["python-3.11"]
+
+[[ports]]
+internalPort = 8080
+externalPort = 80
+
+[nix]
+packages = ["cargo", "gitFull", "glibcLocales", "libiconv", "libxcrypt", "openssl", "pkg-config", "playwright-driver", "rapidfuzz-cpp", "rustc", "taskflow", "unixODBC"]
+
+[workflows]
+
+[[workflows.workflow]]
+name = "run"
+mode = "sequential"
+author = 41904871
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python -m ui.main"
+

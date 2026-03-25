@@ -8,6 +8,7 @@ def get_grades_x_weeks_back(raw_grades: dict, weeks_back: int) -> list[CourseGra
     if len(raw_grades.values()) <= weeks_back: return []
     grades_x_weeks_ago: dict[str, str] = list(raw_grades.values())[-weeks_back] # gets the grades from x weeks back. dict[course, grade] 
     return [CourseGrade(k, v) for k, v in grades_x_weeks_ago.items() if isinstance(v, float)]
+    
 def compute_grade_changes(grades: list[CourseGrade], prev_grades: list[CourseGrade]):
     """
     Computes the change in grade between two batches of grades
@@ -15,6 +16,7 @@ def compute_grade_changes(grades: list[CourseGrade], prev_grades: list[CourseGra
     """
     for grade, prev_grade in zip(grades, prev_grades):
         grade.change = '+' if grade.grade > prev_grade.grade else '-' if grade.grade < prev_grade.grade else None
+        
 def get_student_standing(sorted_grades: list[CourseGrade]) -> Standing:
     min_score_threshold = 70
     # lowest grade in the batch
@@ -25,13 +27,14 @@ def get_student_standing(sorted_grades: list[CourseGrade]) -> Standing:
         return Standing.Fair # 70 > x < 80
     else:
         return Standing.Good # all grades >= 80
+        
 def compute_student_report(student: Student) -> Student:
     """
     Fills computed fields for a student 
     e.g. low_scores, high_scores, standing
     """
-    most_recent_grades = get_grades_x_weeks_back(student.grades, 0)
-    second_most_recent_grades = get_grades_x_weeks_back(student.grades, 1)
+    most_recent_grades = get_grades_x_weeks_back(student.grades, 1)
+    second_most_recent_grades = get_grades_x_weeks_back(student.grades, 2)
     compute_grade_changes(most_recent_grades, second_most_recent_grades)
     
     student.grades_snapshot = most_recent_grades
