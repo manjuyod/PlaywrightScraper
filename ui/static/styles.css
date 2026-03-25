@@ -171,6 +171,22 @@ th {
     z-index: 1;
 }
 
+th.sortable-col {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+th.sortable-col:hover {
+    background: color-mix(in srgb, var(--tutoring-blue) 85%, white);
+}
+
+.sort-indicator {
+    font-size: 11px;
+    margin-left: 4px;
+    opacity: 0.75;
+}
+
 tr:hover {
     background-color: rgba(68, 114, 196, 0.05);
 }

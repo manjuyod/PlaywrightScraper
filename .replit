@@ -1,7 +1,7 @@
 modules = ["python-3.11"]
 
 [[ports]]
-internalPort = 8080
+localPort = 8080
 externalPort = 80
 
 [nix]
@@ -17,4 +17,7 @@ author = 41904871
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python -m ui.main"
+
+[agent]
+expertMode = true
 
