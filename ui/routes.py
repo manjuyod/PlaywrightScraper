@@ -2,7 +2,7 @@
 import json
 import pprint
 # external
-from flask import render_template, redirect, url_for, request, flash, session, Response
+from flask import render_template, redirect, url_for, request, flash, session, Response, jsonify
 import db as db
 from db import filter_group
 from ui.app import app, get_students_from_session, store_students_in_session, add_student_to_session, update_student_in_session
@@ -18,6 +18,10 @@ def index():
         return redirect(url_for('franchise_view', franchise_id=int(request.form['franchise_id'])))
     session.clear()
     return render_template('index.html')
+
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"})
     
     
 @app.route('/franchise/<int:franchise_id>', methods=['GET', 'POST'])

@@ -1,5 +1,5 @@
 import os
-from flask import Flask, session
+from flask import Flask, session, request, abort
 from flask_session import Session
 from dotenv import load_dotenv
 from db import Student, filter_group
@@ -8,6 +8,17 @@ load_dotenv()
 app = Flask(__name__,
             static_folder='static',
             template_folder='templates')
+INTERNAL_KEY = os.getenv("INTERNAL_KEY")
+# @app.before_request
+# def check_internal_key():
+#     key = request.headers.get('X-Internal-Key')
+#     if not key or key != INTERNAL_KEY:
+#         abort(403)
+
+@app.errorhandler(403)
+def forbidden(e):
+    return {"error": "access forbidden"}, 403
+        
 app.secret_key = os.getenv("SESSION_SECRET", "dev-secret-key")
 
 # Session management
