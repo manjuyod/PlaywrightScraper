@@ -4,70 +4,71 @@ import pprint
 
 # external
 from flask import (
-    render_template,
-    redirect,
-    url_for,
-    request,
-    flash,
-    session,
     Response,
-    jsonify,
     abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
 )
+
 import db as db
-from db import filter_group
+from db import (
+    Student,
+    filter_group,
+)
 from ui.app import (
-    app,
     INTERNAL_KEY,
+    add_student_to_session,
+    app,
     dev_bypass,
     get_students_from_session,
-    store_students_in_session,
-    add_student_to_session,
-    update_student_in_session,
     login_required,
+    store_students_in_session,
+    # update_student_in_session,
 )
-from ui.controllers import *
+from ui.controllers import (
+    compute_student_report,
+)
 from ui.ext_jobs import (
-    start_grade_fetch_job,
-    jobs,
+    franchise_from_job_id,
     get_status,
     is_running,
-    franchise_from_job_id,
+    jobs,
+    start_grade_fetch_job,
 )
- 
 
 
-# TODO: make the index page a loading page that receives the franchise id and a key in the request
+# By default, entry is only allowed from the internal key passed by the header
 @app.route("/", methods=["GET", "POST"])
 async def index():
-    print("Bypass? ", dev_bypass)
-    if dev_bypass:
+    if not dev_bypass:  # normal
+        franchise_id = request.headers.get("X-Franchise", type=int)
+        key = request.headers.get("X-Internal-Key")
+
+        # direct/manual access is not allowed
+        if franchise_id is None or key is None:
+            session.clear()
+            return abort(403)
+
+        if key != INTERNAL_KEY:
+            session.clear()
+            abort(403)
+
+        session["franchise_id"] = franchise_id
+        session["authorized"] = True
+
+        return redirect(url_for("franchise_view", franchise_id=franchise_id))
+    else:  # dev only
         session["authorized"] = True
         if request.method == "POST":
             franchise_id = request.form.get("franchise_id", type=int)
             session["franchise_id"] = franchise_id
             return redirect(url_for("franchise_view", franchise_id=franchise_id))
         return render_template("index.html")
-    franchise_id = request.headers.get("X-Franchise", type=int)
-    key = request.headers.get('X-Internal-Key')
-
-    print("FID:" , franchise_id)
-    print("Key:", key)
-    print("Internal Key:", INTERNAL_KEY)
-    
-    # direct/manual access is not allowed
-    if franchise_id is None or key is None:
-        session.clear()
-        return abort(403)
-        
-    if key != INTERNAL_KEY:
-        session.clear()
-        abort(403)
-
-    session["franchise_id"] = franchise_id
-    session["authorized"] = True
-    
-    return redirect(url_for("franchise_view", franchise_id=franchise_id))
 
 
 @app.route("/health")
@@ -84,9 +85,9 @@ async def franchise_view(franchise_id: int):
 
     if not session.get("authorized"):
         return abort(403)
-        
+
     students = get_students_from_session(franchise_id)
-    
+
     if students is None:
         students = db.get_students(franchise_id)
         store_students_in_session(franchise_id, students)
@@ -139,6 +140,7 @@ async def franchise_view(franchise_id: int):
                     )
 
             student_id = request.args.get("student_id")
+            assert student_id is not None, "student_id is required"
             student: Student | None = (
                 filter_group(students, "id", student_id)[0] if student_id else None
             )
