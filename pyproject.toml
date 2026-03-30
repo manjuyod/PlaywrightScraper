@@ -3,7 +3,7 @@ name = "playwrightscraper"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <=3.14"
 dependencies = [
     "argon2-cffi>=25.1.0",
     "beautifulsoup4>=4.13.4",
