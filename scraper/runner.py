@@ -1,36 +1,40 @@
 # -*- coding: utf-8 -*-
 # builtins
-import asyncio
 import argparse
+import asyncio
 import json
 import os
-import textwrap
 import pathlib
+import pprint
+import queue
 import random
 import sys
-from traceback import format_exception_only
-from dotenv import load_dotenv
-from typing import Dict
+import textwrap
 from time import time
-import queue
-import pprint
+from traceback import format_exception_only
+from typing import Dict
+
 # db
 import psycopg2 as pg
+from dotenv import load_dotenv
+
+# external
+from playwright.async_api import Browser, Playwright, async_playwright
 from psycopg2.extensions import connection
 from psycopg2.extras import DictCursor
-# external
-from playwright.async_api import async_playwright, Playwright, Browser
-from scraper.portals import get_portal, managed_portals, LoginError
-from scraper.portals.utils import get_portal_key_from_url
-from scraper.notif import send_notification_to_slack, Severity
 
+from scraper.notif import Severity, send_notification_to_slack
+from scraper.portals import LoginError, get_portal, managed_portals
+from scraper.portals.utils import get_portal_key_from_url
 
 load_dotenv()
 print("[runner] module import OK", flush=True)
 
+
 def _debug_env():
     print("[runner] CWD:", os.getcwd(), flush=True)
     import sys as _sys
+
     print("[runner] Python:", _sys.executable, _sys.version, flush=True)
     # Show key DB envs (mask password)
     print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
@@ -49,7 +53,7 @@ def db_conn() -> connection:
         user=os.getenv("PGUSER"),
         password=os.getenv("PGPASSWORD"),
         port=os.getenv("PGPORT"),
-        sslmode='require'
+        sslmode="require",
     )
 
 
@@ -72,14 +76,17 @@ def get_students_from_db(
     franchise_id: int | None = None,
     student_id: int | None = None,
     portal: str | None = None,
-    status: str | None = None
+    status: str | None = None,
 ):
     """Return a list of student dicts to scrape.
 
     If student_id is provided, it takes precedence over franchise_id.
     If `portal` is provided, we filter in Python (post auto-detection) so rows with portal=NULL aren't dropped.
     """
-    print(f"[runner] get_students_from_db(): fid={franchise_id} sid={student_id} portal={portal} status={status}", flush=True)
+    print(
+        f"[runner] get_students_from_db(): fid={franchise_id} sid={student_id} portal={portal} status={status}",
+        flush=True,
+    )
     students_list = []
     try:
         with db_conn() as conn:
@@ -135,10 +142,17 @@ def get_students_from_db(
 
                 # look up auth by StudentID (if present)
                 auth = student_auth_map.get(row["id"])
-                auth_images = auth["answers"] if auth and auth["type"] == "gps_pictograph" else None
+                auth_images = (
+                    auth["answers"]
+                    if auth and auth["type"] == "gps_pictograph"
+                    else None
+                )
 
                 if not portal_key:
-                    print(f"[WARN] Skipping ID={row['id']}: missing portal (login_url={login_url!r})", flush=True)
+                    print(
+                        f"[WARN] Skipping ID={row['id']}: missing portal (login_url={login_url!r})",
+                        flush=True,
+                    )
                     bad_login(row["id"])
                     continue
 
@@ -149,12 +163,12 @@ def get_students_from_db(
                         "login_url": login_url,
                         "id": row["p1username"],
                         "password": row["p1password"],
-                        "alt_login_url": row['portal2'],
-                        "alt_id": row['p2username'],
-                        "alt_password": row['p2password'],
+                        "alt_login_url": row["portal2"],
+                        "alt_id": row["p2username"],
+                        "alt_password": row["p2password"],
                         "portal": portal_key,  # guaranteed non-empty here
                         "auth_images": auth_images,
-                        "track_agenda": row["track_agenda"]
+                        "track_agenda": row["track_agenda"],
                     }
                 )
 
@@ -164,7 +178,9 @@ def get_students_from_db(
     return students_list
 
 
-def filter_students(_students: list[dict[str, str]], key: str, value) -> list[dict[str, str]]:
+def filter_students(
+    _students: list[dict[str, str]], key: str, value
+) -> list[dict[str, str]]:
     """
     Filters students dictionary by a particular key - value pair.
     Args:
@@ -174,21 +190,35 @@ def filter_students(_students: list[dict[str, str]], key: str, value) -> list[di
     Returns:
         The filtered dictionary
     """
-    return [student for student in _students if key in student.keys() and value in student.values()]
+    return [
+        student
+        for student in _students
+        if key in student.keys() and value in student.values()
+    ]
 
-def students(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None):
-    return get_students_from_db(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
+
+def students(
+    franchise_id: int | None = None,
+    student_id: int | None = None,
+    portal: str | None = None,
+    status: str | None = None,
+):
+    return get_students_from_db(
+        franchise_id=franchise_id, student_id=student_id, portal=portal, status=status
+    )
+
 
 def bad_login(student_id: int):
     """Set PasswordGood=0 for a student in the database."""
-    print(f"[runner] bad_login(): setting PasswordGood=0 for student ID={student_id}", flush=True)
+    print(
+        f"[runner] bad_login(): setting PasswordGood=0 for student ID={student_id}",
+        flush=True,
+    )
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            "UPDATE Student SET PasswordGood = 0 WHERE ID = %s",
-            (student_id,)
-        )
+        cur.execute("UPDATE Student SET PasswordGood = 0 WHERE ID = %s", (student_id,))
         conn.commit()
+
 
 async def scrape_one(browser: Browser, student: dict):
     """Scrape a single student using the appropriate portal engine."""
@@ -206,8 +236,8 @@ async def scrape_one(browser: Browser, student: dict):
         student["id"],
         student["password"],
         student_name=student.get("student_name"),
-        login_url=student.get("login_url"),
-        alt_portal_url=student.get("alt_login_url")
+        login_url=student["login_url"],
+        alt_portal_url=student.get("alt_login_url"),
     )
 
     # Only GPS uses pictograph answers
@@ -218,15 +248,23 @@ async def scrape_one(browser: Browser, student: dict):
         print(f"Starting login for {student['id']}", flush=True)
         try:
             if not scraper.sid or not scraper.pw:  # early check for field population
-                raise ValueError(f"Invalid login credentials for ID={student['db_id']};\nMissing username or password")
+                raise ValueError(
+                    f"Invalid login credentials for ID={student['db_id']};\nMissing username or password"
+                )
             await scraper.login(first_name=student.get("student_name"))
-        except ValueError: # no username/password
-            bad_login(int(student['db_id']))
+        except ValueError:  # no username/password
+            bad_login(int(student["db_id"]))
             raise
-        except Exception as e: # any exception while logging in is considered a bad login
+        except (
+            Exception
+        ) as e:  # any exception while logging in is considered a bad login
             bad_login(int(student['db_id']))
-            print(f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0")
-            raise LoginError(f"{e}\nLikely bad username/password for student") # raise once again so we log the error in the output json
+            print(
+                f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0"
+            )
+            raise LoginError(
+                f"{e}\nLikely bad username/password for student"
+            )  # raise once again so we log the error in the output json
         print(f"Login successful for {student['id']}, fetching grades…", flush=True)
 
         # post-login
@@ -250,20 +288,36 @@ async def scrape_one(browser: Browser, student: dict):
         await page.close()
         await context.close()
 
+
 def project_root() -> pathlib.Path:
-    reference_file = '.python-version'
+    reference_file = ".python-version"
     for parent in pathlib.Path(__file__).resolve().parents:
         if (parent / reference_file).exists():
             return parent
     return pathlib.Path.cwd()
+
+
 out_dir = pathlib.Path("output/phase1totuples")
 out_dir.mkdir(parents=True, exist_ok=True)
 out_file = project_root() / out_dir / "grades.jsonl"
 
-async def main(franchise_id: int | None = None, student_id: int | None = None, portal: str | None = None, status: str | None = None, job_id: str | None = None, state_q: queue.Queue | None = None):
-    print(f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}", flush=True)
 
-    student_list = students(franchise_id=franchise_id, student_id=student_id, portal=portal, status=status)
+async def main(
+    franchise_id: int | None = None,
+    student_id: int | None = None,
+    portal: str | None = None,
+    status: str | None = None,
+    job_id: str | None = None,
+    state_q: queue.Queue | None = None,
+):
+    print(
+        f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}",
+        flush=True,
+    )
+
+    student_list = students(
+        franchise_id=franchise_id, student_id=student_id, portal=portal, status=status
+    )
     print(f"[runner] main(): fetched {len(student_list)} students", flush=True)
 
     if not student_list:
@@ -274,8 +328,10 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
         return
 
     label = (
-        f"student_id={student_id}" if student_id is not None
-        else f"franchise_id={franchise_id}" if franchise_id is not None
+        f"student_id={student_id}"
+        if student_id is not None
+        else f"franchise_id={franchise_id}"
+        if franchise_id is not None
         else "all active"
     )
     if portal is not None:
@@ -295,16 +351,19 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             ]
             browser = await p.chromium.launch(headless=False, args=browser_args)
             for student in student_list:
-                portal_attempted[student.get('portal')] += 1
+                portal_attempted[student.get("portal")] += 1
                 try:
-                    print(f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
+                    print(
+                        f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]",
+                        flush=True,
+                    )
                     result = await scrape_one(browser, student)
                     f.write(json.dumps(result) + "\n")
                     portal_success[student.get("portal")] += 1
                     # success_count += 1
 
                 except Exception as e:
-                    if 'Connection closed while reading from the driver' not in str(e):
+                    if "Connection closed while reading from the driver" not in str(e):
                         error_result = {
                             "db_id": student["db_id"],
                             "student_id": student["id"],
@@ -313,15 +372,28 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
                         }
                         f.write(json.dumps(error_result) + "\n")
                         errors.append(error_result)
-                        print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
+                        print(
+                            f"ERROR: {student['id']} (details in grades.jsonl)",
+                            flush=True,
+                        )
 
     # Compute summary
     end_time = time()
     time_elapsed = int(end_time - begin_time)
     time_per_student = time_elapsed / max(1, len(student_list))
 
-    portal_success_rates = {portal: float(success) / attempted * 100 for portal, success, attempted in zip(portal_attempted.keys(), portal_success.values(), portal_attempted.values()) if attempted != 0}
-    low_success_rates = {portal: success_rate for portal, success_rate in portal_success_rates.items() if success_rate < 75}
+    portal_success_rates = {
+        portal: float(success) / attempted * 100
+        for portal, success, attempted in zip(
+            portal_attempted.keys(), portal_success.values(), portal_attempted.values()
+        )
+        if attempted != 0
+    }
+    low_success_rates = {
+        portal: success_rate
+        for portal, success_rate in portal_success_rates.items()
+        if success_rate < 75
+    }
 
     attempted_count = sum(portal_attempted.values())
     success_count = sum(portal_success.values())
@@ -330,26 +402,26 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
     low_success_rates_summary = pprint.pformat(low_success_rates)
     error_summary = pprint.pformat(errors)
     results_log = f"""
-    Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})" }
-    
+    Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})"}
+
     Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
-    
+
     Low success rates
     ==================
-    
+
     {low_success_rates_summary if len(low_success_rates) > 0 else "No low success rates encountered"}
-    
+
     Error summary | Encountered {error_count} errors
     ==============
-    
+
     {error_summary if error_summary else "Nothing to show"}
     """
 
     results_log = textwrap.dedent(results_log.strip())
     results_log.replace("'", "")
-    results_log.replace('\\n', '')
+    results_log.replace("\\n", "")
 
-    if os.getenv('PYTHON_ENV') != 'dev' or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
+    if os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
         severity = Severity.Crit if error_count > 0 else Severity.Info
         try:
             send_notification_to_slack(severity, results_log)
@@ -357,44 +429,53 @@ async def main(franchise_id: int | None = None, student_id: int | None = None, p
             print(f"[runner] Slack notification failed: {e}", flush=True)
 
     print(f"\nScraping complete! Results saved to {out_file}", flush=True)
-    print(f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student", flush=True)
+    print(
+        f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student",
+        flush=True,
+    )
     print(f"Errors encountered: {error_count}", flush=True)
     print("Script finished.", flush=True)
 
-
     print(results_log, flush=True)
+
 
 if __name__ == "__main__":
     print("[runner] __main__ starting", flush=True)
     _debug_env()
     parser = argparse.ArgumentParser(description="Scrape student grades.")
     parser.add_argument(
-        "-f", "--franchise-id",
+        "-f",
+        "--franchise-id",
         type=int,
-        help="Only scrape students for a specific FranchiseID."
+        help="Only scrape students for a specific FranchiseID.",
     )
     parser.add_argument(
-        "-s", "--student-id",
+        "-s",
+        "--student-id",
         type=int,
-        help="Scrape a single student by database ID. Takes precedence over --franchise-id."
+        help="Scrape a single student by database ID. Takes precedence over --franchise-id.",
     )
     parser.add_argument(
-        "-p", "--portal",
-        type=str,
-        help="Test a single portal by name."
+        "-p", "--portal", type=str, help="Test a single portal by name."
     )
     parser.add_argument(
-        "-stat", "--status",
-        type=str,
-        help="Filter for the status of students."
+        "-stat", "--status", type=str, help="Filter for the status of students."
     )
     args = parser.parse_args()
     print("[runner] CLI args:", args, flush=True)
 
     try:
-        asyncio.run(main(franchise_id=args.franchise_id, student_id=args.student_id, portal=args.portal, status = args.status))
+        asyncio.run(
+            main(
+                franchise_id=args.franchise_id,
+                student_id=args.student_id,
+                portal=args.portal,
+                status=args.status,
+            )
+        )
     except Exception as e:
         import traceback as _tb
+
         print("[runner] FATAL EXCEPTION:", repr(e), flush=True)
         _tb.print_exc()
         raise
