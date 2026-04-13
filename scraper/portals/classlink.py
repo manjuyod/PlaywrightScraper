@@ -35,6 +35,8 @@ class Classlink(PortalEngine):
                 pw_selector
             )
             await wait_after_nav(self.page, pattern='https://myapps.classlink.com/home')
+
+            assert self.alt_portal_url is not None, "Classlink scraper requires an alt_portal_url to navigate to after login"
             await self.page.goto(url=self.alt_portal_url, wait_until="domcontentloaded")
             if 'infinitecampus' in self.alt_portal_url:
                 # nav to infinite campus portal
@@ -59,5 +61,3 @@ class Classlink(PortalEngine):
             return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
         else: return {}
     # ---------------------- PARSER ------------------------------------------
-
-

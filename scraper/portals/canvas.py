@@ -232,11 +232,7 @@ class CanvasEngine(PortalEngine):
         """
         # Ensure base reflects post-login host
         try:
-            parsed = await self.parse_grades_from_list_view()
-            if len(parsed) == 0: # fallback to iterative approach
-                parsed = await self.parse_grades_iterative()
-            print(parsed)
-            return parsed
+            return await self.parse_grades_from_list_view()
         except Exception as e:
             # import traceback
             # traceback.print_exc()
@@ -269,7 +265,7 @@ class CanvasEngine(PortalEngine):
                     continue
                 print("Canvas: Grade found", grade_str)
                 grade = canonicalize_grade(grade_str)
-                parsed[course] = grade
+                if grade: parsed[course] = grade
                 # print(course, grade_str)
             # print(grade_cards)
             return parsed
@@ -468,12 +464,12 @@ class CanvasEngine(PortalEngine):
                         today_reached = True
                     else:
                         continue
-                
+
                 assert today_reached
                 if today_passed:
                     date_elem = day_block.select_one('[data-testid="not-today"]')
                 else: today_passed = True
-                    
+
                 assert date_elem is not None
                 date_text = date_elem.get_text(strip=True)
                 day, _ = reconcile_day_time(date_text, reference=datetime.now())

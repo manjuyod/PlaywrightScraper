@@ -88,6 +88,7 @@ class Blackbaud(PortalEngine):
     )
     async def fetch_grades(self) -> Dict[str, Any]:
         """Navigate to My Day → Progress, collect per-course grades via modal."""
+        parsed = {}
         try:
             await self.nav_to_grades()
             table_selector = "#coursesContainer div.row"
@@ -101,13 +102,10 @@ class Blackbaud(PortalEngine):
                 grade_selector,
                 truncate_title_on=truncate_on
             )
-
-            print(parsed)
-            return {"parsed_grades": parsed}
         except Exception as e:
             print(e)
         finally:
-            pass
+            print(parsed)
+            return {"parsed_grades": parsed}
 
     # ── PARSERS ──────────────────────────────────────────────────────────────
-   

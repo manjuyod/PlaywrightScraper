@@ -177,19 +177,16 @@ async def universal_login_flow(
         if await exists(
             username_field
         ):  # We may not have moved on from the Username field yet, try to submit on it now
-            print("Entered")
             await username_field.press("Enter")
             await page.wait_for_timeout(post_fill_wait)
 
         if await exists(
             password_field
         ):  # try the password again after submitting Username field
-            print("password field")
             await password_field.fill(pw)
             await page.wait_for_timeout(post_fill_wait)
             await password_field.press("Enter")
             await wait_for_login_form_to_disappear()
-            print("exit")
             return  # exit here if we were able to fill the password field and submit
 
         # otherwise attempt sso

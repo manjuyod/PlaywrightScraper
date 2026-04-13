@@ -24,7 +24,7 @@ class GoogleClassroom(PortalEngine):
                 await wait_after_nav(self.page, pattern='classroom.google.com')
             except PlaywrightTimeout:
                 portal = get_portal_key_from_url(self.page.url)
-                if portal != 'google_classroom': # new portal reached, create a new engine and login there
+                if portal and portal != 'google_classroom': # new portal reached, create a new engine and login there
                     Engine = get_portal(portal)
                     scraper = Engine(
                         self.page,
@@ -97,8 +97,8 @@ class GoogleClassroom(PortalEngine):
                 course = course_elem.get_text(strip=True) if course_elem else None
 
                 due_info = reconcile_day_time(due, reference=datetime.now()) if due else (None, None)
-                day: date = due_info[0] if due_info[0] else None
-                due_at: time = due_info[1] if due_info[1] else None
+                day: Optional[date] = due_info[0] if due_info[0] else None
+                due_at: Optional[time] = due_info[1] if due_info[1] else None
 
 
 
