@@ -77,6 +77,7 @@ def get_students_from_db(
     student_id: int | None = None,
     portal: str | None = None,
     status: str | None = None,
+    allow_bad_logins: bool = False,
 ):
     """Return a list of student dicts to scrape.
 
@@ -97,24 +98,27 @@ def get_students_from_db(
 
             base = """
                 SELECT ID, FirstName, P1Username, P1Password, Portal1, p2username, p2password, portal2, portal,
-                       YearStart, YearEnd, PasswordGood, FranchiseID, track_agenda
+                       YearStart, YearEnd, PasswordGood, FranchiseID, track_agenda, status
                 FROM Student
             """
             conditions = [
-                "PasswordGood = 1",
+                # "PasswordGood = 1",
                 "(YearStart IS NULL OR YearStart = '' OR date(YearStart) <= CURRENT_DATE)",
                 "(YearEnd IS NULL OR YearEnd = '' OR CURRENT_DATE <= date(YearEnd))",
             ]
             params: list = []
 
+            if not allow_bad_logins:
+                conditions.append("PasswordGood = 1")
+
             # IMPORTANT: do NOT filter by portal in SQL; we filter in Python post-detection.
             if student_id is not None:
                 conditions.append("ID = %s")
                 params.append(student_id)
-            elif franchise_id is not None:
+            if franchise_id is not None:
                 conditions.append("FranchiseID = %s")
                 params.append(franchise_id)
-            elif status is not None:
+            if status is not None:
                 conditions.append("status = %s")
                 params.append(status)
 
@@ -169,6 +173,8 @@ def get_students_from_db(
                         "portal": portal_key,  # guaranteed non-empty here
                         "auth_images": auth_images,
                         "track_agenda": row["track_agenda"],
+                        "status": row["status"],
+                        "passwordgood": row["passwordgood"],
                     }
                 )
 
@@ -242,6 +248,7 @@ async def scrape_one(browser: Browser, student: dict):
 
     # Only GPS uses pictograph answers
     if student.get("auth_images") and student["portal"] == "gps":
+        print(f"Setting auth_images for student ID={student['db_id']}: {student['auth_images']}", flush=True)
         setattr(scraper, "auth_images", student["auth_images"])
 
     try:
