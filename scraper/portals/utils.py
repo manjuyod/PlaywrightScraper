@@ -166,7 +166,9 @@ async def universal_login_flow(
         await username_field.fill(sid)
         await page.wait_for_timeout(post_fill_wait)
         # unable to click enter here because that may cause a failed login attempt and clear fields
-
+    else:
+        print("Username field not found")
+    
     if await exists(password_field):
         print("Found password field")
         await password_field.fill(pw)
@@ -174,6 +176,7 @@ async def universal_login_flow(
         await password_field.press("Enter")
         await wait_for_login_form_to_disappear()
     else:  # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google/microsoft/misc)
+        print("No password field found")
         if await exists(
             username_field
         ):  # We may not have moved on from the Username field yet, try to submit on it now
