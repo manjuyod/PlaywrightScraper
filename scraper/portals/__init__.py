@@ -59,6 +59,7 @@ managed_portals: Dict[str, list[str]] = {
     "k12": ["login.k12"],
     "google_classroom": ["classroom.google", "accounts.google"],
     "schooltool": ["schooltool"],
+    "asuprep": ["global.asuprep"],
    }
 # Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():
