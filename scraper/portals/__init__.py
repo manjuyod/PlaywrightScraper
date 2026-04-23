@@ -47,6 +47,7 @@ managed_portals: Dict[str, list[str]] = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
+    "homeaccess": ["homeaccess", "HomeAccess"],
     "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
     "blackbaud": ["myschoolapp, blackbaud"],
