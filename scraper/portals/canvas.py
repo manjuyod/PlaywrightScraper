@@ -450,8 +450,6 @@ class CanvasEngine(PortalEngine):
                 # print(course, grade_str)
             # print(grade_cards)
             return parsed
-        finally:
-            pass
 
         course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
         count = len(course_grades)
