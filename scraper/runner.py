@@ -345,8 +345,13 @@ async def main(
         label += f", portal={portal}"
     print(f"Found {len(student_list)} students to scrape ({label}).", flush=True)
 
-    # success_count = 0
-    # error_count = 0
+    if job_id:
+        from ui.ext_jobs import JobState # import here to avoid circular imports
+        state = JobState(total=len(student_list), steps=len(student_list) + 2)
+        state.next_step()
+        state_q.put((job_id, state))
+    else: state = None
+        
     portal_attempted = {portal: 0 for portal in managed_portals.keys()}
     portal_success = {portal: 0 for portal in managed_portals.keys()}
     errors = []
@@ -360,15 +365,18 @@ async def main(
             for student in student_list:
                 portal_attempted[student.get("portal")] += 1
                 try:
-                    print(
-                        f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]",
-                        flush=True,
-                    )
+                    print(f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
+                    # gather grades
                     result = await scrape_one(browser, student)
+                    # post result to output
                     f.write(json.dumps(result) + "\n")
+                    # increment success count
                     portal_success[student.get("portal")] += 1
-                    # success_count += 1
-
+                    # push state update
+                    if state:
+                        state.next_step()
+                        state_q.put((job_id, state))
+                    print(f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
                 except Exception as e:
                     if "Connection closed while reading from the driver" not in str(e):
                         error_result = {
@@ -379,11 +387,7 @@ async def main(
                         }
                         f.write(json.dumps(error_result) + "\n")
                         errors.append(error_result)
-                        print(
-                            f"ERROR: {student['id']} (details in grades.jsonl)",
-                            flush=True,
-                        )
-
+                        print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
     # Compute summary
     end_time = time()
     time_elapsed = int(end_time - begin_time)
@@ -428,7 +432,11 @@ async def main(
     results_log.replace("'", "")
     results_log.replace("\\n", "")
 
-    if os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
+    if state:
+        state.next_step()
+        state_q.put((job_id, state))
+
+    if os.getenv('PYTHON_ENV') != 'dev' or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
         severity = Severity.Crit if error_count > 0 else Severity.Info
         try:
             send_notification_to_slack(severity, results_log)

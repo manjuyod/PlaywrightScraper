@@ -38,7 +38,7 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
     # Only GPS uses pictograph answers
     if student.get("auth_images") and student["portal"] == "gps":
         setattr(scraper, "auth_images", student["auth_images"])
-
+    agenda = {}
     try:
         print(f"Starting login for {student['id']}", flush=True)
         try:
@@ -68,12 +68,12 @@ async def main(franchise_id: int | None, student_id: int | None):
         results = await asyncio.gather(*tasks)
 
         for student, agenda in zip(students, results):
-            print(f"Agenda collected for student {student['id']}: {agenda}")
+            print(f"Agenda collected for student {student['student_name']}: {agenda}")
             # add the agenda to the student in the database
             with db_conn() as conn:
                 cur = conn.cursor()
                 cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
-            print(f"Agenda saved for student {student['id']}")
+            print(f"Agenda saved for student {student['student_name']}")
 
 
 import argparse

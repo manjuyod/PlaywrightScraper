@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ student.first_name }} {{ student.last_name }} - Report</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="icon" type="image/webp" href="../static/imgs/tc_logo.webp">
+</head>
+<body>
+<div class="container">
+    <div class="logo">
+        <a href="{{ url_for('franchise_view', franchise_id=session.get('franchise_id')) }}" class="back-link">← Back to Student List</a>
+        <h1>{{ student.first_name }} {{ student.last_name }}</h1>
+        <p>Status: {{ student.status }} | Standing: <span class="standing-{{ student.standing|lower }}">{{ student.standing }}</span></p>
+        <p>Portal: <a href="{{ student.portal_link }}" target="_blank">{{ student.portal }}</a></p>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash-messages">
+          {% for message in messages %}
+            <div class="flash-message">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="actions-bar">
+        <form method="POST" style="margin-left: auto;">
+            <button type="submit" name="run_scraper" class="btn btn-check" onclick="return confirm('This will begin a long job and may take a few minutes. Do you want to continue?')">
+                Check grades <span class="refresh-icon">↻</span>
+            </button>
+        </form>
+    </div>
+
+    <div id="progress-container" class="progress-container" style="display: none;">
+        <div id="progress-label" class="progress-label">
+            Grade collection in progress...
+        </div>
+        <div class="progress-bar-bg">
+            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+        </div>
+    </div>
+
+    <script>
+        const jobId = "{{ job_id }}";
+        const progressContainer = document.getElementById('progress-container');
+        const progressLabel = document.getElementById('progress-label');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+
+        function pollStatus() {
+            fetch(`/status/${jobId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Job not found or error fetching status');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.step >= 0 && data.step < data.steps) {
+                        progressContainer.style.display = 'block';
+                        const percentage = Math.round(data.pct * 100);
+                        console.log(`Polling status: ${percentage}%`);
+                        progressBarFill.style.width = `${percentage}%`;
+                        progressLabel.innerText = `Grade collection in progress: ${data.step} / ${data.total + 2}`;
+                        setTimeout(pollStatus, 2000);
+                    } else if (data.step === data.steps) {
+                        progressContainer.style.display = 'block';
+                        progressBarFill.style.width = '100%';
+                        progressLabel.innerText = 'Grade collection complete! Reloading...';
+                        console.log('Grade collection complete!');
+                        setTimeout(() => window.location.reload(), 2000);
+                    } else {
+                        console.log('Job not found or error fetching status');
+                        progressContainer.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.log('Polling stopped or error:', error);
+                    progressContainer.style.display = 'none';
+                });
+        }
+
+        if (jobId) {
+            pollStatus();
+        }
+    </script>
+    
+    <div class="student-grid">
+        <div class="info-card grade-snapshot-card">
+            <div class="section-header" style="margin-top: 0;">
+                <h2>Grade Snapshot (Recent)</h2>
+            </div>
+            {% if student.grades_snapshot %}
+                <ul class="grade-list snapshot-list">
+                    {% for cg in student.grades_snapshot %}
+                        <li>
+                            <span class="course-name">{{ cg.course }}:</span>
+                            <span class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                {{ cg.grade }}
+                                {% if cg.change == '+' %}
+                                    <span class="grade-up">▲</span>
+                                {% elif cg.change == '-' %}
+                                    <span class="grade-down">▼</span>
+                                {% else %}
+                                    <span class="grade-no-change">●</span>
+                                {% endif %}
+                            </span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>No recent grades available.</p>
+            {% endif %}
+        </div>
+
+        <div class="info-card">
+            <div class="section-header" style="margin-top: 0;">
+                <h2>Student Agenda</h2>
+            </div>
+            <div class="agenda-content">
+                {% if student.agenda %}
+                    {% for due_date, daily in student.agenda.items() %}
+                        {% for assignment in daily %}
+                            <div class="agenda-item" style="margin-bottom: 15px; border-bottom: 1px solid #444; padding-bottom: 10px;">
+                                <h4 style="margin: 0; color: #F4833D">{{ assignment[1] }}</h4>
+                                <p style="margin: 5px 0; color: #454545;">{{ due_date }} | {{ assignment[0] }}</p>
+                            </div>
+                        {% endfor %}
+                    {% endfor %}
+                {% else %}
+                    <p>No agenda items found.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grade-history-section">
+            <div class="section-header grade-history-header">
+                <h2>Grade History</h2>
+                <div class="grade-tabs" role="tablist" aria-label="Grade views">
+                    <button type="button" class="grade-tab-button active" data-tab-target="history" role="tab" aria-selected="true">History</button>
+                    <button type="button" class="grade-tab-button" data-tab-target="heatmap" role="tab" aria-selected="false">Heatmap</button>
+                </div>
+            </div>
+            <div class="grade-tab-panels">
+                <div class="grade-tab-panel active" data-tab="history" role="tabpanel">
+                    <div class="table-container">
+                        {% if student.grades %}
+                            <table class="grade-history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Grades</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for date, grade_batch in student.grades.items()|reverse %}
+                                        <tr>
+                                            <td style="vertical-align: top; white-space: nowrap;">{{ date }}</td>
+                                            <td>
+                                                <ul class="grade-list">
+                                                    {% for course, grade in grade_batch.items() %}
+                                                        {% if grade is number %}
+                                                        <li>
+                                                            <span class="course-name">{{ course }}:</span>
+                                                            <span class="course-grade {% if grade < 70 %}grade-red{% elif grade < 80 %}grade-orange{% elif grade < 90 %}grade-yellow{% else %}grade-green{% endif %}">
+                                                                {{ grade }}
+                                                            </span>
+                                                        </li>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </ul>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No grade history available.</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="grade-tab-panel" data-tab="heatmap" role="tabpanel">
+                    {% include 'student_heatmap.html' %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .grade-history-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .grade-tabs {
+        display: inline-flex;
+        gap: 6px;
+        background: #f1f5f9;
+        padding: 4px;
+        border-radius: 10px;
+    }
+
+    .grade-tab-button {
+        border: none;
+        background: transparent;
+        color: #1f2937;
+        font-weight: 600;
+        padding: 6px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+
+    .grade-tab-button.active {
+        background: #4472C4;
+        color: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+
+    .grade-tab-panels {
+        margin-top: 16px;
+    }
+
+    .grade-tab-panel {
+        display: none;
+    }
+
+    .grade-tab-panel.active {
+        display: block;
+    }
+
+    @media (max-width: 720px) {
+        .grade-history-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    }
+</style>
+
+<script>
+    const tabButtons = document.querySelectorAll('.grade-tab-button');
+    const tabPanels = document.querySelectorAll('.grade-tab-panel');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const target = button.getAttribute('data-tab-target');
+
+            tabButtons.forEach(btn => {
+                const isActive = btn === button;
+                btn.classList.toggle('active', isActive);
+                btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+            });
+
+            tabPanels.forEach(panel => {
+                panel.classList.toggle('active', panel.getAttribute('data-tab') === target);
+            });
+        });
+    });
+</script>
+</body>
+</html>
