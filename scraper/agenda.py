@@ -1,4 +1,5 @@
 import asyncio
+import queue
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Playwright, BrowserContext
 
@@ -51,9 +52,22 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
         await page.close()
 
 
-async def main(franchise_id: int | None, student_id: int | None):
+async def main(
+    franchise_id: int | None,
+    student_id: int | None,
+    job_id: str | None = None,
+    state_q: queue.Queue | None = None,
+):
     _students = get_students_from_db(student_id=student_id, franchise_id=franchise_id)
     students = filter_group(_students, 'track_agenda', True)
+
+    if job_id and state_q:
+        from ui.ext_jobs import JobState
+        state = JobState(total=len(students), steps=len(students) + 2)
+        state.next_step()
+        state_q.put((job_id, state))
+    else:
+        state = None
 
     async with async_playwright() as pw:
         browser_args = [
@@ -64,16 +78,31 @@ async def main(franchise_id: int | None, student_id: int | None):
         context.set_default_timeout(5_000)
         context.set_default_navigation_timeout(5_000)
 
-        tasks = [fetch_agenda(context, student) for student in students]
-        results = await asyncio.gather(*tasks)
+        tasks = {
+            asyncio.create_task(fetch_agenda(context, student)): student
+            for student in students
+        }
 
-        for student, agenda in zip(students, results):
+        for task in asyncio.as_completed(tasks):
+            student = tasks[task]
+            try:
+                agenda = await task
+            except Exception:
+                agenda = {}
             print(f"Agenda collected for student {student['student_name']}: {agenda}")
             # add the agenda to the student in the database
             with db_conn() as conn:
                 cur = conn.cursor()
                 cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
             print(f"Agenda saved for student {student['student_name']}")
+
+            if state:
+                state.next_step()
+                state_q.put((job_id, state))
+
+        if state:
+            state.next_step()
+            state_q.put((job_id, state))
 
 
 import argparse

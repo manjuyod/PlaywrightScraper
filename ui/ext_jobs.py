@@ -1,5 +1,5 @@
 """
-For running external jobs. 
+For running external jobs.
 Just the scraper for now
 """
 from dataclasses import dataclass, field, asdict
@@ -8,6 +8,7 @@ import threading
 from threading import Event, Lock
 import asyncio
 from scraper.runner import main as grade_checker
+from scraper.agenda import main as agenda_checker
 from scraper.work_flows.insert_grades import insert_grades
 from queue import Queue
 @dataclass
@@ -19,25 +20,25 @@ class JobState:
     pct: float = 0.0
     cancel: Event = field(default_factory=Event)
     lock: Lock = field(default_factory=Lock)
-    
+
     def next_step(self):
         with self.lock:
             self.step += 1
-            if self.step > self.steps: 
+            if self.step > self.steps:
                 self.step = -1
-    
+
 executor = ThreadPoolExecutor(max_workers=10)
 
 jobs: dict[str, JobState] = {}
 runners: dict[str, Future] = {}
-state_q: Queue[tuple[str, JobState]] = Queue() 
+state_q: Queue[tuple[str, JobState]] = Queue()
 jobs_lock = threading.Lock()
 def state_consumer():
     while True:
         job_id, new_state = state_q.get()
         with jobs_lock:
             jobs[job_id] = new_state
-            
+
 # Long-running state consumer for jobs
 threading.Thread(target=state_consumer, daemon=True).start()
 def run_coro(coro):
@@ -51,11 +52,11 @@ def start_grade_fetch_job(job_id: str, total: int) -> str:
     jobs[job_id] = JobState(total=total, steps=total_steps)
     jobs[job_id].next_step()
     fut = executor.submit(
-        run_coro, 
+        run_coro,
         grade_checker(franchise_id=franchise_from_job_id(job_id), student_id=student_from_job_id(job_id), job_id=job_id, state_q=state_q)
     )
     runners[job_id] = fut
-    
+
     def _cleanup(_f: Future): # grade fetch done
         print("Runner cancelled?", runners.get(job_id, None).cancelled())
         print("Runner errored?", runners.get(job_id, None).exception())
@@ -63,6 +64,42 @@ def start_grade_fetch_job(job_id: str, total: int) -> str:
         insert_grades()
         jobs[job_id].next_step()
         print(f"Scraper for job {job_id} done. {jobs[job_id].step} / {jobs[job_id].steps} steps completed.")
+
+    fut.add_done_callback(_cleanup)
+    return job_id
+
+def start_agenda_fetch_job(job_id: str, total: int) -> str:
+    print(f"Starting agenda scraper for job {job_id}")
+    NONGOAL_STEPS = 2
+    total_steps = total + NONGOAL_STEPS
+    jobs[job_id] = JobState(total=total, steps=total_steps)
+    jobs[job_id].next_step()
+
+    parts = job_id.split("_")
+    if len(parts) >= 2 and parts[-1] == "agenda":
+        student_id = int(parts[1]) if len(parts) >= 3 else None
+    else:
+        student_id = student_from_job_id(job_id)
+
+    fut = executor.submit(
+        run_coro,
+        agenda_checker(
+            franchise_id=franchise_from_job_id(job_id),
+            student_id=student_id,
+            job_id=job_id,
+            state_q=state_q,
+        ),
+    )
+    runners[job_id] = fut
+
+    def _cleanup(_f: Future):
+        print("Runner cancelled?", runners.get(job_id, None).cancelled())
+        print("Runner errored?", runners.get(job_id, None).exception())
+        runners.pop(job_id, None)
+        jobs[job_id].next_step()
+        print(
+            f"Agenda scraper for job {job_id} done. {jobs[job_id].step} / {jobs[job_id].steps} steps completed."
+        )
 
     fut.add_done_callback(_cleanup)
     return job_id

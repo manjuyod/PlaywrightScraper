@@ -38,6 +38,7 @@ from ui.ext_jobs import (
     get_status,
     is_running,
     jobs,
+    start_agenda_fetch_job,
     start_grade_fetch_job,
 )
 
@@ -95,8 +96,9 @@ async def franchise_view(franchise_id: int):
     assert students is not None
     print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
-    print(student_reports[0:1])
+    # print(student_reports[0:1])
     job_id = f"{franchise_id}"
+    agenda_job_id = f"{franchise_id}_agenda"
     if request.method == "POST":  # handle db updates
         # update franchise grades
         if "run_scraper" in request.form:
@@ -109,6 +111,16 @@ async def franchise_view(franchise_id: int):
                 print("Running scraper")
                 flash("Starting grade collection. This may take a few minutes.")
                 start_grade_fetch_job(job_id=job_id, total=len(students))
+        elif "run_agenda" in request.form:
+            if is_running(agenda_job_id):
+                print(f"Job {agenda_job_id} already running here, or elsewhere.")
+                flash(
+                    "An agenda refresh job is already running for this franchise. Wait for it to finish, then try again."
+                )
+            else:
+                print("Running agenda scraper")
+                flash("Starting agenda refresh. This may take a few minutes.")
+                start_agenda_fetch_job(job_id=agenda_job_id, total=len(students))
         # delete
         elif "delete_students" in request.form:
             student_ids = request.form.getlist("student_id")
@@ -187,6 +199,7 @@ async def franchise_view(franchise_id: int):
         student_reports=student_reports,
         franchise_id=franchise_id,
         job_id=job_id,
+        agenda_job_id=agenda_job_id,
     )
 
 
@@ -199,6 +212,7 @@ async def student_view(franchise_id: int, student_id: int):
     Contains a full report of their grades and agenda.
     """
     job_id = f"{franchise_id}_{student_id}"
+    agenda_job_id = f"{franchise_id}_{student_id}_agenda"
 
     # load from session, fallback to db
     students = get_students_from_session(franchise_id)
@@ -232,8 +246,25 @@ async def student_view(franchise_id: int, student_id: int):
                     "student_view", student_id=student_id, franchise_id=franchise_id
                 )
             )
+        if "run_agenda" in request.form:  # update student agenda
+            if is_running(agenda_job_id):
+                flash(
+                    "An agenda refresh job is already running for this student. Wait for it to finish, then try again."
+                )
+            else:
+                flash("Starting agenda refresh. This may take a few minutes.")
+                start_agenda_fetch_job(agenda_job_id, total=1)
+            return redirect(
+                url_for(
+                    "student_view", student_id=student_id, franchise_id=franchise_id
+                )
+            )
     return render_template(
-        "student.html", student=student_report, job_id=job_id, franchise_id=franchise_id
+        "student.html",
+        student=student_report,
+        job_id=job_id,
+        agenda_job_id=agenda_job_id,
+        franchise_id=franchise_id,
     )
 
 
