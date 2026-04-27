@@ -47,6 +47,7 @@ managed_portals: Dict[str, list[str]] = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
+    "homeaccess": ["homeaccess", "HomeAccess"],
     "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
     "blackbaud": ["myschoolapp, blackbaud"],
@@ -57,7 +58,9 @@ managed_portals: Dict[str, list[str]] = {
     "howsschoolgoing": ["howsschoolgoing"],
     "canvas": ["instructure.com", "canvas"],
     "k12": ["login.k12"],
-    "google_classroom": ["classroom.google", "accounts.google"]
+    "google_classroom": ["classroom.google", "accounts.google"],
+    "schooltool": ["schooltool"],
+    "asuprep": ["global.asuprep"],
    }
 # Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():

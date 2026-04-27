@@ -32,6 +32,10 @@ captcha.png
 gilbert_parent_portal.html
 *.jsonl
 tmp
+.playwright-cli/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
 # IDE / Editor
 .idea/

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional, Tuple
 import re
 from datetime import datetime, timedelta  # ← added timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
 from bs4 import BeautifulSoup
-from . import register_portal 
-from .base import PortalEngine
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from scraper.portals.infinite_campus import InfiniteCampus
+
+from . import register_portal
+from .base import PortalEngine
 from .utils import *
+
 
 @register_portal("gps")
 class GPS(PortalEngine):
@@ -28,8 +37,8 @@ class GPS(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the GPS parent portal."""
         await self.page.context.tracing.start(screenshots=True, snapshots=True)
-        username_selector = 'input#identification'
-        password_selector = 'input#ember534'
+        username_selector = "input#identification"
+        password_selector = "input#ember535"
         await universal_login_flow(
             self.page,
             self.login_url,
@@ -37,7 +46,7 @@ class GPS(PortalEngine):
             self.pw,
             username_selector,
             password_selector,
-            post_fill_wait=4000
+            post_fill_wait=4000,
         )
 
         # Pictograph auth (three picks)
@@ -48,6 +57,7 @@ class GPS(PortalEngine):
 
     # Login Helper
     async def do_gps_auth(self):
+        print(self.auth_images)
         assert self.auth_images is not None  # must be provided by caller/DB
 
         await self.page.locator(".pictograph-list img.tile-icon").first.wait_for(
@@ -61,9 +71,13 @@ class GPS(PortalEngine):
             )
             print("Page images: ", images_alts)
             print("Auth images: ", self.auth_images)
-            user_match = next((image for image in self.auth_images if image in images_alts), None)
+            user_match = next(
+                (image for image in self.auth_images if image in images_alts), None
+            )
             if not user_match:
-                raise RuntimeError(f"No pictograph match found in {images_alts} for {self.auth_images}")
+                raise RuntimeError(
+                    f"No pictograph match found in {images_alts} for {self.auth_images}"
+                )
             await self.page.locator(
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()
@@ -75,20 +89,23 @@ class GPS(PortalEngine):
             await self.page.locator("img[alt='STUDENT INFINITE CAMPUS']").click()
             self.page = await popup.value
 
-        await wait_after_nav(self.page, wait_after_load=5000, wait_until='networkidle')
-        await self.raise_login_error_if('nav-wrapper' not in self.page.url)
+        await wait_after_nav(self.page, wait_after_load=5000, wait_until="networkidle")
+        await self.raise_login_error_if("nav-wrapper" not in self.page.url)
         print("Successfully reached the home page")
+
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(TimeoutError),
     )
-    async def fetch_grades(self) -> Dict[str, Any] | None:
+    async def fetch_grades(self) -> Dict[str, Any]:
         """Collect grades from the grade tab"""
         # GPS uses Infinite Campus as their portal, GPS is just a login wrapper
         try:
             await self.nav_to_ic()
-            return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
+            return await InfiniteCampus(
+                self.page, self.sid, self.pw, self.login_url
+            ).fetch_grades()
         finally:
             pass

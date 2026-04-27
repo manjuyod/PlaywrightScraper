@@ -429,10 +429,29 @@ class CanvasEngine(PortalEngine):
 
             if await show_grades_button.count() > 0:
                 await show_grades_button.click()
-            else:
-                return parsed
+            else: return parsed # {}
 
-        await self.page.wait_for_selector('[data-testid="my-grades-score"]', state="attached")
+            await self.page.wait_for_selector('[data-testid="my-grades-score"]', state='attached')
+            # 2. parse
+            course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
+            count = len(course_grades)
+            print(f"Found {count} grades")
+            # print("Course cards: ", course_cards)
+            for i in range(count):
+                course_grade = course_grades[i]
+                course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
+                course = await course_card.get_by_role('link').inner_text()
+                grade_str: str = await course_grade.inner_text()
+                if grade_str.lower() == "no grade":
+                    continue
+                print("Canvas: Grade found", grade_str)
+                grade = canonicalize_grade(grade_str)
+                if grade: parsed[course] = grade
+                # print(course, grade_str)
+            # print(grade_cards)
+            return parsed
+        finally:
+            pass
 
         course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
         count = len(course_grades)
@@ -666,8 +685,7 @@ class CanvasEngine(PortalEngine):
 
                 if today_passed:
                     date_elem = day_block.select_one('[data-testid="not-today"]')
-                else:
-                    today_passed = True
+                else: today_passed = True
 
                 assert date_elem is not None
                 date_text = date_elem.get_text(strip=True)

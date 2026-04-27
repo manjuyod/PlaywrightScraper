@@ -85,8 +85,4 @@ class PowerSchool(PortalEngine):
                     break
             if grade:
                 results[title] = grade
-
-
-
-
         return results

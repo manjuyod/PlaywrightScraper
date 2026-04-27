@@ -1,5 +1,9 @@
 import argparse
 import asyncio
+from dataclasses import asdict
+from scraper.runner import bad_login, _load_student_auth_map, get_students_from_db
+from db import get_students, filter_group, db_conn
+from scraper.portals import get_portal, LoginError
 
 # IMPORTANT:
 # Import runner so the same environment/bootstrap side effects happen
@@ -10,6 +14,15 @@ from db import get_students, filter_group, db_conn
 from scraper.portals import get_portal
 from playwright.async_api import Browser, async_playwright
 
+async def test_login(browser: Browser, student: dict):
+    student = dict(student)
+    print(f"[verify_bad_logins] Verifying student ID={student['db_id']} PasswordGood={student['passwordgood']}")
+    try:
+        await verify_login(browser, student)
+    except Exception as e:
+        print(f"[verify_bad_logins] Error logging in student ID={student['id']}: {e}")
+        return
+    good_login(int(student['db_id']))
 
 async def verify_login(browser: Browser, student: dict) -> bool:
     context = await browser.new_context()
@@ -124,6 +137,7 @@ async def main(franchise_id: int | None = None, debug: bool = False):
             await browser.close()
 
 
+argparse = __import__("argparse")
 if __name__ == "__main__":
     args = parse_args()
     print(
