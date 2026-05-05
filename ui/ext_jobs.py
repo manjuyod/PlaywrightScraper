@@ -2,7 +2,7 @@
 For running external jobs.
 Just the scraper for now
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, Future
 import threading
 from threading import Event, Lock
@@ -111,6 +111,7 @@ def get_status(job_id: str) -> JobState | None:
             return None
         state.pct = state.step / state.steps
         return state
+        
 def is_running(job_id: str) -> bool:
     return job_id in runners.keys()
 

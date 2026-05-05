@@ -1,6 +1,4 @@
 import os
-import pprint
-from asyncio import Task
 from scraper.portals.utils import get_portal_key_from_url
 import psycopg2 as pg
 from psycopg2.extensions import connection
@@ -39,7 +37,7 @@ def fetchone(query: str, one=False) -> Optional[dict]:
 class Standing(StrEnum):
     Good = 'Good'
     Fair = 'Fair'
-    Poor = 'Poor' 
+    Poor = 'Poor'
 @dataclass
 class AppObject:
     pass
@@ -81,7 +79,7 @@ class Student(AppObject):
             grades = json.loads(grades_json)
         else:
             grades = {}
-            
+
         agenda_json = db_student.get('weekly_agenda', '{}')
         if isinstance(agenda_json, dict):
             agenda = agenda_json
@@ -89,7 +87,7 @@ class Student(AppObject):
             agenda = json.loads(agenda_json)
         else:
             agenda = {}
-            
+
         grades = {k: v for k, v in grades.items() if v != {}} # only rows with grades
         # print("Agenda:", agenda)
         return Student(
@@ -129,16 +127,16 @@ def add_student(fid: int, student: Student, master_key: bytes):
     # INSERT
     weeklydata = {"2025-08-04":{},"2025-08-11":{},"2025-08-18":{},"2025-08-25":{},"2025-09-01":{},"2025-09-08":{},"2025-09-15":{},"2025-09-22":{},"2025-09-29":{},"2025-10-06":{},"2025-10-13":{},"2025-10-20":{},"2025-10-27":{},"2025-11-03":{},"2025-11-10":{},"2025-11-17":{},"2025-11-24":{},"2025-12-01":{},"2025-12-08":{},"2025-12-15":{},"2025-12-22":{},"2025-12-29":{},"2026-01-05":{},"2026-01-12":{},"2026-01-19":{},"2026-01-26":{},"2026-02-02":{},"2026-02-09":{},"2026-02-16":{},"2026-02-23":{},"2026-03-02":{},"2026-03-09":{},"2026-03-16":{},"2026-03-23":{},"2026-03-30":{},"2026-04-06":{},"2026-04-13":{},"2026-04-20":{},"2026-04-27":{},"2026-05-04":{},"2026-05-11":{},"2026-05-18":{},"2026-05-25":{},"2026-06-01":{},"2026-06-08":{},"2026-06-15":{},"2026-06-22":{},"2026-06-29":{}}
     portal = get_portal_key_from_url(student.portal_url)
-    
+
     query = """
             INSERT INTO Student(
                 franchiseid, firstname, lastname, grade,
                 portal1, p1username, p1password, portal, weeklydata,
-                portal2, p2username, p2password 
+                portal2, p2username, p2password
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """
-    
+
     params = (
         fid,
         student.first_name,
@@ -158,7 +156,7 @@ def add_student(fid: int, student: Student, master_key: bytes):
         cur = conn.cursor()
         cur.execute(query, params,)
         conn.commit()
-        
+
     # get the last rowid and return the new student
     db_id = cur.fetchone()[0]
     return get_student(db_id)
@@ -200,20 +198,19 @@ def delete_students(student_ids: list[int], master_key: bytes | None = None):
         conn.commit()
         print(f"Deleted students {student_ids}")
 
-# # Passwords, hashing and encryption
-import os
+def get_active_franchises() -> list[DictRow]:
+    query = "SELECT franchiseid FROM spreadsheets"
+    franchises = fetch(query)
+    return franchises if franchises is not None else []
 
-from argon2.low_level import hash_secret_raw, Type
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
-
 VERSION = b"\x01" # denotes the version of the encryption scheme
 # To make students' passwords secure and visible
 # 1. We encrypt using AES them using a master password as the key
 # 2. We store the encrypted passwords in the database
 # 3. We hash and store the master password in the database as well (per franchise?)
-
 
 SALT = b'\x17\x19\xce\x12\x8a\x8d\x11\xef\x8a\x0e\x00\x15\x5d\xee\x0b\x00' # temp, should be in db
 
@@ -236,9 +233,8 @@ def encrypt_field(key: bytes, plaintext: str, aad: bytes = b"") -> bytes:
     nonce = os.urandom(12)
     ciphertext = AESGCM(key).encrypt(nonce, plaintext.encode('utf-8'), aad)
     return VERSION + nonce + ciphertext
+    
 def decrypt_field(key: bytes, blob: bytes, aad: bytes = b"") -> bytes | None:
-    if not blob:
-        return None
     if len(blob) < 1 + 12 + 16:
         raise ValueError("Ciphertext blob too short")
     version = blob[:1]
@@ -262,21 +258,22 @@ def verify_master_password(franchise_id: int, master_password: str) -> bytes | N
     if not students: return dek
     
     student_pass = None
-    while student_pass is None:
-        # Try to decrypt the first student's password
-        student = students[0]
-        student_pass = student.portal_password
-        
+    # i = 0
+    # while student_pass is None and i < len(students):
+    # Try decrypting the password of each student until we find one that works (or run out of students) 
+    student = students[0]
+    assert isinstance(student, Student)
+    student_pass = student.portal_password
+
     if student_pass and isinstance(student_pass, (bytes, bytearray)):
         try:
-            decrypted = decrypt_field(dek, student_pass)
+            decrypted = decrypt_field(dek, bytes(student_pass))
             if decrypted is not None:
                 return dek
         except (ValueError, InvalidTag):
             return None
     else:
         print("Apparently the student's password has not been encrypted yet.")
-    
     # If we tried all students and couldn't decrypt anything, it's probably the wrong password
     # (or they all have empty passwords, which is unlikely)
     return None
@@ -286,26 +283,28 @@ def test_encryption():
     salt = os.urandom(16) # STORED per key
     master_key = derive_key_from_master(master_password, salt) # STORED per franchise
     assert len(master_key) * 8 == 256
-    
+
     secret = "this is my secret. shhhh" # to be encrypted
     test = encrypt_field(master_key, secret) # STORED
-    
+
     print(f"Master PW plaintext: {master_password}")
     print(f"Master Key: {master_key.hex()}")
     print(f"Secret plaintext: {secret}")
     print(f"Encrypted secret: {test.hex()}")
-    
+
     u_password = input("Enter password:")
     kek = derive_key_from_master(u_password, salt)
     try:
         decrypted = decrypt_field(kek, test)
+        if decrypted is not None:
+            print(decrypted.decode('utf-8'))
     except InvalidTag:
         print("Incorrect password (or corrupted data)!")
         exit(1)
-    print(decrypted.decode('utf-8'))
-    
-    
-from typing import Any, List, Dict
+
+
+
+from typing import Any
 def filter_group(group: list[Any], key: str | None, value, include=True) -> list[Any]:
     """
     Filters a list of dictionaries by a particular key - value pair.
@@ -320,11 +319,11 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
     if key is not None:
         key_check = lambda group: key in group.keys()
     else: key_check = lambda _: True
-    
+
     if include:
         value_check = lambda group: group[key] == value
     else: value_check = lambda group: group[key] != value
-    
+
     filtered = []
     for obj in group:
         if isinstance(obj, AppObject): # we can filter app objects by treating them as dictionaries
@@ -332,7 +331,7 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
         else: _obj = obj
         if key_check(_obj) and value_check(_obj):
             filtered.append(obj)
-        
+
     return filtered
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ def send_notification_to_slack(
 
         try:
             response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
-        except RequestException as e:
+        except RequestException:
             status = response.status_code
             details = (response.text or "").strip()
             if details:

@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 def process_grades(input_path: Path, output_path: Path):

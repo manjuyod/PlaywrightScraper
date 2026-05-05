@@ -1,16 +1,10 @@
 from __future__ import annotations
-
-import re
-from datetime import datetime, timedelta  # ← added timedelta
-from typing import Any, Dict, List, Optional, Tuple
-
-from bs4 import BeautifulSoup
-from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential)
+from typing import Any, Dict, Optional
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
 from scraper.portals.infinite_campus import InfiniteCampus
-from .utils import *
+from .utils import universal_login_flow, wait_after_nav
 
 # TODO: Uses Infinite Campus after RapidIdentity; you can remove those pieces later if not needed.
 @register_portal("classlink")
@@ -40,7 +34,7 @@ class Classlink(PortalEngine):
             await self.page.goto(url=self.alt_portal_url, wait_until="domcontentloaded")
             if 'infinitecampus' in self.alt_portal_url:
                 # nav to infinite campus portal
-                async with self.page.expect_navigation(url='**/nav-wrapper/student/portal/student/**', wait_until="domcontentloaded", timeout=0) as popup:
+                async with self.page.expect_navigation(url='**/nav-wrapper/student/portal/student/**', wait_until="domcontentloaded", timeout=0) as _:
                     await self.page.locator('#samlLoginLink').click()
 
         except Exception as e:

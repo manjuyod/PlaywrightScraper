@@ -1,7 +1,6 @@
 import json
 import pandas as pd
 from pathlib import Path
-import os
 
 def convert_to_excel(input_path: Path, output_path: Path, sheet_name: str):
     """

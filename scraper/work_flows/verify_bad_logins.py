@@ -1,17 +1,16 @@
 import argparse
 import asyncio
-from dataclasses import asdict
-from scraper.runner import bad_login, _load_student_auth_map, get_students_from_db
-from db import get_students, filter_group, db_conn
-from scraper.portals import get_portal, LoginError
+from scraper.runner import _load_student_auth_map
+from db import filter_group, db_conn
+import db
+
+from scraper.portals import get_portal
 
 # IMPORTANT:
 # Import runner so the same environment/bootstrap side effects happen
 # as in the workflows that already work.
 import scraper.runner  # noqa: F401
-
-from db import get_students, filter_group, db_conn
-from scraper.portals import get_portal
+_ = scraper.runner  # silence unused import warning
 from playwright.async_api import Browser, async_playwright
 
 async def test_login(browser: Browser, student: dict):
@@ -37,7 +36,7 @@ async def verify_login(browser: Browser, student: dict) -> bool:
             student["p1username"],
             student["p1password"],
             student_name=student.get("firstname"),
-            login_url=student.get("portal1"),
+            login_url=student["portal1"],
             alt_portal_url=student.get("portal2"),
         )
 

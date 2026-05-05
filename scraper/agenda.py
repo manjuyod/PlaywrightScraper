@@ -1,12 +1,13 @@
 import asyncio
 import queue
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright, Playwright, BrowserContext
+from playwright.async_api import async_playwright, BrowserContext
 
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.runner import get_students_from_db, get_portal, db_conn
 from db import filter_group
 import json
+from typing import Literal
 
 load_dotenv()
 async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
@@ -90,17 +91,17 @@ async def main(
             except Exception:
                 agenda = {}
             print(f"Agenda collected for student {student['student_name']}: {agenda}")
-            # add the agenda to the student in the database
-            with db_conn() as conn:
+            
+            with db_conn() as conn: # add the agenda to the student in the database
                 cur = conn.cursor()
                 cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
             print(f"Agenda saved for student {student['student_name']}")
 
-            if state:
+            if state and state_q:
                 state.next_step()
                 state_q.put((job_id, state))
 
-        if state:
+        if state and state_q:
             state.next_step()
             state_q.put((job_id, state))
 

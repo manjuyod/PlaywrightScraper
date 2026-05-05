@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+ # -*- coding: utf-8 -*-
 # builtins
 import argparse
 import asyncio
@@ -19,7 +19,7 @@ import psycopg2 as pg
 from dotenv import load_dotenv
 
 # external
-from playwright.async_api import Browser, Playwright, async_playwright
+from playwright.async_api import Browser, async_playwright
 from psycopg2.extensions import connection
 from psycopg2.extras import DictCursor
 
@@ -77,7 +77,7 @@ def get_students_from_db(
     student_id: int | None = None,
     portal: str | None = None,
     status: str | None = None,
-    allow_bad_logins: bool = False,
+    # allow_bad_logins: bool = False,
 ):
     """Return a list of student dicts to scrape.
 
@@ -102,14 +102,14 @@ def get_students_from_db(
                 FROM Student
             """
             conditions = [
-                # "PasswordGood = 1",
+                "PasswordGood = 1",
                 "(YearStart IS NULL OR YearStart = '' OR date(YearStart) <= CURRENT_DATE)",
                 "(YearEnd IS NULL OR YearEnd = '' OR CURRENT_DATE <= date(YearEnd))",
             ]
             params: list = []
 
-            if not allow_bad_logins:
-                conditions.append("PasswordGood = 1")
+            # if not allow_bad_logins:
+            #     conditions.append("PasswordGood = 1")
 
             # IMPORTANT: do NOT filter by portal in SQL; we filter in Python post-detection.
             if student_id is not None:
@@ -345,7 +345,8 @@ async def main(
         label += f", portal={portal}"
     print(f"Found {len(student_list)} students to scrape ({label}).", flush=True)
 
-    if job_id:
+    if job_id and state_q:
+        # assert state_q is not None, "state_q must be provided if job_id is provided"
         from ui.ext_jobs import JobState # import here to avoid circular imports
         state = JobState(total=len(student_list), steps=len(student_list) + 2)
         state.next_step()
@@ -373,7 +374,7 @@ async def main(
                     # increment success count
                     portal_success[student.get("portal")] += 1
                     # push state update
-                    if state:
+                    if state and state_q:
                         state.next_step()
                         state_q.put((job_id, state))
                     print(f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]", flush=True)
@@ -432,7 +433,7 @@ async def main(
     results_log.replace("'", "")
     results_log.replace("\\n", "")
 
-    if state:
+    if state and state_q:
         state.next_step()
         state_q.put((job_id, state))
 

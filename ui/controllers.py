@@ -1,6 +1,5 @@
-from db import CourseGrade, Standing, Student
+from db import CourseGrade, Standing, Student, DictRow
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
 
 # # Route helpers

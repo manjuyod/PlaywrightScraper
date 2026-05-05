@@ -8,13 +8,13 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Literal
 from urllib.parse import urlparse, urljoin
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from playwright.async_api import Page, TimeoutError
+from playwright.async_api import TimeoutError
 
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal, LoginError
-from .utils import *
+from .utils import exists, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
 
 
 # --------------------- utilities ---------------------
@@ -464,7 +464,8 @@ class CanvasEngine(PortalEngine):
                 continue
             print("Canvas: Grade found", grade_str)
             grade = canonicalize_grade(grade_str)
-            parsed[course] = grade
+            if grade:
+                parsed[course] = grade
 
         return parsed
 
@@ -669,7 +670,7 @@ class CanvasEngine(PortalEngine):
             for i, day_block in enumerate(all_days):
                 if i > 7:
                     break
-
+                assert isinstance(day_block, Tag)
                 today_reached = today_passed
                 date_elem = day_block.select_one('[data-testid="today-date"]')
 
