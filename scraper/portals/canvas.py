@@ -368,24 +368,24 @@ class CanvasEngine(PortalEngine):
             google_callback=self.google_login,
         )
 
-    async def post_login(self):
-        # handle student view popup
-        student_tour = await exists(self.page.get_by_text('Student Tour'))
-        if student_tour:
-            not_now_button = self.page.get_by_role('button', name='Not Now')
-            await not_now_button.click()
-            done_button = self.page.get_by_role('button', name='Done')
-            if await exists(done_button):
-                await done_button.click()
+    # async def post_login(self):
+    #     # handle student view popup
+    #     student_tour = await exists(self.page.get_by_text('Student Tour'))
+    #     if student_tour:
+    #         not_now_button = self.page.get_by_role('button', name='Not Now')
+    #         await not_now_button.click()
+    #         done_button = self.page.get_by_role('button', name='Done')
+    #         if await exists(done_button):
+    #             await done_button.click()
 
-        # ensure we are on list view
-        show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
-        if await show_grades_button.count() == 0: # no show grades button, switch to list view
-            await self.page.locator('[data-testid="dashboard-options-button"]').click()
-            await self.page.locator('[data-testid="list-view-menu-item"]').click()
+    #     # ensure we are on list view
+    #     show_grades_button = self.page.locator('[data-testid="show-my-grades-button"]')
+    #     if await show_grades_button.count() == 0: # no show grades button, switch to list view
+    #         await self.page.locator('[data-testid="dashboard-options-button"]').click()
+    #         await self.page.locator('[data-testid="list-view-menu-item"]').click()
 
-            await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
-            await self.page.wait_for_timeout(1500)
+    #         await self.page.wait_for_selector('[data-testid="show-my-grades-button"]')
+    #         await self.page.wait_for_timeout(1500)
 
     # ----------------- grades scraping -----------------
 

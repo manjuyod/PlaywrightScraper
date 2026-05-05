@@ -69,11 +69,13 @@ class GPS(PortalEngine):
             images_alts = await self.page.eval_on_selector_all(
                 ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
             )
-            print("Page images: ", images_alts)
-            print("Auth images: ", self.auth_images)
-            user_match = next(
-                (image for image in self.auth_images if image in images_alts), None
-            )
+            
+            user_match = None
+            for alt in images_alts:
+                print(f"Checking if {alt} in {self.auth_images}")
+                if alt in self.auth_images:
+                    user_match = alt
+                    break
             if not user_match:
                 raise RuntimeError(
                     f"No pictograph match found in {images_alts} for {self.auth_images}"

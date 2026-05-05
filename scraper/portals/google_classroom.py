@@ -1,11 +1,12 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from bs4 import BeautifulSoup
+from datetime import datetime, date, time
+# from bs4 import BeautifulSoup
 
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal, get_portal
-from .utils import *
+from .utils import exists, wait_after_nav, reconcile_day_time, grades_table_to_dict, get_portal_key_from_url
 
 @register_portal("google_classroom")
 class GoogleClassroom(PortalEngine):
@@ -110,11 +111,12 @@ class GoogleClassroom(PortalEngine):
                 if not agenda.get(due_date):
                     agenda[due_date] = [(course, title, due_time)]
                 else: agenda[due_date].append((course, title, due_time))
-            return agenda
+            # return agenda
         except Exception as e:
             import traceback
             print(e)
             traceback.print_exc()
+        return agenda
 
     async def fetch_grades(self) -> Dict[str, Any]:
         try:

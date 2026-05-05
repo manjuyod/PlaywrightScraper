@@ -50,6 +50,69 @@ def compute_student_report(student: Student) -> Student:
     student.standing = get_student_standing(sorted_grades)
     return student
 
+# health helper
+
+"""
+Accepts a list of active students from a franchise franchise and returns a report of the update/sync status, 
+including error counts and common error types.
+    This is used to monitor the health of the scraper and identify common issues.
+"""
+def check_students_status(students: list[DictRow]) -> dict:
+    synced = 0
+    total = len(students)
+    errors = []
+    error_groups: dict[str, int] = {}
+    malformed_inputs = 0
+    nonconfigured_portals = 0
+    bad_logins = 0
+    for student in students:
+        # check if the student is synced
+        if Student.check_status(student):
+            synced += 1
+        # check for errors
+        error = Student.check_error(student)
+        assert isinstance(error, str)
+        if len(error) > 0:
+            errors.append(error)
+            error_groups[error] = error_groups.get(error, 0) + 1
+        # check for bad logins
+        if student.get('passwordgood') == 0:
+            bad_logins += 1
+        # check for malformed inputs (missing portal or credentials)
+        if (
+            not student.get('portal1') 
+            or not student.get('p1username') 
+            or not student.get('p1password')
+        ): malformed_inputs += 1
+        # check for nonconfigured portals (portal specified but not configured in scraper)
+        if (
+            student.get('portal1') is not None and
+            student.get('portal') is None
+        ): nonconfigured_portals += 1
+
+    grouped_errors = sorted(
+        (
+            {"label": label, "count": count}
+            for label, count in error_groups.items()
+        ),
+        key=lambda entry: entry["count"],
+        reverse=True,
+    )
+
+
+    return {
+        "synced": synced,
+        "total": total,
+        "errors": errors,
+        "error_count": len(errors),
+        "error_groups": grouped_errors,
+        "malformed_inputs": malformed_inputs,
+        "nonconfigured_portals": nonconfigured_portals,
+        "last_updated": 'n/a',
+        "bad_logins": bad_logins,
+    }
+    
+"""unused as of now"""
 def create_grade_line_graph(student: Student):
     name = student.first_name + ' ' + student.last_name
     df = pd.DataFrame(student.grades).T

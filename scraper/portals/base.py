@@ -25,10 +25,9 @@ class PortalEngine(ABC):
 
     @abstractmethod
     async def fetch_grades(self) -> Dict[str, Any]: ...
-
-    async def get_agenda(self, **kwargs: Any):
-        pass
-
+    
+    async def get_agenda(self, get: Literal["upcoming", "missing"]) -> Dict[str, Any]: ...  # only implement if the portal has an agenda page, otherwise this will be inherited as a method that raises NotImplementedError
+        
     # optional shared helpers ↓
     async def wait(self, selector: str, timeout: int = 15_000) -> None:
         await self.page.locator(selector).wait_for(state="visible", timeout=timeout)

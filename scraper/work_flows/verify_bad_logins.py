@@ -49,7 +49,7 @@ async def verify_login(browser: Browser, student: dict) -> bool:
 
     except Exception as e:
         print(
-            f"[verify_bad_logins] Error logging in student ID={student['db_id']}: {e}",
+            f"[verify_bad_logins] Error logging in student ID={student['db_id']}: {type(e)}: {e.args}",
             flush=True,
         )
         return False
@@ -86,23 +86,31 @@ def parse_args():
     parser.add_argument(
         "--debug",
         action="store_true",
+        default=True,
         help="Run browser in headed mode.",
     )
     return parser.parse_args()
 
 
-async def main(franchise_id: int | None = None, debug: bool = False):
+async def main(debug: bool, franchise_id: int | None = None):
     print(
         f"[verify_bad_logins] main(): franchise_id={franchise_id}, debug={debug}",
         flush=True,
     )
-
-    students: list[dict] = get_students(franchise_id=franchise_id, bare=True)
+    
+    if franchise_id is not None:
+        students = db.get_students(franchise_id, raw=True)
+    else: students = db.get_students(raw=True)
+    
     students = filter_group(students, key="passwordgood", value=0)
     students = filter_group(students, key="status", value="error")
 
     print(f"[verify_bad_logins] Found {len(students)} students to verify.", flush=True)
-
+    auth_map = None
+    if len(filter_group(students, key="portal", value="gps")) > 0:
+        with db_conn() as conn:
+            auth_map = _load_student_auth_map(conn)
+    
     async with async_playwright() as p:
         browser_args = [
             "--disable-blink-features=AutomationControlled",
@@ -115,8 +123,11 @@ async def main(franchise_id: int | None = None, debug: bool = False):
         try:
             for student in students:
                 student = dict(student)
+                if student["portal"] == "gps":
+                    assert auth_map is not None, "Auth map is required for GPS students but was not loaded."
+                    student["auth_images"] = auth_map[student["id"]]["answers"]
+                    
                 student["db_id"] = student.pop("id")
-
                 print(
                     f"[verify_bad_logins] Verifying student ID={student['db_id']} "
                     f"PasswordGood={student['passwordgood']}",
@@ -135,8 +146,6 @@ async def main(franchise_id: int | None = None, debug: bool = False):
         finally:
             await browser.close()
 
-
-argparse = __import__("argparse")
 if __name__ == "__main__":
     args = parse_args()
     print(

@@ -21,16 +21,16 @@ def db_conn() -> connection:
         sslmode='require'
     )
 
-def fetch(query: str) -> Optional[list]:
+def fetch(query: str, params: tuple = ()) -> Optional[list[DictRow]]:
     with db_conn() as conn:
         cur = conn.cursor(cursor_factory=DictCursor)
-        cur.execute(query)
+        cur.execute(query, params)
         return cur.fetchall()
 
-def fetchone(query: str, one=False) -> Optional[dict]:
+def fetchone(query: str, params: tuple = ()) -> Optional[DictRow]:
     with db_conn() as conn:
         cur = conn.cursor(cursor_factory=DictCursor)
-        cur.execute(query)
+        cur.execute(query, params)
         return cur.fetchone()
 
 # # Data Types used within the app
@@ -68,9 +68,17 @@ class Student(AppObject):
     low_grades: list[CourseGrade] | None = None
     high_grades: list[CourseGrade] | None = None
     standing: Standing | None = None
+    @staticmethod
+    def check_status(db_student: DictRow) -> bool:
+        return db_student.get('status') == 'synced'
 
     @staticmethod
-    def create(db_student: dict):
+    def check_error(db_student: DictRow) -> str:
+        err = db_student.get("error_msg", "")
+        return err if err else "" # if error_msg is None or len(error_msg) == 0, return empty string
+
+    @staticmethod
+    def create(db_student: dict | DictRow):
         # pprint.pprint(db_student)
         grades_json = db_student.get('weeklydata', '{}')
         if isinstance(grades_json, dict):
@@ -106,22 +114,29 @@ class Student(AppObject):
             grades=grades,
             agenda=agenda
         )
-def get_student(student_id: int) -> Student:
-    query = f"SELECT * FROM student WHERE id = {student_id}"
-    db_student = fetchone(query)
+def get_student(student_id: int, *, raw: bool = False) -> Student:
+    query = "SELECT * FROM student WHERE id = %s"
+    db_student = fetchone(query, (student_id,))
     if db_student is None:
-        raise ValueError(f"Student with ID {student_id} not found.")    
+        raise ValueError(f"Student with ID {student_id} not found.")
+    
     student = Student.create(db_student)
     return student
 
-def get_students(franchise_id: int | None = None) -> list[Student]:
-    print("fetching students for franchise ID:", franchise_id)
-    query = "SELECT * FROM student"
-    students = fetch(query)
-    assert students is not None
+
+def get_students(franchise_id: Optional[int] = None, *, raw: bool = False) -> list[Student] | list[DictRow]:
+    query = "SELECT * FROM student"  
     if franchise_id is not None:
-        students = filter_group(students, 'franchiseid', franchise_id)
-    return [Student.create(student) for student in students]
+        cond = "WHERE franchiseid = %s"
+        query += " " + cond
+        params = (franchise_id,)
+    else: params = ()
+    
+    db_students = fetch(query, params)
+    if db_students is None:
+        raise ValueError(f"No students found for franchise ID {franchise_id}.")
+        
+    return db_students if raw else [Student.create(db_student) for db_student in db_students]
 
 def add_student(fid: int, student: Student, master_key: bytes):
     # INSERT
@@ -158,13 +173,16 @@ def add_student(fid: int, student: Student, master_key: bytes):
         conn.commit()
 
     # get the last rowid and return the new student
-    db_id = cur.fetchone()[0]
+    maybe_db_id = cur.fetchone()
+    if maybe_db_id is None:
+        raise ValueError("Failed to create student.")
+    db_id = maybe_db_id[0]
     return get_student(db_id)
 
 def update_student(student_id: int, student: Student, master_key: bytes):
     portal = get_portal_key_from_url(student.portal_url)
     query = """
-            UPDATE Student SET 
+            UPDATE Student SET
                 firstname = %s, lastname = %s, grade = %s,
                 portal1 = %s, p1username = %s, p1password = %s, portal = %s,
                 portal2 = %s, p2username = %s, p2password = %s
@@ -189,12 +207,13 @@ def update_student(student_id: int, student: Student, master_key: bytes):
         conn.commit()
 
 def delete_students(student_ids: list[int], master_key: bytes | None = None):
+    if not master_key:
+        return
     if not student_ids:
         return
     with db_conn() as conn:
         cur = conn.cursor()
-        format_strings = ','.join(['%s'] * len(student_ids))
-        cur.execute(f"DELETE FROM student WHERE id IN ({format_strings})", tuple(student_ids))
+        cur.execute("DELETE FROM student WHERE id IN (%s)", tuple(student_ids))
         conn.commit()
         print(f"Deleted students {student_ids}")
 
@@ -204,6 +223,17 @@ def get_active_franchises() -> list[DictRow]:
     return franchises if franchises is not None else []
 
 
+# health checks
+def check_db_connection() -> bool:
+    try:
+        with db_conn() as _:
+            return True
+    except Exception as e:
+        print("Database connection failed:", e)
+        return False
+
+# Passwords, hashing and encryption
+from argon2.low_level import hash_secret_raw, Type
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
 VERSION = b"\x01" # denotes the version of the encryption scheme
@@ -224,6 +254,7 @@ def derive_key_from_master(password: str, salt: bytes = SALT) -> bytes:
         hash_len=32, # 256 bits for AES-256
         type=Type.ID
     )
+    
 def encrypt_field(key: bytes, plaintext: str, aad: bytes = b"") -> bytes:
     """
     Encrypts a string using AES-GCM with random nonce.
@@ -254,12 +285,11 @@ def verify_master_password(franchise_id: int, master_password: str) -> bytes | N
     in the franchise. Returns the DEK if successful, else None.
     """
     dek = derive_key_from_master(master_password)
-    students = get_students(franchise_id)
+    students = get_students(franchise_id, raw=True)
+
     if not students: return dek
-    
+
     student_pass = None
-    # i = 0
-    # while student_pass is None and i < len(students):
     # Try decrypting the password of each student until we find one that works (or run out of students) 
     student = students[0]
     assert isinstance(student, Student)
@@ -336,8 +366,3 @@ def filter_group(group: list[Any], key: str | None, value, include=True) -> list
 
 if __name__ == "__main__":
     test_encryption()
-    
-    
-    
-    
-    

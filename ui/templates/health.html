@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Health Check</title>
+        <style>
+            :root {
+                color-scheme: light;
+                --bg: #f6f7fb;
+                --panel: #ffffff;
+                --border: #e5e7eb;
+                --text: #0f172a;
+                --muted: #64748b;
+                --accent: #2563eb;
+                --danger: #dc2626;
+                --warning: #f59e0b;
+                --success: #16a34a;
+                --shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                font-family:
+                    "Inter",
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    sans-serif;
+                font-size: 16px;
+                background: var(--bg);
+                color: var(--text);
+            }
+
+            .page {
+                display: grid;
+                grid-template-columns: 280px 1fr;
+                min-height: 100vh;
+            }
+
+            .sidebar {
+                padding: 24px;
+                background: var(--panel);
+                border-right: 1px solid var(--border);
+            }
+
+            .sidebar h2 {
+                margin: 0 0 12px 0;
+                font-size: 1.1rem;
+            }
+
+            .sidebar .section {
+                margin-bottom: 24px;
+            }
+
+            .job {
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 12px;
+                margin-bottom: 12px;
+                background: #f9fafb;
+            }
+
+            .job-title {
+                font-weight: 600;
+            }
+
+            .job-meta {
+                color: var(--muted);
+                font-size: 0.95rem;
+                margin-top: 6px;
+            }
+
+            .content {
+                padding: 28px 32px 48px;
+            }
+
+            .header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 24px;
+            }
+
+            .header h1 {
+                margin: 0;
+                font-size: 1.8rem;
+            }
+
+            .count-pill {
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 999px;
+                padding: 8px 16px;
+                font-weight: 600;
+                box-shadow: var(--shadow);
+            }
+
+            .franchise-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 16px;
+            }
+
+            .card {
+                position: relative;
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 16px;
+                padding: 16px;
+                box-shadow: var(--shadow);
+                transition:
+                    transform 0.15s ease,
+                    box-shadow 0.15s ease,
+                    border-color 0.15s ease;
+            }
+
+            .card:hover {
+                transform: translateY(-2px);
+                border-color: rgba(37, 99, 235, 0.4);
+                box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+            }
+
+            .card-link {
+                position: absolute;
+                inset: 0;
+                border-radius: 16px;
+                z-index: 1;
+                text-decoration: none;
+                color: inherit;
+                display: block;
+            }
+
+            .card-link:focus-visible {
+                outline: 3px solid rgba(37, 99, 235, 0.5);
+                outline-offset: 2px;
+            }
+
+            .card-content {
+                position: relative;
+                z-index: 2;
+                pointer-events: none;
+            }
+
+            .card-content .error-details {
+                pointer-events: auto;
+                position: relative;
+                z-index: 3;
+            }
+
+            .card h3 {
+                margin: 0 0 8px 0;
+                font-size: 1.2rem;
+            }
+
+            .stat-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-top: 8px;
+            }
+
+            .stat-label {
+                color: var(--muted);
+                font-size: 0.95rem;
+            }
+
+            .stat-value {
+                font-weight: 600;
+            }
+
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 10px;
+                border-radius: 999px;
+                font-size: 0.8rem;
+                font-weight: 600;
+            }
+
+            .badge.success {
+                background: rgba(22, 163, 74, 0.15);
+                color: var(--success);
+            }
+            .badge.warning {
+                background: rgba(245, 158, 11, 0.2);
+                color: var(--warning);
+            }
+            .badge.danger {
+                background: rgba(220, 38, 38, 0.15);
+                color: var(--danger);
+            }
+
+            .error-details {
+                margin-top: 10px;
+            }
+
+            .error-details summary {
+                cursor: pointer;
+                color: var(--danger);
+                font-weight: 600;
+                font-size: 0.85rem;
+            }
+
+            .error-group-list {
+                margin: 8px 0 0;
+                padding: 0;
+                list-style: none;
+                display: grid;
+                gap: 6px;
+                max-height: 140px;
+                overflow-y: auto;
+            }
+
+            .error-group-item {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+            }
+
+            .error-count {
+                background: rgba(220, 38, 38, 0.15);
+                color: var(--danger);
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 0.75rem;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+
+            .error-label {
+                color: var(--danger);
+                font-size: 0.85rem;
+                word-break: break-word;
+            }
+
+            .footer-note {
+                margin-top: 24px;
+                color: var(--muted);
+                font-size: 0.85rem;
+            }
+
+            @media (max-width: 900px) {
+                .page {
+                    grid-template-columns: 1fr;
+                }
+
+                .sidebar {
+                    border-right: none;
+                    border-bottom: 1px solid var(--border);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <aside class="sidebar">
+                <div class="section">
+                    <h2>Active Jobs</h2>
+                    {% if jobs %} {% for job_id, job in jobs.items() %}
+                    <div class="job">
+                        <div class="job-title">Job {{ job_id }}</div>
+                        <div class="job-meta">
+                            {% if job is mapping %} {% if job.total is defined
+                            %}Total: {{ job.total }}{% endif %} {% if job.step
+                            is defined %} · Step: {{ job.step }}{% endif %} {%
+                            if job.steps is defined %} / {{ job.steps }}{% endif
+                            %} {% if job.pct is defined %} · {{ job.pct }}%{%
+                            endif %} {% else %} {{ job }} {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %} {% else %}
+                    <p class="job-meta">No active jobs.</p>
+                    {% endif %}
+                </div>
+            </aside>
+
+            <main class="content">
+                <div class="header">
+                    <h1>Health Check</h1>
+                    <div class="count-pill">
+                        Active students: {{ count_all }} · Synced: {{
+                        count_synced }} · Bad logins: {{ count_bad_logins }}
+                    </div>
+                </div>
+
+                <div class="franchise-grid">
+                    {% for franchise in health %}
+                    <div class="card">
+                        <a
+                            class="card-link"
+                            href="{{ url_for('franchise_view', franchise_id=franchise.id) }}"
+                            aria-label="Open franchise {{ franchise.id }}"
+                        ></a>
+                        <div class="card-content">
+                            <h3>Franchise {{ franchise.id }}</h3>
+
+                            <div class="stat-row">
+                                <span class="stat-label">Synced students</span>
+                                <span class="stat-value"
+                                    >{{ franchise.synced }} / {{ franchise.total
+                                    }}</span
+                                >
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Malformed inputs</span>
+                                <span class="stat-value">
+                                    {% if franchise.malformed_inputs and
+                                    franchise.malformed_inputs > 0 %}
+                                    <span class="badge warning"
+                                        >{{ franchise.malformed_inputs }}</span
+                                    >
+                                    {% else %}0{% endif %}
+                                </span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label"
+                                    >Nonconfigured portals</span
+                                >
+                                <span class="stat-value">
+                                    {% if franchise.nonconfigured_portals and
+                                    franchise.nonconfigured_portals > 0 %}
+                                    <span class="badge warning"
+                                        >{{ franchise.nonconfigured_portals
+                                        }}</span
+                                    >
+                                    {% else %}0{% endif %}
+                                </span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Bad logins</span>
+                                <span class="stat-value">
+                                    {% if franchise.bad_logins and
+                                    franchise.bad_logins > 0 %}
+                                    <span class="badge warning"
+                                        >{{ franchise.bad_logins }}</span
+                                    >
+                                    {% else %}0{% endif %}
+                                </span>
+                            </div>
+
+                            <div class="stat-row">
+                                <span class="stat-label">Last updated</span>
+                                <span class="stat-value"
+                                    >{{ franchise.last_updated }}</span
+                                >
+                            </div>
+
+                            <div class="stat-row">
+                                <span class="stat-label">Errors</span>
+                                {% if franchise.error_count and
+                                franchise.error_count > 0 %}
+                                <span class="badge danger"
+                                    >{{ franchise.error_count }} active</span
+                                >
+                                {% else %}
+                                <span class="badge success">None</span>
+                                {% endif %}
+                            </div>
+                            {% if franchise.error_groups and
+                            franchise.error_groups|length > 0 %}
+                            <details class="error-details">
+                                <summary>
+                                    Grouped errors ({{
+                                    franchise.error_groups|length }})
+                                </summary>
+                                <ul class="error-group-list">
+                                    {% for group in franchise.error_groups %}
+                                    <li class="error-group-item">
+                                        <span class="error-count"
+                                            >{{ group.count }}x</span
+                                        >
+                                        <span class="error-label"
+                                            >{{ group.label }}</span
+                                        >
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </details>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% endfor %}
+                </div>
+            </main>
+        </div>
+    </body>
+</html>

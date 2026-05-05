@@ -1,6 +1,10 @@
 """
 For running external jobs.
-Just the scraper for now
+Updates student grades or agendas by running the scraper in a separate thread and tracking progress with a shared JobState object. 
+
+The scraper will report progress by putting updated JobState objects into a queue, 
+    which are then consumed by a long-running state consumer thread that updates the main jobs dictionary. 
+    This allows the UI to query job status and determine completion percentage.
 """
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -27,7 +31,7 @@ class JobState:
             if self.step > self.steps:
                 self.step = -1
 
-executor = ThreadPoolExecutor(max_workers=10)
+executor = ThreadPoolExecutor(max_workers=3)
 
 jobs: dict[str, JobState] = {}
 runners: dict[str, Future] = {}
@@ -46,7 +50,7 @@ def run_coro(coro):
 def start_grade_fetch_job(job_id: str, total: int) -> str:
     print(f"Starting scraper for job {job_id}")
     # franchise_id
-    NONGOAL_STEPS = 3
+    NONGOAL_STEPS = 3 # login, scrape, insert (these steps are not tracked by the scraper but we want to account for them in progress)
     total_steps = total + NONGOAL_STEPS
     print(total_steps, "steps total", total, "students")
     jobs[job_id] = JobState(total=total, steps=total_steps)
@@ -58,8 +62,10 @@ def start_grade_fetch_job(job_id: str, total: int) -> str:
     runners[job_id] = fut
 
     def _cleanup(_f: Future): # grade fetch done
-        print("Runner cancelled?", runners.get(job_id, None).cancelled())
-        print("Runner errored?", runners.get(job_id, None).exception())
+        job = runners.get(job_id, None)
+        assert job is not None
+        print("Runner cancelled?", job.cancelled())
+        print("Runner errored?", job.exception())
         runners.pop(job_id, None)
         insert_grades()
         jobs[job_id].next_step()
@@ -93,14 +99,15 @@ def start_agenda_fetch_job(job_id: str, total: int) -> str:
     runners[job_id] = fut
 
     def _cleanup(_f: Future):
-        print("Runner cancelled?", runners.get(job_id, None).cancelled())
-        print("Runner errored?", runners.get(job_id, None).exception())
+        job = runners.get(job_id, None)
+        assert job is not None
+        print("Runner cancelled?", job.cancelled())
+        print("Runner errored?", job.exception())
         runners.pop(job_id, None)
         jobs[job_id].next_step()
         print(
             f"Agenda scraper for job {job_id} done. {jobs[job_id].step} / {jobs[job_id].steps} steps completed."
         )
-
     fut.add_done_callback(_cleanup)
     return job_id
 

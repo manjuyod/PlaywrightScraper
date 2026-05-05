@@ -10,21 +10,21 @@ import json
 from typing import Literal
 
 load_dotenv()
-async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
+async def fetch_agenda(ctx: BrowserContext, student: dict, target: Literal["upcoming", "missing"]) -> tuple[dict, dict]: # maybe make this just a db id (int)
     # logins for canvas and google classroom are stored in the alternate fields, unless the students main login is canvas
     page = await ctx.new_page()
-    grade_portal = student.get("portal")
-    if grade_portal == 'canvas':
-        login_url = student.get("login_url")
-        sid = student.get("id")
-        password = student.get("password")
+    if student["portal"] == 'canvas':
+        login_url = student["login_url"]
+        sid = student["id"]
+        password = student["password"]
     else:
-        login_url = student.get("alt_login_url")
-        sid = student.get("alt_id")
-        password = student.get("alt_password")
+        login_url = student["alt_login_url"]
+        sid = student["alt_id"]
+        password = student["alt_password"]
 
     portal = get_portal_key_from_url(login_url)
-
+    assert portal in ("canvas", "google_classroom"), f"Portal {portal} not supported for agenda collection"
+    
     Engine = get_portal(portal)
     scraper = Engine(
         page,
@@ -40,15 +40,14 @@ async def fetch_agenda(ctx: BrowserContext, student: dict) -> dict:
     # Only GPS uses pictograph answers
     if student.get("auth_images") and student["portal"] == "gps":
         setattr(scraper, "auth_images", student["auth_images"])
-    agenda = {}
     try:
         print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
             print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
-            return await scraper.get_agenda() # this method should only exist on Canvas and Google Classroom
+            return await scraper.get_agenda(get=target), student
         except:
-            return {}
+            return {}, student
     finally:
         await page.close()
 
@@ -58,6 +57,7 @@ async def main(
     student_id: int | None,
     job_id: str | None = None,
     state_q: queue.Queue | None = None,
+    target: Literal["upcoming", "missing"] = "upcoming"
 ):
     _students = get_students_from_db(student_id=student_id, franchise_id=franchise_id)
     students = filter_group(_students, 'track_agenda', True)
@@ -78,18 +78,19 @@ async def main(
         context = await browser.new_context()
         context.set_default_timeout(5_000)
         context.set_default_navigation_timeout(5_000)
-
+        
         tasks = {
-            asyncio.create_task(fetch_agenda(context, student)): student
+            asyncio.create_task(fetch_agenda(context, student, target)): student
             for student in students
         }
 
         for task in asyncio.as_completed(tasks):
-            student = tasks[task]
-            try:
-                agenda = await task
-            except Exception:
-                agenda = {}
+            agenda, student = await task
+            
+            if len(agenda) == 0:
+                print(f"No {target} assignments found for student {student['student_name']} or failed to fetch agenda.")
+                continue
+           
             print(f"Agenda collected for student {student['student_name']}: {agenda}")
             
             with db_conn() as conn: # add the agenda to the student in the database

@@ -1,13 +1,12 @@
 # builtins
 import json
 import pprint
-
+from typing import cast
 # external
 from flask import (
     Response,
     abort,
     flash,
-    jsonify,
     redirect,
     render_template,
     request,
@@ -24,7 +23,7 @@ from ui.app import (
     INTERNAL_KEY,
     add_student_to_session,
     app,
-    dev_bypass,
+    DEV_BYPASS,
     get_students_from_session,
     login_required,
     store_students_in_session,
@@ -32,6 +31,7 @@ from ui.app import (
 )
 from ui.controllers import (
     compute_student_report,
+    check_students_status,
 )
 from ui.ext_jobs import (
     franchise_from_job_id,
@@ -46,7 +46,7 @@ from ui.ext_jobs import (
 # By default, entry is only allowed from the internal key passed by the header
 @app.route("/", methods=["GET", "POST"])
 async def index():
-    if not dev_bypass:  # normal
+    if not DEV_BYPASS:  # normal
         franchise_id = request.headers.get("X-Franchise", type=int)
         key = request.headers.get("X-Internal-Key")
 
@@ -63,18 +63,42 @@ async def index():
         session["authorized"] = True
 
         return redirect(url_for("franchise_view", franchise_id=franchise_id))
-    else:  # dev only
+    else:  # dev only route
         session["authorized"] = True
-        if request.method == "POST":
-            franchise_id = request.form.get("franchise_id", type=int)
-            session["franchise_id"] = franchise_id
-            return redirect(url_for("franchise_view", franchise_id=franchise_id))
-        return render_template("index.html")
+        return redirect(url_for("health"))
 
 
+# A simple health page to show the health of active franchise pages and status of background jobs, and provide a landing page for dev access
 @app.route("/health")
-def health():
-    return jsonify({"status": "healthy"})
+@login_required
+async def health():
+    all_students = db.fetch("select * from student")
+    if not all_students:
+        return "No students found in the database.", 500
+    all_students_ct = len(all_students)
+
+    synced_ct = len(filter_group(all_students, "status", "synced"))
+    bad_login_ct = check_students_status(all_students).get("bad_logins", 0)
+    active_franchises = db.get_active_franchises()
+    health_info: list[dict] = [] # list of dicts per active franchise with keys: id, active_students, synced_students, errors, last_updated
+
+    # count_franchise_students = 0
+    for franchise in active_franchises:
+        fid = franchise["franchiseid"]
+        f_students = filter_group(all_students, "franchiseid", fid)
+        f_health = check_students_status(f_students)
+        f_health["id"] = fid
+        health_info.append(f_health)
+
+    return render_template(
+        "health.html",
+        health=health_info,
+        count_all=all_students_ct,
+        count_synced=synced_ct,
+        count_bad_logins=bad_login_ct,
+        jobs=jobs,
+    )
+
 
 
 @app.route("/franchise/<int:franchise_id>", methods=["GET", "POST"])
@@ -91,6 +115,7 @@ async def franchise_view(franchise_id: int):
 
     if students is None:
         students = db.get_students(franchise_id)
+        students = cast(list[Student], students)
         store_students_in_session(franchise_id, students)
 
     assert students is not None
@@ -123,6 +148,7 @@ async def franchise_view(franchise_id: int):
                 start_agenda_fetch_job(job_id=agenda_job_id, total=len(students))
         # delete
         elif "delete_students" in request.form:
+            # this should also probably gate on dek
             student_ids = request.form.getlist("student_id")
             if student_ids:
                 # print(f"Deleting students: {student_ids}")
@@ -131,10 +157,10 @@ async def franchise_view(franchise_id: int):
             else:
                 flash("No students selected for deletion.")
             return redirect(url_for("index"))
-        else:
+        elif "add_student" in request.form or "edit_student" in request.form:
             # For Add/Edit, we create a student object from the form
             dek = session.get("dek")
-            if not dek:
+            if not dek: # gate on master password for any operation that requires the dek
                 master_password = request.form.get("master_password")
                 if master_password:
                     dek = db.verify_master_password(franchise_id, master_password)
