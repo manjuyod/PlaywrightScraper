@@ -1,10 +1,5 @@
 from __future__ import annotations
-
-import re
-from datetime import datetime, timedelta  # ← added timedelta
-from typing import Any, Dict, List, Optional, Tuple
-
-from bs4 import BeautifulSoup
+from typing import Any, Dict, Optional
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -16,7 +11,7 @@ from scraper.portals.infinite_campus import InfiniteCampus
 
 from . import register_portal
 from .base import PortalEngine
-from .utils import *
+from .utils import universal_login_flow, wait_after_nav, PlaywrightTimeout
 
 
 @register_portal("gps")

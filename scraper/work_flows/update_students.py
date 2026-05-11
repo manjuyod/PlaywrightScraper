@@ -32,6 +32,7 @@ from scraper.runner import db_conn, connection, DictCursor
 from typing import Dict, List
 
 import gspread
+from gspread.utils import ValueRenderOption
 from gspread.cell import Cell
 from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
@@ -141,7 +142,7 @@ def _update_cells_retry(ws: gspread.Worksheet, cells: list[Cell], retries: int =
         chunk = cells[start:start + chunk_size]
         for attempt in range(1, retries + 1):
             try:
-                ws.update_cells(chunk, value_input_option="RAW")
+                ws.update_cells(chunk)
                 break
             except APIError as e:
                 msg = str(e)
@@ -163,6 +164,7 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     print('trying to open sheet')
     sh = _open_by_key_retry(gc, sheet_id)
     print('opened, try to get worksheet')
+    assert sh is not None, f"Failed to open sheet with ID {sheet_id}"
     try:
         ws = sh.worksheet(LOGIN_MASTER_TITLE)
     except gspread.WorksheetNotFound:
@@ -171,7 +173,7 @@ def _read_login_master(gc: gspread.Client, sheet_id: str) -> List[dict]:
     print("collected worksheet")
     # get_all_records() reads the header row and returns list[dict]
     # rows = ws.get_all_records()  # empty cells -> ''
-    values = ws.get_all_values(value_render_option='FORMATTED_VALUE') # this is necessary so that strings are not interpreted as numbers, resulting in the truncation of zeros
+    values = ws.get_all_values(value_render_option=ValueRenderOption.formatted) # this is necessary so that strings are not interpreted as numbers, resulting in the truncation of zeros
     if not values:
         print(f"[WARN] Sheet tab '{LOGIN_MASTER_TITLE}' is empty (id={sheet_id}); parsed 0 rows.")
         return []
@@ -425,7 +427,7 @@ def sync_students(target_fid: int | None = None, *, debug: bool = False) -> None
                     # UPDATE vs SKIP
                     db_row = _fetch_db_row(conn, sid)
                     needs_update = _differs(db_row, sheet_rec)
-                    portal_missing = db_row.get("portal") is None or len(db_row.get("portal")) == 0
+                    portal_missing = db_row.get("portal") is None or len(db_row["portal"]) == 0
                     if needs_update or portal_missing:
                         portal = get_portal_key_from_url(sheet_rec['portal1'])
                         if debug:
