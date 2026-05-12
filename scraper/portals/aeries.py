@@ -3,9 +3,12 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any, Dict, Optional
 
+from bs4 import Tag
+
 from . import register_portal
 from .base import PortalEngine
-from .utils import *
+from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict, canonicalize_course_title, canonicalize_grade, PlaywrightTimeout
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
 @register_portal("aeries")
@@ -178,20 +181,27 @@ class Aeries(PortalEngine):
                 await self.page.reload()
                 courses_dict = {}
 
-                if class_table is not None and len(class_table.select("div.Card")) > 0:
+                if isinstance(class_table, Tag) and len(class_table.select("div.Card")) > 0:
                     class_cards = class_table.select("div.Card")
                     print(f"[AERIES] found {len(class_cards)}")
                     for card in class_cards:
                         class_link = card.find("a", class_="TextHeading")
+                        if class_link is None: 
+                            continue
                         course_name: str = class_link.text.strip()
 
                         grade_div = card.find("div", class_="Grade")
+                        if not isinstance(grade_div, Tag):
+                            continue
                         grade_span = grade_div.find("span")
-                        if grade_span is not None:
-                            grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-                            title = canonicalize_course_title(course_name)
-                            grade = canonicalize_grade(grade_str)
-                            courses_dict[title] = grade
+                        if grade_span is None:
+                            continue
+                        grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
+                        if not grade_str:
+                            continue
+                        title = canonicalize_course_title(course_name)
+                        grade = canonicalize_grade(grade_str)
+                        courses_dict[title] = grade
 
                 import pprint
                 pprint.pprint(courses_dict)

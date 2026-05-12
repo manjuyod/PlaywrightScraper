@@ -500,7 +500,7 @@ def sync_students(target_fid: int | None = None, *, debug: bool = False) -> None
             total_skp += skips
         print(f"[SUMMARY] FID={fid} inserts={inserts} updates={updates} skips={skips} deletes={deletes}")
 
-    print(f"\n=== GRAND TOTALS ===")
+    print("\n=== GRAND TOTALS ===")
     print(f"inserts={total_ins} updates={total_upd} skips={total_skp} deletes={total_del}")
 
 def _parse_args():

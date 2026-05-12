@@ -1,14 +1,8 @@
 # scraper/portals/blackbaud_student_bghs.py
 from __future__ import annotations
-import asyncio
 import logging
-import pathlib
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, Tuple, List
-
-import re
-from bs4 import BeautifulSoup  # type: ignore
-from playwright.async_api import Locator, Page, Error, expect
+from typing import Dict, Any, Optional
+from playwright.async_api import expect
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
     retry_if_exception_type, before_sleep_log
@@ -16,7 +10,7 @@ from tenacity import (
 
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
-from .utils import *
+from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict
 
 logger = logging.getLogger("blackbaud")
 logger.setLevel(logging.INFO)

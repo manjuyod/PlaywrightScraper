@@ -1,7 +1,5 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
-from bs4 import BeautifulSoup
-import re
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -50,7 +48,7 @@ class HowsSchoolGoing(PortalEngine):
         try:
             soup = await self.get_soup()
             course_table = soup.find("div", class_="dataSource_Common_StudentProfile_Grades_GradesTable")
-            courses = course_table.find_all('tr')
+            courses = course_table.find_all('tr') # possible 
             print(f'found {len(courses)} courses')
             for course in courses:
                 columns = course.find_all('td')
