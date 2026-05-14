@@ -48,3 +48,9 @@ tmp
 # OS-specific
 .DS_Store
 Thumbs.db
+.gitnexus
+
+# agentic items as a result of gitnexus
+.claude
+CLAUDE.md
+AGENTS.md
