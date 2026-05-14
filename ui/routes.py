@@ -40,6 +40,7 @@ from ui.ext_jobs import (
     jobs,
     start_agenda_fetch_job,
     start_grade_fetch_job,
+    run_job,
 )
 
 
@@ -107,7 +108,7 @@ async def franchise_view(franchise_id: int):
     """Here we show a list of students for the given franchise.
     Student data is fetched from the database.
     Comprised of the students' first/last name, portal links, most recent grades"""
-
+    session["franchise_id"] = franchise_id
     if not session.get("authorized"):
         return abort(403)
 
@@ -125,27 +126,11 @@ async def franchise_view(franchise_id: int):
     job_id = f"{franchise_id}"
     agenda_job_id = f"{franchise_id}_agenda"
     if request.method == "POST":  # handle db updates
-        # update franchise grades
+        # update franchise grades//agenda
         if "run_scraper" in request.form:
-            if is_running(job_id):
-                print(f"Job {job_id} already running here, or elsewhere.")
-                flash(
-                    "A job is already running for this franchise. Wait for it to finish, then try again."
-                )
-            else:
-                print("Running scraper")
-                flash("Starting grade collection. This may take a few minutes.")
-                start_grade_fetch_job(job_id=job_id, total=len(students))
+            run_job(job_id, len(students), "grade")
         elif "run_agenda" in request.form:
-            if is_running(agenda_job_id):
-                print(f"Job {agenda_job_id} already running here, or elsewhere.")
-                flash(
-                    "An agenda refresh job is already running for this franchise. Wait for it to finish, then try again."
-                )
-            else:
-                print("Running agenda scraper")
-                flash("Starting agenda refresh. This may take a few minutes.")
-                start_agenda_fetch_job(job_id=agenda_job_id, total=len(students))
+            run_job(job_id, len(students), "agenda")
         # delete
         elif "delete_students" in request.form:
             # this should also probably gate on dek

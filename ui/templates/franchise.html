@@ -290,7 +290,8 @@
                             <tr
                                 class="clickable-row"
                                 data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}"
-                                data-name="{{ student.last_name|lower }},{{ student.first_name|lower }}"
+                                data-name="{{ student.first_name|lower }} {{ student.last_name|lower }}"
+                                data-status="{{ student.status|lower if student.status else '' }}"
                                 data-standing="{{ student.standing.value if student.standing else 'z' }}"
                             >
                                 <td
@@ -740,6 +741,7 @@
             function sortTable(col) {
                 const tbody = document.querySelector('#students-table tbody');
                 const rows = Array.from(tbody.querySelectorAll('tr'));
+                const isNever = row => (row.dataset.status || '') === 'never';
 
                 const currentDir = sortState[col];
                 const nextDir = currentDir === 'asc' ? 'desc' : 'asc';
@@ -750,6 +752,9 @@
                 });
 
                 rows.sort((a, b) => {
+                    const aNever = isNever(a);
+                    const bNever = isNever(b);
+                    if (aNever !== bNever) return aNever ? 1 : -1;
                     if (col === 'name') {
                         const aVal = a.dataset.name || '';
                         const bVal = b.dataset.name || '';
@@ -774,6 +779,8 @@
                 document.getElementById('sort-indicator-name').textContent = col === 'name' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
                 document.getElementById('sort-indicator-standing').textContent = col === 'standing' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
             }
+
+            sortTable('name');
 
             const searchInput = document.getElementById('student-search');
             searchInput.addEventListener('input', function () {

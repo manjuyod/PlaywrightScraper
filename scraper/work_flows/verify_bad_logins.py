@@ -86,7 +86,7 @@ def parse_args():
     parser.add_argument(
         "--debug",
         action="store_true",
-        default=True,
+        default=False,
         help="Run browser in headed mode.",
     )
     return parser.parse_args()

@@ -15,6 +15,10 @@ from scraper.runner import main as grade_checker
 from scraper.agenda import main as agenda_checker
 from scraper.work_flows.insert_grades import insert_grades
 from queue import Queue
+
+from flask import flash
+from typing import Literal
+
 @dataclass
 class JobState:
     # structure for a scraper task's progress i.e. update student
@@ -129,3 +133,17 @@ def student_from_job_id(job_id: str) -> int | None:
     if len(parts) == 1:
         return None
     return int(parts[1])
+    
+def run_job(job_id: str, total: int, type: Literal["grade", "agenda"] = "grade"):
+    if is_running(job_id):
+        print(f"Job {job_id} already running here, or elsewhere.")
+        flash(
+            "A job is already running for this franchise. Wait for it to finish, then try again."
+        )
+        return
+    print(f"Running {type} {job_id}")
+    flash(f"Starting {type} collection. This may take a few minutes.")
+    if type == "grade":
+        start_grade_fetch_job(job_id=job_id, total=total)
+    elif type == "agenda":
+        start_agenda_fetch_job(job_id=job_id, total=total)
