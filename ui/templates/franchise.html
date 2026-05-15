@@ -1378,7 +1378,11 @@
         </div>
 
         <!-- Modal for Master Password -->
-        <div id="password-modal" class="modal">
+        <div
+            id="password-modal"
+            class="modal"
+            data-dek-exists="{{ 'true' if session.get('dek') else 'false' }}"
+        >
             <div class="modal-content" style="max-width: 400px">
                 <h2>Master Password Required</h2>
                 <p>Please enter the master password to continue.</p>
@@ -1513,7 +1517,7 @@
             const masterPasswordPrompt = document.getElementById("master_password_prompt");
             const masterPasswordInput = document.getElementById("master_password_input");
 
-            let dekExists = {{ "true" if session.get("dek") else "false" }} === true;
+            let dekExists = passwordModal?.dataset.dekExists === "true";
             let pendingAction = null;
 
             form.onsubmit = function(e) {

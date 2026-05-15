@@ -239,8 +239,15 @@
     }
 </style>
 
+<script type="application/json" id="student-grades-data">
+    {{ student.grades | tojson | safe }}
+</script>
+
 <script>
-    const gradesData = {{ student.grades | tojson | safe }};
+    const gradesDataElement = document.getElementById("student-grades-data");
+    const gradesData = gradesDataElement
+        ? JSON.parse(gradesDataElement.textContent || "{}")
+        : {};
 
     const weeks = gradesData ? Object.keys(gradesData) : [];
 
