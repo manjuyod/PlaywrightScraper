@@ -384,13 +384,13 @@ def test_encryption():
         exit(1)
 
 
-from typing import Callable, Dict
 def filter_group(group: list[Any], key: str | None, value, include=True) -> list[Any]:
     if key is not None:
-        key_check: Callable[[Dict[str, Any]], bool] = lambda group: key in group.keys()
+        def key_check(group):
+            return key in group.keys()
     else:
-        key_check: Callable[[Dict[str, Any]], bool] = lambda _: True
-
+        def key_check(_):
+            return True
     if include:
         def value_check(group):
             return group[key] == value
