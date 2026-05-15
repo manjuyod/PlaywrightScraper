@@ -211,6 +211,9 @@ def test_crm_connection_prefers_primary_db() -> None:
 
 
 def test_crm_connection_requires_validated_tls() -> None:
+    _configure_crm_env()
+    os.environ.pop("CRM_TRUST_SERVER_CERTIFICATE", None)
+
     connect_string = importlib.import_module("ui.auth")._connect_string()
 
     assert "Encrypt=yes" in connect_string
@@ -264,6 +267,28 @@ def test_login_redirects_root_without_headers() -> None:
         assert response.headers["Location"].endswith("/login")
 
 
+def test_login_redirects_root_even_with_dev_bypass_enabled() -> None:
+    with patch.dict(os.environ, {"DEV_BYPASS": "1"}):
+        app_module, routes = _load_fresh_ui_modules()
+    app_module.app.config["TESTING"] = True
+    with app_module.app.test_client() as client:
+        response = client.get("/")
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/login")
+
+
+def test_login_redirects_root_even_with_internal_handoff_headers() -> None:
+    app_module, routes = _load_fresh_ui_modules()
+    app_module.app.config["TESTING"] = True
+    with app_module.app.test_client() as client:
+        response = client.get(
+            "/",
+            headers={"X-Franchise": "21", "X-Internal-Key": "internal-key"},
+        )
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith("/login")
+
+
 def _create_auth_client():
     app_module, routes = _load_fresh_ui_modules()
     app_module.app.config["TESTING"] = True
@@ -293,7 +318,7 @@ def test_login_success_sets_crm_session_state() -> None:
         assert sess["role"] == 2
 
 
-def test_login_health_credentials_start_fresh_health_session() -> None:
+def test_login_franchise_one_starts_fresh_health_session() -> None:
     app, _ = _create_auth_client()
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -302,7 +327,14 @@ def test_login_health_credentials_start_fresh_health_session() -> None:
             sess["franchise_id"] = 21
             sess["csrf_token"] = "token-1"
 
-        with patch("ui.routes.crm_login") as crm_login:
+        with patch(
+            "ui.routes.crm_login",
+            return_value=CrmLoginResult(
+                authenticated=True,
+                role=2,
+                franchise_id=1,
+            ),
+        ) as crm_login:
             response = client.post(
                 "/login",
                 data={
@@ -312,7 +344,7 @@ def test_login_health_credentials_start_fresh_health_session() -> None:
                 },
             )
 
-        assert crm_login.call_count == 0
+        assert crm_login.call_count == 1
         assert response.status_code == 302
         assert response.headers["Location"].endswith("/health")
 
@@ -320,6 +352,21 @@ def test_login_health_credentials_start_fresh_health_session() -> None:
         assert sess.get("session_type") == "health_test"
         assert not sess.get("franchise_id")
         assert sess.get("authorized") is True
+
+
+def test_login_get_with_unknown_session_type_shows_login() -> None:
+    app, _ = _create_auth_client()
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "internal"
+            sess["csrf_token"] = "token-1"
+
+        response = client.get("/login")
+
+        assert response.status_code == 200
+        with client.session_transaction() as sess:
+            assert not sess.get("authorized")
 
 
 def test_failed_login_attempts_are_rate_limited() -> None:
@@ -642,6 +689,19 @@ def test_health_test_session_is_limited_to_health_and_logout() -> None:
         assert response.status_code == 403
 
 
+def test_legacy_dev_and_internal_sessions_do_not_authorize_protected_routes() -> None:
+    app, _ = _create_auth_client()
+    for session_type in ("dev", "internal"):
+        with app.test_client() as client:
+            with client.session_transaction() as sess:
+                sess["authorized"] = True
+                sess["session_type"] = session_type
+                sess["csrf_token"] = "token-1"
+
+            response = client.get("/status/11")
+            assert response.status_code == 403
+
+
 def test_logout_clears_session() -> None:
     app, _ = _create_auth_client()
     with app.test_client() as client:
@@ -663,7 +723,8 @@ def test_csrf_validation_blocks_mutating_requests() -> None:
     with app.test_client() as client:
         with client.session_transaction() as sess:
             sess["authorized"] = True
-            sess["session_type"] = "dev"
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
             sess["csrf_token"] = secrets.token_urlsafe(12)
 
         response = client.post("/franchise/11", data={"run_scraper": "1"})

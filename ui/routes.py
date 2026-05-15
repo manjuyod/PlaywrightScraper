@@ -19,10 +19,8 @@ from db import (
     filter_group,
 )
 from ui.app import (
-    INTERNAL_KEY,
     clear_login_failures,
     app,
-    DEV_BYPASS,
     get_students_from_session,
     csrf_protect,
     is_login_rate_limited,
@@ -81,27 +79,8 @@ def _form_or_existing(field_name: str, existing_student: Student | Mapping | Non
     return ""
 
 
-# By default, entry is only allowed from the internal key passed by the header
 @app.route("/", methods=["GET", "POST"])
 async def index():
-    if DEV_BYPASS:  # dev only route
-        set_session_state(session_type="dev", franchise_id=None)
-        return redirect(url_for("health"))
-
-    if not DEV_BYPASS:  # normal
-        franchise_id = request.headers.get("X-Franchise", type=int)
-        key = request.headers.get("X-Internal-Key")
-
-        # direct/manual access is not allowed
-        if franchise_id is None or key is None:
-            return redirect(url_for("login"))
-
-        if key != INTERNAL_KEY:
-            return redirect(url_for("login"))
-
-        set_session_state(session_type="internal", franchise_id=franchise_id)
-
-        return redirect(url_for("franchise_view", franchise_id=franchise_id))
     return redirect(url_for("login"))
 
 
@@ -110,11 +89,13 @@ async def index():
 async def login():
     if request.method == "GET":
         if session.get("authorized"):
-            if session.get("session_type") == "crm":
-                return redirect(
-                    url_for("franchise_view", franchise_id=session.get("franchise_id"))
-                )
-            return redirect(url_for("health"))
+            session_type = session.get("session_type")
+            franchise_id = _coerce_int(session.get("franchise_id"))
+            if session_type == "crm" and franchise_id and franchise_id != 1:
+                return redirect(url_for("franchise_view", franchise_id=franchise_id))
+            if session_type == "health_test":
+                return redirect(url_for("health"))
+            session.clear()
         return render_template("login.html")
 
     username = request.form.get("username", "")
@@ -125,11 +106,6 @@ async def login():
         flash("Too many sign-in attempts. Try again later.")
         return render_template("login.html"), 429
 
-    if username == "test@test.com" and password == "test":
-        set_session_state(session_type="health_test", franchise_id=None)
-        clear_login_failures(remote_addr, username)
-        return redirect(url_for("health"))
-
     login_result = crm_login(username=username, password=password)
 
     if not login_result.authenticated or login_result.franchise_id is None:
@@ -138,6 +114,10 @@ async def login():
         return redirect(url_for("login"))
 
     clear_login_failures(remote_addr, username)
+    if login_result.franchise_id == 1:
+        set_session_state(session_type="health_test", franchise_id=None)
+        return redirect(url_for("health"))
+
     set_session_state(
         session_type="crm",
         franchise_id=login_result.franchise_id,

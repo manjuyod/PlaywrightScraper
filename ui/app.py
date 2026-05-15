@@ -19,22 +19,18 @@ DEFAULT_SESSION_SECRET = "dev-secret-key"
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-INTERNAL_KEY = os.getenv("INTERNAL_KEY")
 SESSION_SECRET = os.getenv("SESSION_SECRET", DEFAULT_SESSION_SECRET)
 app.secret_key = SESSION_SECRET
 
 IS_DEPLOYMENT = os.getenv("REPLIT_DEPLOYMENT", "0") in {"1", "true", "True"}
-DEV_BYPASS = not IS_DEPLOYMENT and int(os.getenv("DEV_BYPASS", 0)) == 1
-print(f"\nDeployment: {IS_DEPLOYMENT}, Dev Bypass: {DEV_BYPASS}")
-if DEV_BYPASS:
-    print("Dev session, access at: http://localhost:8080/\n\n")
-if not DEV_BYPASS and (
+print(f"\nDeployment: {IS_DEPLOYMENT}")
+if (
     SESSION_SECRET == DEFAULT_SESSION_SECRET
     or len(SESSION_SECRET.strip()) < 32
     or SESSION_SECRET.lower() in {"replace-me", "changeme", "secret"}
 ):
     raise ValueError(
-        "SESSION_SECRET must be set to a strong, non-default value when DEV_BYPASS is not enabled."
+        "SESSION_SECRET must be set to a strong, non-default value."
     )
 
 # Session management
@@ -189,9 +185,6 @@ def login_required(view):
             abort(403)
 
         session_type = session.get("session_type")
-        if session_type in {"internal", "dev"}:
-            return await view(*args, **kwargs)
-
         if session_type == "health_test":
             if request.endpoint in {"health", "logout"}:
                 return await view(*args, **kwargs)
@@ -205,7 +198,7 @@ def login_required(view):
             abort(403)
 
         franchise_id = _session_franchise_id()
-        if not franchise_id:
+        if not franchise_id or franchise_id == 1:
             abort(403)
 
         if request.endpoint == "health":
