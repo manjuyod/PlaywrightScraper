@@ -417,6 +417,28 @@ def test_franchise_page_does_not_render_student_portal_credentials() -> None:
     assert "alt-login" not in body
 
 
+def test_student_page_does_not_render_student_portal_credentials() -> None:
+    app, routes = _create_auth_client()
+    student = _sample_student()
+    routes.get_students_from_session = lambda _franchise_id: [student]
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = secrets.token_urlsafe(12)
+
+        response = client.get("/franchise/11/student/123")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "student-secret" not in body
+    assert "alt-secret" not in body
+    assert "ada-login" not in body
+    assert "alt-login" not in body
+
+
 def test_edit_student_blank_credentials_keep_existing_values() -> None:
     app, routes = _create_auth_client()
     existing = _sample_student()
