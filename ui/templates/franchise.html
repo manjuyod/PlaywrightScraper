@@ -938,6 +938,7 @@
                     <div class="franchise-toolbar-spacer"></div>
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <button
                             type="submit"
                             name="run_agenda"
@@ -953,6 +954,7 @@
                     </form>
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <button
                             type="submit"
                             name="run_scraper"
@@ -1042,6 +1044,7 @@
                     aria-label="Student reports table. Scroll horizontally if needed."
                 >
                     <form id="bulk-action-form" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <table id="students-table">
                             <thead>
                                 <tr>
@@ -1222,18 +1225,12 @@
                                         "first_name": student.first_name,
                                         "last_name": student.last_name, "grade":
                                         student.grade_level, "portal_url":
-                                        student.portal_url, "portal_username":
-                                        student.portal_username, "portal_password":
-                                        student.portal_password, "alt_portal_url":
-                                        student.alt_portal_url or "",
-                                        "alt_portal_username":
-                                        student.alt_portal_username or "",
-                                        "alt_portal_password":
-                                        student.alt_portal_password or "" } %}
+                                        student.portal_url, "alt_portal_url":
+                                        student.alt_portal_url or "" } %}
                                         <button
                                             type="button"
                                             class="btn-edit"
-                                            data-student="{{ student_data | tojson | safe }}"
+                                            data-student="{{ student_data | tojson | forceescape }}"
                                             onclick="showEditForm(this)"
                                         >
                                             Edit
@@ -1255,6 +1252,7 @@
                 <h2 id="modal-title">Add Student</h2>
 
                 <form id="student-form" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <input
                         type="hidden"
                         name="master_password"
@@ -1554,6 +1552,12 @@
 
                 form.reset();
                 form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}";
+                document.getElementById("portal_username").required = true;
+                document.getElementById("portal_password").required = true;
+                document.getElementById("portal_username").placeholder = "";
+                document.getElementById("portal_password").placeholder = "";
+                document.getElementById("alt_portal_username").placeholder = "";
+                document.getElementById("alt_portal_password").placeholder = "";
                 modalTitle.innerText = "Add Student";
                 addBtn.style.display = "inline-block";
                 editBtn.style.display = "none";
@@ -1578,16 +1582,22 @@
                 document.getElementById("last_name").value = student.last_name;
                 document.getElementById("grade").value = student.grade;
                 document.getElementById("portal_url").value = student.portal_url;
-                document.getElementById("portal_username").value =
-                    student.portal_username;
-                document.getElementById("portal_password").value =
-                    student.portal_password;
+                document.getElementById("portal_username").value = "";
+                document.getElementById("portal_password").value = "";
+                document.getElementById("portal_username").required = false;
+                document.getElementById("portal_password").required = false;
+                document.getElementById("portal_username").placeholder =
+                    "Leave blank to keep current";
+                document.getElementById("portal_password").placeholder =
+                    "Leave blank to keep current";
                 document.getElementById("alt_portal_url").value =
                     student.alt_portal_url;
-                document.getElementById("alt_portal_username").value =
-                    student.alt_portal_username;
-                document.getElementById("alt_portal_password").value =
-                    student.alt_portal_password;
+                document.getElementById("alt_portal_username").value = "";
+                document.getElementById("alt_portal_password").value = "";
+                document.getElementById("alt_portal_username").placeholder =
+                    "Leave blank to keep current";
+                document.getElementById("alt_portal_password").placeholder =
+                    "Leave blank to keep current";
 
                 addBtn.style.display = "none";
                 editBtn.style.display = "inline-block";

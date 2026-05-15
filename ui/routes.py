@@ -1,11 +1,10 @@
 # builtins
 import json
-import pprint
+from collections.abc import Mapping
 from typing import cast
 # external
 from flask import (
     Response,
-    abort,
     flash,
     redirect,
     render_template,
@@ -21,14 +20,19 @@ from db import (
 )
 from ui.app import (
     INTERNAL_KEY,
-    add_student_to_session,
+    clear_login_failures,
     app,
     DEV_BYPASS,
     get_students_from_session,
+    csrf_protect,
+    is_login_rate_limited,
+    record_login_failure,
+    set_session_state,
     login_required,
     store_students_in_session,
     # update_student_in_session,
 )
+from ui.auth import crm_login
 from ui.controllers import (
     compute_student_report,
     check_students_status,
@@ -44,29 +48,110 @@ from ui.ext_jobs import (
 )
 
 
+def _coerce_int(value: object) -> int | None:
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _student_value(student: Student | Mapping, key: str):
+    if isinstance(student, Student):
+        return getattr(student, key, None)
+    return student.get(key)
+
+
+def _find_student(students: list[Student] | list[Mapping], student_id: int) -> Student | Mapping | None:
+    for student in students:
+        if _coerce_int(_student_value(student, "id")) == student_id:
+            return student
+    return None
+
+
+def _form_or_existing(field_name: str, existing_student: Student | Mapping | None, attr_name: str) -> str:
+    submitted = request.form.get(field_name)
+    if submitted:
+        return submitted
+    if existing_student is not None:
+        existing = _student_value(existing_student, attr_name)
+        if existing is not None:
+            return str(existing)
+    return ""
+
+
 # By default, entry is only allowed from the internal key passed by the header
 @app.route("/", methods=["GET", "POST"])
 async def index():
+    if DEV_BYPASS:  # dev only route
+        set_session_state(session_type="dev", franchise_id=None)
+        return redirect(url_for("health"))
+
     if not DEV_BYPASS:  # normal
         franchise_id = request.headers.get("X-Franchise", type=int)
         key = request.headers.get("X-Internal-Key")
 
         # direct/manual access is not allowed
         if franchise_id is None or key is None:
-            session.clear()
-            return abort(403)
+            return redirect(url_for("login"))
 
         if key != INTERNAL_KEY:
-            session.clear()
-            abort(403)
+            return redirect(url_for("login"))
 
-        session["franchise_id"] = franchise_id
-        session["authorized"] = True
+        set_session_state(session_type="internal", franchise_id=franchise_id)
 
         return redirect(url_for("franchise_view", franchise_id=franchise_id))
-    else:  # dev only route
-        session["authorized"] = True
+    return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+@csrf_protect
+async def login():
+    if request.method == "GET":
+        if session.get("authorized"):
+            if session.get("session_type") == "crm":
+                return redirect(
+                    url_for("franchise_view", franchise_id=session.get("franchise_id"))
+                )
+            return redirect(url_for("health"))
+        return render_template("login.html")
+
+    username = request.form.get("username", "")
+    password = request.form.get("password", "")
+    remote_addr = request.remote_addr
+
+    if is_login_rate_limited(remote_addr, username):
+        flash("Too many sign-in attempts. Try again later.")
+        return render_template("login.html"), 429
+
+    if username == "test@test.com" and password == "test":
+        set_session_state(session_type="health_test", franchise_id=None)
+        clear_login_failures(remote_addr, username)
         return redirect(url_for("health"))
+
+    login_result = crm_login(username=username, password=password)
+
+    if not login_result.authenticated or login_result.franchise_id is None:
+        record_login_failure(remote_addr, username)
+        flash("Invalid username or password.")
+        return redirect(url_for("login"))
+
+    clear_login_failures(remote_addr, username)
+    set_session_state(
+        session_type="crm",
+        franchise_id=login_result.franchise_id,
+        role=login_result.role,
+    )
+    return redirect(url_for("franchise_view", franchise_id=login_result.franchise_id))
+
+
+@app.route("/logout", methods=["POST"])
+@csrf_protect
+@login_required
+async def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 # A simple health page to show the health of active franchise pages and status of background jobs, and provide a landing page for dev access
@@ -104,14 +189,11 @@ async def health():
 
 @app.route("/franchise/<int:franchise_id>", methods=["GET", "POST"])
 @login_required
+@csrf_protect
 async def franchise_view(franchise_id: int):
     """Here we show a list of students for the given franchise.
     Student data is fetched from the database.
     Comprised of the students' first/last name, portal links, most recent grades"""
-    session["franchise_id"] = franchise_id
-    if not session.get("authorized"):
-        return abort(403)
-
     students = get_students_from_session(franchise_id)
 
     if students is None:
@@ -120,7 +202,6 @@ async def franchise_view(franchise_id: int):
         store_students_in_session(franchise_id, students)
 
     assert students is not None
-    print(f"Session active keys: {session.keys()}")
     student_reports = [compute_student_report(student) for student in students]
     # print(student_reports[0:1])
     job_id = f"{franchise_id}"
@@ -134,10 +215,23 @@ async def franchise_view(franchise_id: int):
         # delete
         elif "delete_students" in request.form:
             # this should also probably gate on dek
-            student_ids = request.form.getlist("student_id")
+            allowed_student_ids = {
+                _coerce_int(_student_value(student, "id"))
+                for student in students
+            }
+            allowed_student_ids.discard(None)
+            student_ids = [
+                sid
+                for sid in (
+                    _coerce_int(raw_sid)
+                    for raw_sid in request.form.getlist("student_id")
+                )
+                if sid is not None
+            ]
             if student_ids:
-                # print(f"Deleting students: {student_ids}")
-                db.delete_students([int(sid) for sid in student_ids])
+                if any(sid not in allowed_student_ids for sid in student_ids):
+                    return {"error": "invalid student selection"}, 403
+                db.delete_students(student_ids)
                 flash(f"Deleted {len(student_ids)} students.")
             else:
                 flash("No students selected for deletion.")
@@ -162,25 +256,32 @@ async def franchise_view(franchise_id: int):
                         url_for("franchise_view", franchise_id=franchise_id)
                     )
 
-            student_id = request.args.get("student_id")
-            assert student_id is not None, "student_id is required"
-            student: Student | None = (
-                filter_group(students, "id", student_id)[0] if student_id else None
-            )
+            student_id = request.args.get("student_id", type=int)
+            existing_student = _find_student(students, student_id) if student_id else None
+            if "edit_student" in request.form and existing_student is None:
+                return "Student not found", 404
             db_student = {
                 "id": int(student_id) if student_id else -1,
                 "firstname": request.form["first_name"],
                 "lastname": request.form["last_name"],
                 "grade": int(request.form["grade"]),
                 "portal1": request.form["portal_url"],
-                "p1username": request.form["portal_username"],
-                "p1password": request.form["portal_password"],
+                "portal": _student_value(existing_student, "portal") if existing_student else "",
+                "p1username": _form_or_existing(
+                    "portal_username", existing_student, "portal_username"
+                ),
+                "p1password": _form_or_existing(
+                    "portal_password", existing_student, "portal_password"
+                ),
                 "portal2": request.form.get("alt_portal_url"),
-                "p2username": request.form.get("alt_portal_username"),
-                "p2password": request.form.get("alt_portal_password"),
-                "status": student.status if student else "never",
+                "p2username": _form_or_existing(
+                    "alt_portal_username", existing_student, "alt_portal_username"
+                ),
+                "p2password": _form_or_existing(
+                    "alt_portal_password", existing_student, "alt_portal_password"
+                ),
+                "status": _student_value(existing_student, "status") if existing_student else "never",
             }
-            pprint.pprint(db_student)
             student = Student.create(db_student)
             # add
             if "add_student" in request.form:
@@ -217,6 +318,8 @@ async def franchise_view(franchise_id: int):
 @app.route(
     "/franchise/<int:franchise_id>/student/<int:student_id>", methods=["GET", "POST"]
 )
+@login_required
+@csrf_protect
 async def student_view(franchise_id: int, student_id: int):
     """
     Here is a single student's page.
@@ -225,22 +328,25 @@ async def student_view(franchise_id: int, student_id: int):
     job_id = f"{franchise_id}_{student_id}"
     agenda_job_id = f"{franchise_id}_{student_id}_agenda"
 
-    # load from session, fallback to db
+    # load only students within the requested franchise, then select by student id.
     students = get_students_from_session(franchise_id)
-    if students is None:  # no session, get from the database
-        # print("Fetching student from db")
-        student = db.get_student(student_id=student_id)
-        student_report = compute_student_report(student)
-        if not is_running(job_id):
-            jobs.pop(job_id, None)
-        add_student_to_session(franchise_id, student_report)
-    else:  # session exists, get the student from the session
-        student_report = filter_group(students, "id", student_id)[0]
+    if students is None:
+        try:
+            students = cast(list[Student], db.get_students(franchise_id))
+        except ValueError:
+            students = []
+        store_students_in_session(franchise_id, students)
+
+    student = _find_student(students, student_id)
+    if student is None:
+        return "Student not found", 404
+
+    student_report = compute_student_report(cast(Student, student))
+    if not is_running(job_id):
+        jobs.pop(job_id, None)
     if not student_report:  # still no report, failure
         return "Student not found", 404
 
-    pprint.pprint(f"Student Snapshot:{student_report.grades_snapshot}")
-    pprint.pprint(f"Student Grades: {student_report.grades}")
     if request.method == "POST":  # handle db updates
         if "run_scraper" in request.form:  # update franchise grades
             if is_running(job_id):
@@ -280,12 +386,12 @@ async def student_view(franchise_id: int, student_id: int):
 
 
 @app.get("/status/<job_id>")
-def status(job_id: str):
+@login_required
+async def status(job_id: str):
     state = get_status(job_id)
-    # pprint.pprint(f"Status for job {job_id}: {state}")
     if state:
         if state.step == state.steps:
-            session.pop(f"students_{franchise_from_job_id(job_id)}")
+            session.pop(f"students_{franchise_from_job_id(job_id)}", None)
         data = {
             "total": state.total,
             "step": state.step,

@@ -41,7 +41,9 @@ Agenda collection follows the same dashboard job pattern through `scraper.agenda
 
 Key routes:
 
-- `/` is the protected handoff route. Normal access requires `X-Franchise` and `X-Internal-Key`; dev access can use `DEV_BYPASS=1`.
+- `/` is the protected handoff route. Normal access requires `X-Franchise` and `X-Internal-Key`; without valid headers users are redirected to `/login`. Dev access can use `DEV_BYPASS=1`.
+- `/login` authenticates against CRM using `ui/auth.py` (`dbo.usp_login`) and starts a franchise-scoped CRM session.
+- `/logout` clears the session and ends dashboard access.
 - `/health` shows active franchises, scraper health, grouped errors, bad logins, malformed inputs, nonconfigured portals, and active jobs.
 - `/franchise/<franchise_id>` shows the franchise student list, grade snapshots, low/high grades, standing, status, search/sort, edit/delete actions, and franchise-wide grade/agenda refresh buttons.
 - `/franchise/<franchise_id>/student/<student_id>` shows one student's current snapshot, agenda, grade history table, and heatmap tab.
@@ -69,8 +71,13 @@ Database:
 Dashboard:
 
 - `INTERNAL_KEY` gates production-style dashboard entry.
-- `SESSION_SECRET` signs Flask sessions.
+- `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` configure CRM authentication. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
+- `CRM_TRUST_SERVER_CERTIFICATE` controls CRM certificate trust (default `no`). Acceptable true values are `1`, `true`, and `yes` (case-insensitive). Other values default to `no`.
+- CRM SQL Server traffic is encrypted. The value of `CRM_TRUST_SERVER_CERTIFICATE` controls `TrustServerCertificate`.
+- `SESSION_SECRET` signs Flask sessions. Outside `DEV_BYPASS`, use a strong non-default value of at least 32 characters.
 - `DEV_BYPASS=1` opens local dashboard access without the internal handoff headers.
+
+nginx forwards client IP/protocol headers and Flask applies trusted proxy handling for login rate limiting and deployment-aware secure cookies.
 
 Notifications and utilities:
 

@@ -981,6 +981,7 @@
             <section class="student-toolbar-panel">
                 <div class="student-toolbar">
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <button
                             type="submit"
                             name="run_agenda"
@@ -996,6 +997,7 @@
                     </form>
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <button
                             type="submit"
                             name="run_scraper"
