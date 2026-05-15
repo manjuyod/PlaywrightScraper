@@ -4,27 +4,883 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>TC Grade Checker</title>
+
         <link
             rel="stylesheet"
             href="{{ url_for('static', filename='styles.css') }}"
         />
-        <link rel="icon" type="image/webp" href="../static/imgs/tc_logo.webp" />
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+
+        <style>
+            :root {
+                --franchise-blue: #4472c4;
+                --franchise-blue-dark: #2f5597;
+                --franchise-blue-soft: #edf4ff;
+
+                --franchise-orange: #f4833d;
+                --franchise-orange-dark: #d76624;
+                --franchise-orange-soft: #fff0e7;
+
+                --franchise-bg: #fff8f3;
+                --franchise-panel: #ffffff;
+                --franchise-border: #eadfd7;
+                --franchise-text: #102033;
+                --franchise-muted: #64748b;
+
+                --franchise-success: #15803d;
+                --franchise-danger: #dc2626;
+                --franchise-warning: #d76624;
+
+                --franchise-shadow: 0 14px 35px rgba(244, 131, 61, 0.12);
+                --franchise-shadow-soft: 0 8px 22px rgba(15, 23, 42, 0.07);
+            }
+
+            body {
+                font-family:
+                    "Inter",
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    sans-serif;
+                background: var(--franchise-bg);
+                color: var(--franchise-text);
+                margin: 0;
+            }
+
+            .franchise-header-section {
+                background: rgba(255, 255, 255, 0.96);
+                padding: 18px 0;
+                margin-bottom: 24px;
+                border-bottom: 1px solid var(--franchise-border);
+                box-shadow: var(--franchise-shadow-soft);
+            }
+
+            .franchise-header-inner {
+                width: min(1800px, calc(100% - 32px));
+                margin: 0 auto;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 24px;
+            }
+
+            .franchise-brand {
+                display: flex;
+                align-items: center;
+                gap: 18px;
+            }
+
+            .franchise-logo-wrap {
+                height: 64px;
+                width: 64px;
+                border-radius: 18px;
+                display: grid;
+                place-items: center;
+                background: #ffffff;
+                border: 1px solid var(--franchise-border);
+                box-shadow: var(--franchise-shadow-soft);
+                overflow: hidden;
+                flex: 0 0 auto;
+            }
+
+            .franchise-logo {
+                width: 54px;
+                height: 54px;
+                object-fit: contain;
+                display: block;
+            }
+
+            .franchise-title {
+                font-size: 2rem;
+                font-weight: 850;
+                color: var(--franchise-blue-dark);
+                margin: 0;
+                letter-spacing: -0.025em;
+            }
+
+            .franchise-subtitle {
+                color: var(--franchise-muted);
+                font-size: 0.95rem;
+                margin-top: 4px;
+            }
+
+            .franchise-header-meta {
+                text-align: right;
+                color: var(--franchise-muted);
+                font-size: 0.95rem;
+                line-height: 1.4;
+            }
+
+            .franchise-header-meta strong {
+                display: block;
+                color: var(--franchise-orange-dark);
+                margin-bottom: 4px;
+                font-weight: 800;
+            }
+
+            .franchise-page {
+                width: min(1900px, calc(100% - 32px));
+                margin: 24px auto 48px;
+            }
+
+            .franchise-top-panel {
+                background: var(--franchise-panel);
+                border: 1px solid var(--franchise-border);
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: var(--franchise-shadow-soft);
+                margin-bottom: 18px;
+            }
+
+            .franchise-toolbar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .franchise-toolbar-spacer {
+                flex: 1 1 auto;
+            }
+
+            .franchise-btn {
+                border: none;
+                border-radius: 12px;
+                padding: 11px 16px;
+                font-weight: 800;
+                font-size: 0.86rem;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition:
+                    transform 0.18s ease,
+                    box-shadow 0.18s ease,
+                    background 0.18s ease;
+            }
+
+            .franchise-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+            }
+
+            .franchise-btn-primary {
+                background: var(--franchise-blue);
+                color: white;
+            }
+
+            .franchise-btn-primary:hover {
+                background: var(--franchise-blue-dark);
+            }
+
+            .franchise-btn-orange {
+                background: var(--franchise-orange);
+                color: white;
+            }
+
+            .franchise-btn-orange:hover {
+                background: var(--franchise-orange-dark);
+            }
+
+            .franchise-btn-danger {
+                background: var(--franchise-danger);
+                color: white;
+            }
+
+            .franchise-btn-secondary {
+                background: #6c757d;
+                color: white;
+            }
+
+            .franchise-btn-gold {
+                background: #f4d03f;
+                color: #3b3b3b;
+            }
+
+            .refresh-icon {
+                margin-left: 5px;
+                font-size: 1.1em;
+            }
+
+            .franchise-progress-stack {
+                display: grid;
+                gap: 12px;
+                margin-bottom: 18px;
+            }
+
+            .franchise-progress-container {
+                background: var(--franchise-panel);
+                border: 1px solid var(--franchise-border);
+                border-radius: 16px;
+                padding: 15px;
+                box-shadow: var(--franchise-shadow-soft);
+            }
+
+            .franchise-progress-label {
+                margin-bottom: 10px;
+                font-size: 0.95rem;
+                font-weight: 800;
+                color: var(--franchise-orange-dark);
+            }
+
+            .franchise-progress-bar-bg {
+                width: 100%;
+                height: 12px;
+                background-color: #f0e6de;
+                border-radius: 999px;
+                overflow: hidden;
+            }
+
+            .franchise-progress-bar-fill {
+                height: 100%;
+                background-color: var(--franchise-orange);
+                transition: width 0.3s ease;
+            }
+
+            .franchise-search-panel {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 14px;
+                margin-bottom: 0;
+            }
+
+            .franchise-search-label {
+                color: var(--franchise-blue-dark);
+                font-weight: 850;
+                font-size: 1.2rem;
+            }
+
+            .franchise-search-input {
+                width: min(100%, 420px);
+                padding: 12px 16px;
+                border: 2px solid var(--franchise-border);
+                border-radius: 14px;
+                font-size: 0.95rem;
+                outline: none;
+                background: #ffffff;
+                color: var(--franchise-text);
+                transition:
+                    border-color 0.18s ease,
+                    box-shadow 0.18s ease;
+            }
+
+            .franchise-search-input:focus {
+                border-color: var(--franchise-orange);
+                box-shadow: 0 0 0 0.2rem rgba(244, 131, 61, 0.2);
+            }
+
+            /* =========================
+               Dynamic Student Table
+               ========================= */
+
+            .franchise-table-card {
+                background: var(--franchise-panel);
+                border: 1px solid var(--franchise-border);
+                border-radius: 20px;
+                box-shadow: var(--franchise-shadow-soft);
+                overflow: hidden;
+                width: 100%;
+            }
+
+            .franchise-table-header {
+                background: var(--franchise-orange);
+                color: white;
+                padding: 16px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+
+            .franchise-table-header h2 {
+                margin: 0;
+                font-size: 1.05rem;
+                font-weight: 850;
+                color: white;
+            }
+
+            .franchise-table-header span {
+                font-size: 0.9rem;
+                opacity: 0.9;
+                font-weight: 700;
+            }
+
+            .franchise-table-container {
+                width: 100%;
+                overflow-x: visible;
+            }
+
+            #students-table {
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: fixed;
+                margin: 0;
+            }
+
+            #students-table th:nth-child(1),
+            #students-table td:nth-child(1) {
+                width: 42px;
+            }
+
+            #students-table th:nth-child(2),
+            #students-table td:nth-child(2) {
+                width: 12%;
+            }
+
+            #students-table th:nth-child(3),
+            #students-table td:nth-child(3) {
+                width: 10%;
+            }
+
+            #students-table th:nth-child(4),
+            #students-table td:nth-child(4),
+            #students-table th:nth-child(5),
+            #students-table td:nth-child(5),
+            #students-table th:nth-child(6),
+            #students-table td:nth-child(6) {
+                width: 18%;
+            }
+
+            #students-table th:nth-child(7),
+            #students-table td:nth-child(7) {
+                width: 10%;
+            }
+
+            #students-table th:nth-child(8),
+            #students-table td:nth-child(8) {
+                width: 8%;
+            }
+
+            #students-table th:nth-child(9),
+            #students-table td:nth-child(9) {
+                width: 8%;
+            }
+
+            #students-table th,
+            #students-table td {
+                padding: clamp(10px, 0.7vw, 16px);
+                text-align: left;
+                border-bottom: 1px solid #f0e6de;
+                vertical-align: top;
+                overflow-wrap: anywhere;
+                word-break: normal;
+            }
+
+            #students-table th {
+                background: var(--franchise-blue);
+                color: white;
+                font-weight: 800;
+                text-transform: uppercase;
+                font-size: clamp(0.68rem, 0.18vw + 0.62rem, 0.78rem);
+                letter-spacing: 0.06em;
+                position: sticky;
+                top: 0;
+                z-index: 2;
+                white-space: normal;
+            }
+
+            #students-table th.sortable-col {
+                cursor: pointer;
+                user-select: none;
+            }
+
+            #students-table th.sortable-col:hover {
+                background: var(--franchise-blue-dark);
+            }
+
+            #students-table tbody tr {
+                transition:
+                    background 0.16s ease,
+                    box-shadow 0.16s ease;
+            }
+
+            #students-table tbody tr:hover {
+                background-color: #fffaf6;
+            }
+
+            .clickable-row {
+                cursor: pointer;
+            }
+
+            #students-table td:nth-child(2) {
+                font-weight: 850;
+                color: var(--franchise-blue-dark);
+            }
+
+            #students-table td:nth-child(3) a {
+                font-weight: 700;
+                color: var(--franchise-blue);
+                overflow-wrap: anywhere;
+            }
+
+            #students-table td:nth-child(3) a:hover {
+                color: var(--franchise-orange-dark);
+                text-decoration: underline;
+            }
+
+            .grade-list {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+                display: grid;
+                gap: 5px;
+            }
+
+            .grade-list li {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 4px;
+                white-space: normal;
+                margin: 0;
+                font-size: clamp(0.78rem, 0.22vw + 0.72rem, 0.95rem);
+                line-height: 1.3;
+                color: var(--franchise-text);
+            }
+
+            .course-name {
+                font-weight: 750;
+                color: var(--franchise-text);
+                overflow-wrap: anywhere;
+                min-width: 0;
+            }
+
+            .course-grade {
+                font-weight: 900;
+                white-space: nowrap;
+            }
+
+            .grade-up {
+                color: #2e7d32;
+                margin-left: 4px;
+                font-size: 0.8em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-down {
+                color: #d32f2f;
+                margin-left: 4px;
+                font-size: 0.8em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-no-change {
+                color: #8e8e93;
+                margin-left: 4px;
+                font-size: 0.6em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-red {
+                color: #d32f2f;
+            }
+
+            .grade-orange {
+                color: var(--franchise-orange);
+            }
+
+            .grade-yellow {
+                color: #d8a709;
+            }
+
+            .grade-green {
+                color: #2e7d32;
+            }
+
+            .standing-good {
+                color: #2e7d32;
+                font-weight: 900;
+            }
+
+            .standing-fair {
+                color: #d8a709;
+                font-weight: 900;
+            }
+
+            .standing-poor {
+                color: #d32f2f;
+                font-weight: 900;
+            }
+
+            .btn-edit {
+                background: var(--franchise-blue);
+                color: white;
+                padding: 7px 11px;
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                border-radius: 10px;
+                border: none;
+                font-weight: 800;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+
+            .btn-edit:hover {
+                background: var(--franchise-blue-dark);
+            }
+
+            .flash-messages {
+                margin-bottom: 18px;
+            }
+
+            .flash-message {
+                padding: 13px 15px;
+                background: var(--franchise-orange-soft);
+                border-left: 5px solid var(--franchise-orange);
+                color: var(--franchise-text);
+                margin-bottom: 10px;
+                border-radius: 12px;
+                box-shadow: var(--franchise-shadow-soft);
+                font-weight: 650;
+            }
+
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1000;
+                inset: 0;
+                background-color: rgba(15, 23, 42, 0.52);
+                padding: 24px;
+                overflow-y: auto;
+            }
+
+            .modal-content {
+                background-color: var(--franchise-panel);
+                margin: 4% auto;
+                padding: 24px;
+                border: 1px solid var(--franchise-border);
+                width: min(720px, 100%);
+                border-radius: 20px;
+                box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+            }
+
+            .modal-content h2 {
+                margin-top: 0;
+                color: var(--franchise-blue-dark);
+                font-weight: 850;
+            }
+
+            .close {
+                color: var(--franchise-muted);
+                float: right;
+                font-size: 28px;
+                font-weight: bold;
+                cursor: pointer;
+            }
+
+            .close:hover {
+                color: var(--franchise-text);
+            }
+
+            .form-group {
+                margin-bottom: 15px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .form-group label {
+                margin-bottom: 6px;
+                font-weight: 800;
+                color: var(--franchise-text);
+            }
+
+            .form-group input {
+                padding: 11px 13px;
+                border-radius: 12px;
+                border: 2px solid var(--franchise-border);
+                background-color: #ffffff;
+                color: var(--franchise-text);
+                transition:
+                    border-color 0.18s ease,
+                    box-shadow 0.18s ease;
+            }
+
+            .form-group input:focus {
+                border-color: var(--franchise-orange);
+                box-shadow: 0 0 0 0.2rem rgba(244, 131, 61, 0.2);
+                outline: none;
+            }
+
+            .form-group.optional label::after {
+                content: " (optional)";
+                font-style: italic;
+                font-size: 0.8em;
+                color: var(--franchise-muted);
+            }
+
+            .form-actions {
+                display: flex;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 10px;
+                margin-top: 20px;
+            }
+
+            .sort-indicator {
+                font-size: 0.8rem;
+                margin-left: 4px;
+                opacity: 0.78;
+            }
+
+            @media (min-width: 1500px) {
+                #students-table th,
+                #students-table td {
+                    padding: 16px 18px;
+                }
+
+                .grade-list li {
+                    font-size: 0.95rem;
+                }
+            }
+
+            @media (max-width: 1200px) {
+                .franchise-table-container {
+                    overflow-x: auto;
+                    border-top: 1px solid #f0e6de;
+                }
+
+                #students-table {
+                    min-width: 1050px;
+                    table-layout: auto;
+                }
+
+                #students-table th,
+                #students-table td {
+                    white-space: normal;
+                }
+            }
+
+            @media (max-width: 900px) {
+                .franchise-header-inner {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+
+                .franchise-header-meta {
+                    text-align: left;
+                }
+
+                .franchise-title {
+                    font-size: 1.4rem;
+                }
+
+                .franchise-toolbar {
+                    align-items: stretch;
+                }
+
+                .franchise-toolbar form,
+                .franchise-toolbar button {
+                    width: 100%;
+                }
+
+                .franchise-toolbar-spacer {
+                    display: none;
+                }
+            }
+
+            @media (max-width: 760px) {
+                .franchise-table-container {
+                    overflow-x: visible;
+                }
+
+                #students-table,
+                #students-table thead,
+                #students-table tbody,
+                #students-table th,
+                #students-table td,
+                #students-table tr {
+                    display: block;
+                    width: 100%;
+                }
+
+                #students-table {
+                    min-width: 0;
+                    border-collapse: separate;
+                    border-spacing: 0;
+                }
+
+                #students-table thead {
+                    display: none;
+                }
+
+                #students-table tbody {
+                    display: grid;
+                    gap: 14px;
+                    padding: 14px;
+                    background: #fffaf6;
+                }
+
+                #students-table tbody tr {
+                    background: white;
+                    border: 1px solid var(--franchise-border);
+                    border-radius: 18px;
+                    box-shadow: var(--franchise-shadow-soft);
+                    overflow: hidden;
+                }
+
+                #students-table tbody tr:hover {
+                    background: white;
+                    box-shadow: 0 12px 26px rgba(244, 131, 61, 0.14);
+                }
+
+                #students-table td {
+                    display: grid;
+                    grid-template-columns: 140px 1fr;
+                    gap: 12px;
+                    padding: 11px 14px;
+                    border-bottom: 1px solid #f0e6de;
+                    text-align: left;
+                }
+
+                #students-table td:last-child {
+                    border-bottom: none;
+                }
+
+                #students-table td::before {
+                    font-weight: 850;
+                    color: var(--franchise-blue-dark);
+                    text-transform: uppercase;
+                    font-size: 0.72rem;
+                    letter-spacing: 0.06em;
+                }
+
+                #students-table td:nth-child(1)::before {
+                    content: "Select";
+                }
+
+                #students-table td:nth-child(2)::before {
+                    content: "Student";
+                }
+
+                #students-table td:nth-child(3)::before {
+                    content: "Portal";
+                }
+
+                #students-table td:nth-child(4)::before {
+                    content: "Snapshot";
+                }
+
+                #students-table td:nth-child(5)::before {
+                    content: "Low Grades";
+                }
+
+                #students-table td:nth-child(6)::before {
+                    content: "High Grades";
+                }
+
+                #students-table td:nth-child(7)::before {
+                    content: "Standing";
+                }
+
+                #students-table td:nth-child(8)::before {
+                    content: "Status";
+                }
+
+                #students-table td:nth-child(9)::before {
+                    content: "Actions";
+                }
+
+                #students-table .checkbox-col[style*="display: none"] {
+                    display: none !important;
+                }
+
+                #students-table td.checkbox-col {
+                    grid-template-columns: 140px 1fr;
+                }
+
+                .grade-list {
+                    gap: 6px;
+                }
+
+                .grade-list li {
+                    font-size: 0.9rem;
+                }
+            }
+
+            @media (max-width: 640px) {
+                .franchise-page,
+                .franchise-header-inner {
+                    width: min(100% - 24px, 1800px);
+                }
+
+                .franchise-search-panel {
+                    align-items: stretch;
+                    flex-direction: column;
+                }
+
+                .franchise-search-input {
+                    width: 100%;
+                }
+
+                .modal {
+                    padding: 12px;
+                }
+
+                .modal-content {
+                    margin: 8% auto;
+                    padding: 18px;
+                }
+            }
+
+            @media (max-width: 460px) {
+                #students-table td {
+                    grid-template-columns: 1fr;
+                    gap: 5px;
+                }
+
+                #students-table td::before {
+                    margin-bottom: 2px;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    transition: none !important;
+                    animation: none !important;
+                }
+            }
+        </style>
     </head>
+
     <body>
-        <div class="container dashboard-container">
-            <div class="logo">
-                <img
-                    src="../static/imgs/tc_logo.webp"
-                    width="15%"
-                    height="15%"
-                    alt="TC Logo"
-                    class="logo-image"
-                />
-                <h1>Grade Checker</h1>
+        <header class="franchise-header-section">
+            <div class="franchise-header-inner">
+                <div class="franchise-brand">
+                    <div class="franchise-logo-wrap">
+                        <img
+                            src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                            alt="Tutoring Club Logo"
+                            class="franchise-logo"
+                        />
+                    </div>
+
+                    <div>
+                        <h1 class="franchise-title">
+                            Tutoring Club Grade Checker
+                        </h1>
+                        <div class="franchise-subtitle">
+                            Franchise student grade and portal dashboard
+                        </div>
+                    </div>
+                </div>
+
+                <div class="franchise-header-meta">
+                    <strong>Franchise {{ franchise_id }}</strong>
+                    Manage students, refresh agendas, and check grades.
+                </div>
             </div>
+        </header>
 
-            <div class="franchise-tag">Franchise: {{ franchise_id }}</div>
-
+        <main class="franchise-page">
             {% with messages = get_flashed_messages() %} {% if messages %}
             <div class="flash-messages">
                 {% for message in messages %}
@@ -33,426 +889,378 @@
             </div>
             {% endif %} {% endwith %}
 
-            <div class="actions-bar">
-                <button
-                    type="button"
-                    class="btn btn-add"
-                    id="btn-add-main"
-                    onclick="showAddForm()"
-                >
-                    Add Student
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-delete"
-                    id="btn-delete-mode"
-                    onclick="toggleDeleteMode(true)"
-                >
-                    Delete
-                </button>
-                <button
-                    type="submit"
-                    form="bulk-action-form"
-                    name="delete_students"
-                    id="btn-confirm-delete"
-                    class="btn btn-delete"
+            <section class="franchise-top-panel">
+                <div class="franchise-toolbar">
+                    <button
+                        type="button"
+                        class="franchise-btn franchise-btn-orange"
+                        id="btn-add-main"
+                        onclick="showAddForm()"
+                    >
+                        Add Student
+                    </button>
+
+                    <button
+                        type="button"
+                        class="franchise-btn franchise-btn-danger"
+                        id="btn-delete-mode"
+                        onclick="toggleDeleteMode(true)"
+                    >
+                        Delete
+                    </button>
+
+                    <button
+                        type="submit"
+                        form="bulk-action-form"
+                        name="delete_students"
+                        id="btn-confirm-delete"
+                        class="franchise-btn franchise-btn-danger"
+                        style="display: none"
+                        onclick="
+                            return confirm(
+                                'Are you sure you want to delete selected students?',
+                            );
+                        "
+                    >
+                        Confirm Deletion
+                    </button>
+
+                    <button
+                        type="button"
+                        id="btn-cancel-delete"
+                        class="franchise-btn franchise-btn-secondary"
+                        style="display: none"
+                        onclick="toggleDeleteMode(false)"
+                    >
+                        Cancel
+                    </button>
+
+                    <div class="franchise-toolbar-spacer"></div>
+
+                    <form method="POST">
+                        <button
+                            type="submit"
+                            name="run_agenda"
+                            class="franchise-btn franchise-btn-primary"
+                            onclick="
+                                return confirm(
+                                    'This will begin a long job and may take a few minutes. Do you want to continue?',
+                                );
+                            "
+                        >
+                            Refresh agendas <span class="refresh-icon">↻</span>
+                        </button>
+                    </form>
+
+                    <form method="POST">
+                        <button
+                            type="submit"
+                            name="run_scraper"
+                            class="franchise-btn franchise-btn-gold"
+                            onclick="
+                                return confirm(
+                                    'This will begin a long job and may take a few minutes. Do you want to continue?',
+                                );
+                            "
+                        >
+                            Check grades <span class="refresh-icon">↻</span>
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <div class="franchise-progress-stack">
+                <div
+                    id="progress-container"
+                    class="franchise-progress-container"
                     style="display: none"
-                    onclick="
-                        return confirm(
-                            'Are you sure you want to delete selected students?',
-                        );
+                >
+                    <div id="progress-label" class="franchise-progress-label">
+                        Grade collection in progress...
+                    </div>
+                    <div class="franchise-progress-bar-bg">
+                        <div
+                            id="progress-bar-fill"
+                            class="franchise-progress-bar-fill"
+                            style="width: 0%"
+                        ></div>
+                    </div>
+                </div>
+
+                <div
+                    id="progress-container-agenda"
+                    class="franchise-progress-container"
+                    style="display: none"
+                >
+                    <div
+                        id="progress-label-agenda"
+                        class="franchise-progress-label"
+                    >
+                        Agenda refresh in progress...
+                    </div>
+                    <div class="franchise-progress-bar-bg">
+                        <div
+                            id="progress-bar-fill-agenda"
+                            class="franchise-progress-bar-fill"
+                            style="width: 0%"
+                        ></div>
+                    </div>
+                </div>
+            </div>
+
+            <section class="franchise-table-card">
+                <div class="franchise-table-header">
+                    <h2>Students</h2>
+                    <span>Click a row to view student details</span>
+                </div>
+
+                <div
+                    class="franchise-top-panel"
+                    style="
+                        box-shadow: none;
+                        border: none;
+                        border-radius: 0;
+                        margin-bottom: 0;
                     "
                 >
-                    Confirm Deletion
-                </button>
-                <button
-                    type="button"
-                    id="btn-cancel-delete"
-                    class="btn btn-secondary"
-                    style="display: none"
-                    onclick="toggleDeleteMode(false)"
+                    <div class="franchise-search-panel">
+                        <div class="franchise-search-label">
+                            Student Reports
+                        </div>
+
+                        <input
+                            type="text"
+                            id="student-search"
+                            class="franchise-search-input"
+                            placeholder="Search by student name..."
+                        />
+                    </div>
+                </div>
+
+                <div
+                    class="franchise-table-container"
+                    aria-label="Student reports table. Scroll horizontally if needed."
                 >
-                    Cancel
-                </button>
-
-                <form method="POST" style="margin-left: auto">
-                    <button
-                        type="submit"
-                        name="run_agenda"
-                        class="btn btn-agenda"
-                        onclick="
-                            return confirm(
-                                'This will begin a long job and may take a few minutes. Do you want to continue?',
-                            );
-                        "
-                    >
-                        Refresh agendas <span class="refresh-icon">↻</span>
-                    </button>
-                </form>
-                <form method="POST">
-                    <button
-                        type="submit"
-                        name="run_scraper"
-                        class="btn btn-check-grades"
-                        onclick="
-                            return confirm(
-                                'This will begin a long job and may take a few minutes. Do you want to continue?',
-                            );
-                        "
-                    >
-                        Check grades <span class="refresh-icon">↻</span>
-                    </button>
-                </form>
-            </div>
-
-            <div
-                id="progress-container"
-                class="progress-container"
-                style="display: none"
-            >
-                <div id="progress-label" class="progress-label">
-                    Grade collection in progress...
-                </div>
-                <div class="progress-bar-bg">
-                    <div
-                        id="progress-bar-fill"
-                        class="progress-bar-fill"
-                        style="width: 0%"
-                    ></div>
-                </div>
-            </div>
-
-            <div
-                id="progress-container-agenda"
-                class="progress-container"
-                style="display: none"
-            >
-                <div id="progress-label-agenda" class="progress-label">
-                    Agenda refresh in progress...
-                </div>
-                <div class="progress-bar-bg">
-                    <div
-                        id="progress-bar-fill-agenda"
-                        class="progress-bar-fill"
-                        style="width: 0%"
-                    ></div>
-                </div>
-            </div>
-
-            <script>
-                const jobId = "{{ job_id }}";
-                const agendaJobId = "{{ agenda_job_id }}";
-
-                function pollStatus(jobId, elements, inProgressLabel) {
-                    const { container, label, bar } = elements;
-                    fetch(`/status/${jobId}`)
-                        .then((response) => {
-                            if (!response.ok) {
-                                throw new Error(
-                                    "Job not found or error fetching status",
-                                );
-                            }
-                            return response.json();
-                        })
-                        .then((data) => {
-                            if (data.step === 0) {
-                                setTimeout(
-                                    () =>
-                                        pollStatus(
-                                            jobId,
-                                            elements,
-                                            inProgressLabel,
-                                        ),
-                                    2000,
-                                );
-                            } else if (
-                                data.step >= 0 &&
-                                data.step < data.steps
-                            ) {
-                                container.style.display = "block";
-                                const percentage = Math.round(data.pct * 100);
-                                console.log(
-                                    `Polling status (${jobId}): ${percentage}%`,
-                                );
-                                bar.style.width = `${percentage}%`;
-                                label.innerText = `${inProgressLabel}: ${data.step} / ${data.total + 2}`;
-                                setTimeout(
-                                    () =>
-                                        pollStatus(
-                                            jobId,
-                                            elements,
-                                            inProgressLabel,
-                                        ),
-                                    2000,
-                                );
-                            } else if (data.step === data.steps) {
-                                container.style.display = "block";
-                                bar.style.width = "100%";
-                                label.innerText = `${inProgressLabel} complete! Reloading...`;
-                                setTimeout(
-                                    () => window.location.reload(),
-                                    2000,
-                                );
-                            } else {
-                                container.style.display = "none";
-                            }
-                        })
-                        .catch((error) => {
-                            console.log("Polling stopped or error:", error);
-                            container.style.display = "none";
-                        });
-                }
-
-                if (jobId) {
-                    pollStatus(
-                        jobId,
-                        {
-                            container:
-                                document.getElementById("progress-container"),
-                            label: document.getElementById("progress-label"),
-                            bar: document.getElementById("progress-bar-fill"),
-                        },
-                        "Grade collection in progress",
-                    );
-                }
-
-                if (agendaJobId) {
-                    pollStatus(
-                        agendaJobId,
-                        {
-                            container: document.getElementById(
-                                "progress-container-agenda",
-                            ),
-                            label: document.getElementById(
-                                "progress-label-agenda",
-                            ),
-                            bar: document.getElementById(
-                                "progress-bar-fill-agenda",
-                            ),
-                        },
-                        "Agenda refresh in progress",
-                    );
-                }
-            </script>
-
-            <div class="search-bar-container">
-                <input
-                    type="text"
-                    id="student-search"
-                    class="student-search-input"
-                    placeholder="Search by student name..."
-                />
-            </div>
-
-            <div class="table-container">
-                <form id="bulk-action-form" method="POST">
-                    <table id="students-table">
-                        <thead>
-                            <tr>
-                                <th
-                                    class="checkbox-col"
-                                    style="display: none; width: 30px"
-                                ></th>
-                                <th
-                                    class="sortable-col"
-                                    onclick="sortTable('name')"
-                                    title="Sort by name"
-                                >
-                                    Student Name
-                                    <span
-                                        id="sort-indicator-name"
-                                        class="sort-indicator"
-                                        >⇅</span
+                    <form id="bulk-action-form" method="POST">
+                        <table id="students-table">
+                            <thead>
+                                <tr>
+                                    <th
+                                        class="checkbox-col"
+                                        style="display: none; width: 30px"
+                                    ></th>
+                                    <th
+                                        class="sortable-col"
+                                        onclick="sortTable('name')"
+                                        title="Sort by name"
                                     >
-                                </th>
-                                <th>Portal URL</th>
-                                <th>Grade Snapshot</th>
-                                <th>Low Grades</th>
-                                <th>High Grades</th>
-                                <th
-                                    class="sortable-col"
-                                    onclick="sortTable('standing')"
-                                    title="Sort by grade standing"
-                                >
-                                    Grade Standing
-                                    <span
-                                        id="sort-indicator-standing"
-                                        class="sort-indicator"
-                                        >⇅</span
+                                        Student Name
+                                        <span
+                                            id="sort-indicator-name"
+                                            class="sort-indicator"
+                                            >⇅</span
+                                        >
+                                    </th>
+                                    <th>Portal URL</th>
+                                    <th>Grade Snapshot</th>
+                                    <th>Low Grades</th>
+                                    <th>High Grades</th>
+                                    <th
+                                        class="sortable-col"
+                                        onclick="sortTable('standing')"
+                                        title="Sort by grade standing"
                                     >
-                                </th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for student in student_reports %}
-                            <tr
-                                class="clickable-row"
-                                data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}"
-                                data-name="{{ student.first_name|lower }} {{ student.last_name|lower }}"
-                                data-status="{{ student.status|lower if student.status else '' }}"
-                                data-standing="{{ student.standing.value if student.standing else 'z' }}"
-                            >
-                                <td
-                                    class="checkbox-col"
-                                    style="display: none"
-                                    onclick="event.stopPropagation()"
+                                        Grade Standing
+                                        <span
+                                            id="sort-indicator-standing"
+                                            class="sort-indicator"
+                                            >⇅</span
+                                        >
+                                    </th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                {% for student in student_reports %}
+                                <tr
+                                    class="clickable-row"
+                                    data-url="{{ url_for('student_view', student_id=student.id, franchise_id=franchise_id) }}"
+                                    data-name="{{ student.first_name|lower }} {{ student.last_name|lower }}"
+                                    data-status="{{ student.status|lower if student.status else '' }}"
+                                    data-standing="{{ student.standing.value if student.standing else 'z' }}"
                                 >
-                                    <input
-                                        type="checkbox"
-                                        name="student_id"
-                                        value="{{ student.id }}"
-                                    />
-                                </td>
-                                <td>
-                                    {{ student.first_name }} {{
-                                    student.last_name }}
-                                </td>
-                                <td>
-                                    <a
-                                        href="{{ student.portal_url }}"
-                                        target="_blank"
+                                    <td
+                                        class="checkbox-col"
+                                        style="display: none"
                                         onclick="event.stopPropagation()"
-                                        >{{ student.portal }}</a
                                     >
-                                </td>
-                                <td>
-                                    {% if student.grades_snapshot %}
-                                    <ul class="grade-list">
-                                        {% for cg in student.grades_snapshot %}
-                                        <li>
-                                            <span class="course-name"
-                                                >{{ cg.course }}:</span
-                                            >
-                                            <span
-                                                class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
-                                            >
-                                                {{ cg.grade }} {% if cg.change
-                                                == '+' %}
-                                                <span class="grade-up">▲</span>
-                                                {% elif cg.change == '-' %}
-                                                <span class="grade-down"
-                                                    >▼</span
+                                        <input
+                                            type="checkbox"
+                                            name="student_id"
+                                            value="{{ student.id }}"
+                                        />
+                                    </td>
+
+                                    <td>
+                                        {{ student.first_name }} {{
+                                        student.last_name }}
+                                    </td>
+
+                                    <td>
+                                        <a
+                                            href="{{ student.portal_url }}"
+                                            target="_blank"
+                                            onclick="event.stopPropagation()"
+                                            >{{ student.portal }}</a
+                                        >
+                                    </td>
+
+                                    <td>
+                                        {% if student.grades_snapshot %}
+                                        <ul class="grade-list">
+                                            {% for cg in student.grades_snapshot %}
+                                            <li>
+                                                <span class="course-name"
+                                                    >{{ cg.course }}:</span
                                                 >
-                                                {% else %}
-                                                <span class="grade-no-change"
-                                                    >●</span
+                                                <span
+                                                    class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
                                                 >
-                                                {% endif %}
-                                            </span>
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% else %} N/A {% endif %}
-                                </td>
-                                <td>
-                                    {% if student.low_grades %}
-                                    <ul class="grade-list">
-                                        {% for cg in student.low_grades %}
-                                        <li>
-                                            <span class="course-name"
-                                                >{{ cg.course }}:</span
-                                            >
-                                            <span
-                                                class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
-                                            >
-                                                {{ cg.grade }} {% if cg.change
-                                                == '+' %}
-                                                <span class="grade-up">▲</span>
-                                                {% elif cg.change == '-' %}
-                                                <span class="grade-down"
-                                                    >▼</span
+                                                    {{ cg.grade }} {% if cg.change
+                                                    == '+' %}
+                                                    <span class="grade-up">▲</span>
+                                                    {% elif cg.change == '-' %}
+                                                    <span class="grade-down"
+                                                        >▼</span
+                                                    >
+                                                    {% else %}
+                                                    <span class="grade-no-change"
+                                                        >●</span
+                                                    >
+                                                    {% endif %}
+                                                </span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% else %} N/A {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if student.low_grades %}
+                                        <ul class="grade-list">
+                                            {% for cg in student.low_grades %}
+                                            <li>
+                                                <span class="course-name"
+                                                    >{{ cg.course }}:</span
                                                 >
-                                                {% else %}
-                                                <span class="grade-no-change"
-                                                    >●</span
+                                                <span
+                                                    class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
                                                 >
-                                                {% endif %}
-                                            </span>
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% else %} - {% endif %}
-                                </td>
-                                <td>
-                                    {% if student.high_grades %}
-                                    <ul class="grade-list">
-                                        {% for cg in student.high_grades %}
-                                        <li>
-                                            <span class="course-name"
-                                                >{{ cg.course }}:</span
-                                            >
-                                            <span
-                                                class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
-                                            >
-                                                {{ cg.grade }} {% if cg.change
-                                                == '+' %}
-                                                <span class="grade-up">▲</span>
-                                                {% elif cg.change == '-' %}
-                                                <span class="grade-down"
-                                                    >▼</span
+                                                    {{ cg.grade }} {% if cg.change
+                                                    == '+' %}
+                                                    <span class="grade-up">▲</span>
+                                                    {% elif cg.change == '-' %}
+                                                    <span class="grade-down"
+                                                        >▼</span
+                                                    >
+                                                    {% else %}
+                                                    <span class="grade-no-change"
+                                                        >●</span
+                                                    >
+                                                    {% endif %}
+                                                </span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% else %} - {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if student.high_grades %}
+                                        <ul class="grade-list">
+                                            {% for cg in student.high_grades %}
+                                            <li>
+                                                <span class="course-name"
+                                                    >{{ cg.course }}:</span
                                                 >
-                                                {% else %}
-                                                <span class="grade-no-change"
-                                                    >●</span
+                                                <span
+                                                    class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
                                                 >
-                                                {% endif %}
-                                            </span>
-                                        </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% else %} - {% endif %}
-                                </td>
-                                <td>
-                                    <span
-                                        class="standing-{{ student.standing|lower }}"
-                                    >
-                                        {{ student.standing }}
-                                    </span>
-                                </td>
-                                <td>{{ student.status }}</td>
-                                <td onclick="event.stopPropagation()">
-                                    {% set student_data = { "id": student.id,
-                                    "first_name": student.first_name,
-                                    "last_name": student.last_name, "grade":
-                                    student.grade_level, "portal_url":
-                                    student.portal_url, "portal_username":
-                                    student.portal_username, "portal_password":
-                                    student.portal_password, "alt_portal_url":
-                                    student.alt_portal_url or "",
-                                    "alt_portal_username":
-                                    student.alt_portal_username or "",
-                                    "alt_portal_password":
-                                    student.alt_portal_password or "" } %}
-                                    <button
-                                        type="button"
-                                        class="btn btn-edit"
-                                        data-student="{{ student_data | tojson | safe }}"
-                                        onclick="showEditForm(this)"
-                                    >
-                                        Edit
-                                    </button>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </form>
-            </div>
-        </div>
+                                                    {{ cg.grade }} {% if cg.change
+                                                    == '+' %}
+                                                    <span class="grade-up">▲</span>
+                                                    {% elif cg.change == '-' %}
+                                                    <span class="grade-down"
+                                                        >▼</span
+                                                    >
+                                                    {% else %}
+                                                    <span class="grade-no-change"
+                                                        >●</span
+                                                    >
+                                                    {% endif %}
+                                                </span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% else %} - {% endif %}
+                                    </td>
+
+                                    <td>
+                                        <span
+                                            class="standing-{{ student.standing|lower }}"
+                                        >
+                                            {{ student.standing }}
+                                        </span>
+                                    </td>
+
+                                    <td>{{ student.status }}</td>
+
+                                    <td onclick="event.stopPropagation()">
+                                        {% set student_data = { "id": student.id,
+                                        "first_name": student.first_name,
+                                        "last_name": student.last_name, "grade":
+                                        student.grade_level, "portal_url":
+                                        student.portal_url, "portal_username":
+                                        student.portal_username, "portal_password":
+                                        student.portal_password, "alt_portal_url":
+                                        student.alt_portal_url or "",
+                                        "alt_portal_username":
+                                        student.alt_portal_username or "",
+                                        "alt_portal_password":
+                                        student.alt_portal_password or "" } %}
+                                        <button
+                                            type="button"
+                                            class="btn-edit"
+                                            data-student="{{ student_data | tojson | safe }}"
+                                            onclick="showEditForm(this)"
+                                        >
+                                            Edit
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </form>
+                </div>
+            </section>
+        </main>
 
         <!-- Modal for Add/Edit Student -->
         <div id="student-modal" class="modal">
             <div class="modal-content">
                 <span class="close" onclick="closeModal()">&times;</span>
                 <h2 id="modal-title">Add Student</h2>
+
                 <form id="student-form" method="POST">
                     <input
                         type="hidden"
                         name="master_password"
                         id="master_password_input"
                     />
+
                     <div class="form-group">
                         <label for="first_name">First Name:</label>
                         <input
@@ -462,6 +1270,7 @@
                             required
                         />
                     </div>
+
                     <div class="form-group">
                         <label for="last_name">Last Name:</label>
                         <input
@@ -471,10 +1280,12 @@
                             required
                         />
                     </div>
+
                     <div class="form-group">
                         <label for="grade">Grade Level:</label>
                         <input type="number" name="grade" id="grade" required />
                     </div>
+
                     <div class="form-group">
                         <label for="portal_url">Portal URL:</label>
                         <input
@@ -484,6 +1295,7 @@
                             required
                         />
                     </div>
+
                     <div class="form-group">
                         <label for="portal_username">Portal Username:</label>
                         <input
@@ -493,6 +1305,7 @@
                             required
                         />
                     </div>
+
                     <div class="form-group">
                         <label for="portal_password">Portal Password:</label>
                         <input
@@ -502,6 +1315,7 @@
                             required
                         />
                     </div>
+
                     <div class="form-group optional">
                         <label for="alt_portal_url">Alt Portal URL :</label>
                         <input
@@ -510,6 +1324,7 @@
                             id="alt_portal_url"
                         />
                     </div>
+
                     <div class="form-group optional">
                         <label for="alt_portal_username"
                             >Alt Portal Username :</label
@@ -520,6 +1335,7 @@
                             id="alt_portal_username"
                         />
                     </div>
+
                     <div class="form-group optional">
                         <label for="alt_portal_password"
                             >Alt Portal Password :</label
@@ -530,27 +1346,30 @@
                             id="alt_portal_password"
                         />
                     </div>
+
                     <div class="form-actions">
                         <button
                             type="submit"
                             name="add_student"
                             id="btn-add-submit"
-                            class="btn btn-primary"
+                            class="franchise-btn franchise-btn-primary"
                         >
                             Add Student
                         </button>
+
                         <button
                             type="submit"
                             name="edit_student"
                             id="btn-edit-submit"
-                            class="btn btn-primary"
+                            class="franchise-btn franchise-btn-primary"
                             style="display: none"
                         >
                             Update Student
                         </button>
+
                         <button
                             type="button"
-                            class="btn btn-secondary"
+                            class="franchise-btn franchise-btn-secondary"
                             onclick="closeModal()"
                         >
                             Cancel
@@ -565,6 +1384,7 @@
             <div class="modal-content" style="max-width: 400px">
                 <h2>Master Password Required</h2>
                 <p>Please enter the master password to continue.</p>
+
                 <div class="form-group">
                     <input
                         type="password"
@@ -574,17 +1394,19 @@
                         placeholder="Enter master password"
                     />
                 </div>
+
                 <div class="form-actions" style="margin-top: 20px">
                     <button
                         type="button"
-                        class="btn btn-primary"
+                        class="franchise-btn franchise-btn-primary"
                         onclick="submitWithPassword()"
                     >
                         Submit
                     </button>
+
                     <button
                         type="button"
-                        class="btn btn-secondary"
+                        class="franchise-btn franchise-btn-secondary"
                         onclick="closePasswordModal()"
                     >
                         Cancel
@@ -594,6 +1416,96 @@
         </div>
 
         <script>
+            const jobId = "{{ job_id }}";
+            const agendaJobId = "{{ agenda_job_id }}";
+
+            function pollStatus(jobId, elements, inProgressLabel) {
+                const { container, label, bar } = elements;
+                fetch(`/status/${jobId}`)
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error(
+                                "Job not found or error fetching status",
+                            );
+                        }
+                        return response.json();
+                    })
+                    .then((data) => {
+                        if (data.step === 0) {
+                            setTimeout(
+                                () =>
+                                    pollStatus(
+                                        jobId,
+                                        elements,
+                                        inProgressLabel,
+                                    ),
+                                2000,
+                            );
+                        } else if (
+                            data.step >= 0 &&
+                            data.step < data.steps
+                        ) {
+                            container.style.display = "block";
+                            const percentage = Math.round(data.pct * 100);
+                            console.log(
+                                `Polling status (${jobId}): ${percentage}%`,
+                            );
+                            bar.style.width = `${percentage}%`;
+                            label.innerText = `${inProgressLabel}: ${data.step} / ${data.total + 2}`;
+                            setTimeout(
+                                () =>
+                                    pollStatus(
+                                        jobId,
+                                        elements,
+                                        inProgressLabel,
+                                    ),
+                                2000,
+                            );
+                        } else if (data.step === data.steps) {
+                            container.style.display = "block";
+                            bar.style.width = "100%";
+                            label.innerText = `${inProgressLabel} complete! Reloading...`;
+                            setTimeout(() => window.location.reload(), 2000);
+                        } else {
+                            container.style.display = "none";
+                        }
+                    })
+                    .catch((error) => {
+                        console.log("Polling stopped or error:", error);
+                        container.style.display = "none";
+                    });
+            }
+
+            if (jobId) {
+                pollStatus(
+                    jobId,
+                    {
+                        container: document.getElementById("progress-container"),
+                        label: document.getElementById("progress-label"),
+                        bar: document.getElementById("progress-bar-fill"),
+                    },
+                    "Grade collection in progress",
+                );
+            }
+
+            if (agendaJobId) {
+                pollStatus(
+                    agendaJobId,
+                    {
+                        container: document.getElementById(
+                            "progress-container-agenda",
+                        ),
+                        label: document.getElementById(
+                            "progress-label-agenda",
+                        ),
+                        bar: document.getElementById(
+                            "progress-bar-fill-agenda",
+                        ),
+                    },
+                    "Agenda refresh in progress",
+                );
+            }
+
             const modal = document.getElementById("student-modal");
             const form = document.getElementById("student-form");
             const modalTitle = document.getElementById("modal-title");
@@ -603,7 +1515,6 @@
             const masterPasswordPrompt = document.getElementById("master_password_prompt");
             const masterPasswordInput = document.getElementById("master_password_input");
 
-            // We check if dek is in session via a jinja variable
             let dekExists = {{ "true" if session.get("dek") else "false" }} === true;
             let pendingAction = null;
 
@@ -619,7 +1530,7 @@
 
             function submitWithPassword() {
                 masterPasswordInput.value = masterPasswordPrompt.value;
-                dekExists = true; // Temporary allow submit
+                dekExists = true;
                 if (pendingAction) {
                     pendingAction();
                     pendingAction = null;
@@ -640,6 +1551,7 @@
                     masterPasswordPrompt.focus();
                     return;
                 }
+
                 form.reset();
                 form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}";
                 modalTitle.innerText = "Add Student";
@@ -655,18 +1567,27 @@
                     masterPasswordPrompt.focus();
                     return;
                 }
-                const student = JSON.parse(btn.getAttribute('data-student'));
+
+                const student = JSON.parse(btn.getAttribute("data-student"));
                 modalTitle.innerText = "Edit Student";
-                form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}?student_id=" + student.id;
+                form.action =
+                    "{{ url_for('franchise_view', franchise_id=franchise_id) }}?student_id=" +
+                    student.id;
+
                 document.getElementById("first_name").value = student.first_name;
                 document.getElementById("last_name").value = student.last_name;
                 document.getElementById("grade").value = student.grade;
                 document.getElementById("portal_url").value = student.portal_url;
-                document.getElementById("portal_username").value = student.portal_username;
-                document.getElementById("portal_password").value = student.portal_password;
-                document.getElementById("alt_portal_url").value = student.alt_portal_url;
-                document.getElementById("alt_portal_username").value = student.alt_portal_username;
-                document.getElementById("alt_portal_password").value = student.alt_portal_password;
+                document.getElementById("portal_username").value =
+                    student.portal_username;
+                document.getElementById("portal_password").value =
+                    student.portal_password;
+                document.getElementById("alt_portal_url").value =
+                    student.alt_portal_url;
+                document.getElementById("alt_portal_username").value =
+                    student.alt_portal_username;
+                document.getElementById("alt_portal_password").value =
+                    student.alt_portal_password;
 
                 addBtn.style.display = "none";
                 editBtn.style.display = "inline-block";
@@ -684,31 +1605,38 @@
                     masterPasswordPrompt.focus();
                     return;
                 }
-                const checkboxCols = document.querySelectorAll('.checkbox-col');
-                const addBtnMain = document.getElementById('btn-add-main');
-                const deleteModeBtn = document.getElementById('btn-delete-mode');
-                const confirmDeleteBtn = document.getElementById('btn-confirm-delete');
-                const cancelDeleteBtn = document.getElementById('btn-cancel-delete');
-                const editButtons = document.querySelectorAll('.btn-edit');
 
-                checkboxCols.forEach(col => {
-                    col.style.display = enable ? 'table-cell' : 'none';
+                const checkboxCols = document.querySelectorAll(".checkbox-col");
+                const addBtnMain = document.getElementById("btn-add-main");
+                const deleteModeBtn = document.getElementById("btn-delete-mode");
+                const confirmDeleteBtn =
+                    document.getElementById("btn-confirm-delete");
+                const cancelDeleteBtn =
+                    document.getElementById("btn-cancel-delete");
+                const editButtons = document.querySelectorAll(".btn-edit");
+
+                checkboxCols.forEach((col) => {
+                    col.style.display = enable ? "table-cell" : "none";
                 });
 
                 if (enable) {
-                    addBtnMain.style.display = 'none';
-                    deleteModeBtn.style.display = 'none';
-                    confirmDeleteBtn.style.display = 'inline-block';
-                    cancelDeleteBtn.style.display = 'inline-block';
-                    editButtons.forEach(btn => btn.style.display = 'none');
+                    addBtnMain.style.display = "none";
+                    deleteModeBtn.style.display = "none";
+                    confirmDeleteBtn.style.display = "inline-block";
+                    cancelDeleteBtn.style.display = "inline-block";
+                    editButtons.forEach((btn) => (btn.style.display = "none"));
                 } else {
-                    addBtnMain.style.display = 'inline-block';
-                    deleteModeBtn.style.display = 'inline-block';
-                    confirmDeleteBtn.style.display = 'none';
-                    cancelDeleteBtn.style.display = 'none';
-                    editButtons.forEach(btn => btn.style.display = 'inline-block');
-                    // Clear selections when canceling
-                    document.querySelectorAll('input[name="student_id"]').forEach(cb => cb.checked = false);
+                    addBtnMain.style.display = "inline-block";
+                    deleteModeBtn.style.display = "inline-block";
+                    confirmDeleteBtn.style.display = "none";
+                    cancelDeleteBtn.style.display = "none";
+                    editButtons.forEach(
+                        (btn) => (btn.style.display = "inline-block"),
+                    );
+
+                    document
+                        .querySelectorAll('input[name="student_id"]')
+                        .forEach((cb) => (cb.checked = false));
                 }
             }
 
@@ -716,18 +1644,20 @@
                 if (event.target == modal) {
                     closeModal();
                 }
-            }
+            };
 
+            document.querySelectorAll(".clickable-row").forEach((row) => {
+                row.addEventListener("click", () => {
+                    const isDeleteMode =
+                        document.getElementById("btn-confirm-delete").style
+                            .display !== "none";
 
-            document.querySelectorAll('.clickable-row').forEach(row => {
-                row.addEventListener('click', () => {
-                    // Only navigate if NOT in delete mode
-                    const isDeleteMode = document.getElementById('btn-confirm-delete').style.display !== 'none';
                     if (!isDeleteMode) {
                         window.location = row.dataset.url;
                     } else {
-                        // In delete mode, clicking the row toggles the checkbox
-                        const checkbox = row.querySelector('input[name="student_id"]');
+                        const checkbox = row.querySelector(
+                            'input[name="student_id"]',
+                        );
                         if (checkbox) {
                             checkbox.checked = !checkbox.checked;
                         }
@@ -735,60 +1665,83 @@
                 });
             });
 
-            const standingOrder = { 'Poor': 0, 'Fair': 1, 'Good': 2 };
+            const standingOrder = { Poor: 0, Fair: 1, Good: 2 };
             const sortState = { name: null, standing: null };
 
             function sortTable(col) {
-                const tbody = document.querySelector('#students-table tbody');
-                const rows = Array.from(tbody.querySelectorAll('tr'));
-                const isNever = row => (row.dataset.status || '') === 'never';
+                const tbody = document.querySelector("#students-table tbody");
+                const rows = Array.from(tbody.querySelectorAll("tr"));
+                const isNever = (row) => (row.dataset.status || "") === "never";
 
                 const currentDir = sortState[col];
-                const nextDir = currentDir === 'asc' ? 'desc' : 'asc';
+                const nextDir = currentDir === "asc" ? "desc" : "asc";
                 sortState[col] = nextDir;
 
-                Object.keys(sortState).forEach(k => {
+                Object.keys(sortState).forEach((k) => {
                     if (k !== col) sortState[k] = null;
                 });
 
                 rows.sort((a, b) => {
                     const aNever = isNever(a);
                     const bNever = isNever(b);
+
                     if (aNever !== bNever) return aNever ? 1 : -1;
-                    if (col === 'name') {
-                        const aVal = a.dataset.name || '';
-                        const bVal = b.dataset.name || '';
-                        return nextDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-                    } else if (col === 'standing') {
+
+                    if (col === "name") {
+                        const aVal = a.dataset.name || "";
+                        const bVal = b.dataset.name || "";
+                        return nextDir === "asc"
+                            ? aVal.localeCompare(bVal)
+                            : bVal.localeCompare(aVal);
+                    } else if (col === "standing") {
                         const aRaw = a.dataset.standing;
                         const bRaw = b.dataset.standing;
                         const aNone = !(aRaw in standingOrder);
                         const bNone = !(bRaw in standingOrder);
+
                         if (aNone && bNone) return 0;
                         if (aNone) return 1;
                         if (bNone) return -1;
+
                         const aVal = standingOrder[aRaw];
                         const bVal = standingOrder[bRaw];
-                        return nextDir === 'asc' ? aVal - bVal : bVal - aVal;
+
+                        return nextDir === "asc"
+                            ? aVal - bVal
+                            : bVal - aVal;
                     }
+
                     return 0;
                 });
 
-                rows.forEach(row => tbody.appendChild(row));
+                rows.forEach((row) => tbody.appendChild(row));
 
-                document.getElementById('sort-indicator-name').textContent = col === 'name' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
-                document.getElementById('sort-indicator-standing').textContent = col === 'standing' ? (nextDir === 'asc' ? '↑' : '↓') : '⇅';
+                document.getElementById("sort-indicator-name").textContent =
+                    col === "name" ? (nextDir === "asc" ? "↑" : "↓") : "⇅";
+
+                document.getElementById(
+                    "sort-indicator-standing",
+                ).textContent =
+                    col === "standing"
+                        ? nextDir === "asc"
+                            ? "↑"
+                            : "↓"
+                        : "⇅";
             }
 
-            sortTable('name');
+            sortTable("name");
 
-            const searchInput = document.getElementById('student-search');
-            searchInput.addEventListener('input', function () {
+            const searchInput = document.getElementById("student-search");
+            searchInput.addEventListener("input", function () {
                 const query = this.value.trim().toLowerCase();
-                document.querySelectorAll('#students-table tbody tr').forEach(row => {
-                    const name = row.dataset.name || '';
-                    row.style.display = (!query || name.includes(query)) ? '' : 'none';
-                });
+
+                document
+                    .querySelectorAll("#students-table tbody tr")
+                    .forEach((row) => {
+                        const name = row.dataset.name || "";
+                        row.style.display =
+                            !query || name.includes(query) ? "" : "none";
+                    });
             });
         </script>
     </body>
