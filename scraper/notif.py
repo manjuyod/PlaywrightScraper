@@ -1,9 +1,11 @@
-from requests.exceptions import RequestException
-from dotenv import load_dotenv
-from pathlib import Path
 import os
 import time
+from enum import StrEnum
+from pathlib import Path
+
 import requests
+from requests.exceptions import RequestException
+from dotenv import load_dotenv
 
 _DOTENV_LOADED = False
 
@@ -25,7 +27,6 @@ def _ensure_dotenv_loaded() -> None:
         load_dotenv(env_path)
     _DOTENV_LOADED = True
 
-from enum import StrEnum
 class Severity(StrEnum):
     Info = '[INFO]'
     Warn = '[WARNING]'

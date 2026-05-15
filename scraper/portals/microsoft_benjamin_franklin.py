@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 
 from bs4 import BeautifulSoup  # type: ignore
-from playwright.async_api import Page  # type: ignore
 from .base import PortalEngine
 from . import register_portal  # helper we'll create in __init__.py
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type

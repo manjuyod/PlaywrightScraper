@@ -1,7 +1,18 @@
 from __future__ import annotations
+from typing import Any, Dict, Optional
+
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
 from .base import PortalEngine
 from . import register_portal  # helper we'll create in __init__.py
-from .utils import *
+from .utils import (
+    canonicalize_course_title,
+    canonicalize_grade,
+    exists,
+    universal_login_flow,
+    wait_after_nav,
+)
 
 @register_portal("student_connection")
 class StudentConnection(PortalEngine):
@@ -180,7 +191,6 @@ class StudentConnection(PortalEngine):
             return None
 
         idx_class = col_idx("Class")
-        idx_term = col_idx("Term")
         idx_pct = col_idx("Pct")
         idx_letter = col_idx("CurrentGrade")
 
@@ -193,7 +203,7 @@ class StudentConnection(PortalEngine):
         # Extract rows
         rows = self.page.locator("#SP-Pulse tbody tr")
         n = await rows.count()
-        parsed: Dict[str, any] = {}
+        parsed: Dict[str, Any] = {}
 
         for r in range(n):
             cells = rows.nth(r).locator("td")
@@ -212,12 +222,10 @@ class StudentConnection(PortalEngine):
                     return ""
 
             course = (await safe_text(idx_class)).upper()
-            term = await safe_text(idx_term) if idx_term is not None else ""
             pct_s = await safe_text(idx_pct) if idx_pct is not None else ""
             letter = await safe_text(idx_letter) if idx_letter is not None else ""
 
             # Normalize percentage: "82.0%" → 82.0
-            value: Any
             if pct_s:
                 grade = canonicalize_grade(pct_s)
             elif letter:

@@ -3,8 +3,11 @@ GPT-assisted helper: select a student card by first name using the mouse.
 DEBUG version – prints every major step.
 """
 from __future__ import annotations
-import json, os, textwrap, asyncio
-from typing import Optional, List
+import asyncio
+import json
+import os
+import textwrap
+from typing import List
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 import openai
 

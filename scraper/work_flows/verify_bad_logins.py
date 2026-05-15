@@ -1,17 +1,18 @@
 import argparse
 import asyncio
-from scraper.runner import _load_student_auth_map
-from db import filter_group, db_conn
+
 import db
+from db import db_conn, filter_group
+from playwright.async_api import Browser, async_playwright
 
 from scraper.portals import get_portal
+from scraper.runner import _load_student_auth_map
 
 # IMPORTANT:
 # Import runner so the same environment/bootstrap side effects happen
 # as in the workflows that already work.
 import scraper.runner  # noqa: F401
 _ = scraper.runner  # silence unused import warning
-from playwright.async_api import Browser, async_playwright
 
 async def test_login(browser: Browser, student: dict):
     student = dict(student)
@@ -66,8 +67,7 @@ def good_login(student_id: int):
         flush=True,
     )
     with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(
+        conn.exec_driver_sql(
             "UPDATE Student SET PasswordGood = 1 WHERE ID = %s",
             (student_id,),
         )
@@ -100,7 +100,8 @@ async def main(debug: bool, franchise_id: int | None = None):
     
     if franchise_id is not None:
         students = db.get_students(franchise_id, raw=True)
-    else: students = db.get_students(raw=True)
+    else:
+        students = db.get_students(raw=True)
     
     students = filter_group(students, key="passwordgood", value=0)
     students = filter_group(students, key="status", value="error")

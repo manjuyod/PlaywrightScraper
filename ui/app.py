@@ -30,10 +30,8 @@ app.config["SESSION_PERMANENT"] = False
 Session(app)
 
 
-# def students_key(f_id: int) -> str:
-#     return f"students_{f_id}"
-
-students_key = lambda f_id: f"students_{f_id}"
+def students_key(f_id: int) -> str:
+    return f"students_{f_id}"
 
 # session helpers
 def get_students_from_session(franchise_id: int) -> list[Student] | None:

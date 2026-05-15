@@ -53,5 +53,6 @@ class Classlink(PortalEngine):
         print('fetching grades')
         if 'infinitecampus' in self.page.url:
             return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
-        else: return {}
+        else:
+            return {}
     # ---------------------- PARSER ------------------------------------------

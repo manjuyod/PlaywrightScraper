@@ -1,10 +1,11 @@
 # scraper/work_flows/insert_grades.py
 import json
-from scraper.runner import db_conn, DictCursor, project_root
-import psycopg2
 import pathlib
+from sqlalchemy.exc import SQLAlchemyError
+
+from scraper.runner import db_conn, project_root
 from datetime import date, timedelta
- 
+
 PROJECT_ROOT = project_root()
 print(f"Project root: {PROJECT_ROOT}")
 
@@ -50,8 +51,7 @@ def insert_grades():
     print(f"Using Monday anchor date: {monday_anchor}")
     print(f"Input: {JSONL_PATH}")
     try:
-        with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
-            cur = conn.cursor(cursor_factory=DictCursor)
+        with db_conn() as conn, open(JSONL_PATH, "r", encoding="utf-8") as f:
             for raw in f:
                 raw = raw.strip()
                 if not raw:
@@ -67,7 +67,7 @@ def insert_grades():
                 # Skip error payloads
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
-                    update_status(cur, student_id, "error", error_msg=data['error'])
+                    update_status(conn, student_id, "error", error_msg=data['error'])
                     continue
 
                 # Accept both NEW and OLD shapes:
@@ -78,12 +78,14 @@ def insert_grades():
                     grades = data["grades"].get("parsed_grades")
                 if not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
-                    update_status(cur, student_id, "missing grades")
+                    update_status(conn, student_id, "missing grades")
                     continue
 
                 # Fetch existing WeeklyData
-                cur.execute("SELECT WeeklyData FROM Student WHERE ID = %s", (student_id,))
-                row = cur.fetchone()
+                row = conn.exec_driver_sql(
+                    "SELECT WeeklyData FROM Student WHERE ID = %s",
+                    (student_id,)
+                ).mappings().fetchone()
                 if not row:
                     print(f"Student with ID '{student_id}' not found.")
                     continue
@@ -94,28 +96,28 @@ def insert_grades():
                 # Update current week's bucket
                 weekly_data[monday_anchor] = grades
                 # Persist
-                cur.execute(
+                conn.exec_driver_sql(
                     "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
                     (json.dumps(weekly_data, ensure_ascii=False), student_id)
                 )
-                update_status(cur, student_id, 'synced')
+                update_status(conn, student_id, 'synced')
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
 
             conn.commit()
 
     except FileNotFoundError:
         print(f"Error: Output file not found at {JSONL_PATH}")
-    except psycopg2.Error as e:
+    except SQLAlchemyError as e:
         print(f"Database error: {e}")
 
-def update_status(cur: DictCursor, student_id: int, status: str, error_msg: str | None = None):
+def update_status(cur, student_id: int, status: str, error_msg: str | None = None):
     """ Modifies a students update status (synced, missing grades, error) in the database
         If the status is 'error' we will update the error_msg field in the database"""
-    cur.execute("update student set status = %s where ID = %s", (status, student_id,))
+    cur.exec_driver_sql("update student set status = %s where ID = %s", (status, student_id,))
     if status == 'error':
-        cur.execute("update student set error_msg = %s where ID = %s", (error_msg, student_id,))
+        cur.exec_driver_sql("update student set error_msg = %s where ID = %s", (error_msg, student_id,))
     else:
-        cur.execute("update student set error_msg = NULL where ID = %s", (student_id,))
+        cur.exec_driver_sql("update student set error_msg = NULL where ID = %s", (student_id,))
 if __name__ == "__main__":
     try:
         insert_grades()
