@@ -38,6 +38,50 @@ Open `http://127.0.0.1:8080/` and sign in with CRM credentials.
 
 The Replit/nginx entrypoint is `ui/start.sh`. It runs Gunicorn on `127.0.0.1:3000` and proxies public traffic through nginx on port `8080`.
 
+## Replit Deployment
+
+For Replit Autoscale, keep `.replit` and `replit.nix` configured manually in
+Replit; both files are intentionally gitignored for this project. The shared
+deployment contract is that Replit builds Python dependencies with
+`uv sync --frozen`, verifies or rebuilds the bundled SQL Server ODBC driver,
+then starts `ui/start.sh`. Runtime traffic is served by nginx on local port
+`8080`, mapped to external port `80`.
+
+Build command:
+
+```bash
+uv sync --frozen && bash setup_odbc_build.sh
+```
+
+Run command:
+
+```bash
+bash ui/start.sh
+```
+
+Set these Replit published-app Secrets before deploying:
+
+- `SESSION_SECRET`
+- `PGHOST`
+- `PGDATABASE`
+- `PGUSER`
+- `PGPASSWORD`
+- `PGPORT`
+- `CRMSrvAddress`
+- `CRMSrvDb` or `CRMSrvDbQA`
+- `CRMSrvUs`
+- `CRMSrvPs`
+
+Optional:
+
+- `CRM_TRUST_SERVER_CERTIFICATE=1` allows trusting the CRM SQL Server
+  certificate when required by that environment.
+
+The Microsoft ODBC Driver 17 bundle lives in `odbc_driver/`, with its required
+resource file in `share/resources/en_US/`. `setup_odbc.sh` registers the driver
+as `ODBC Driver 17 for SQL Server` in `$HOME/.odbc/odbcinst.ini`, matching the
+dashboard CRM login connection string.
+
 ## Configuration
 
 The scraper and dashboard read environment variables from `.env` via `python-dotenv`.
