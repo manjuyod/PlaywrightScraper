@@ -23,6 +23,7 @@ SESSION_SECRET = os.getenv("SESSION_SECRET", DEFAULT_SESSION_SECRET)
 app.secret_key = SESSION_SECRET
 
 IS_DEPLOYMENT = os.getenv("REPLIT_DEPLOYMENT", "0") in {"1", "true", "True"}
+IS_REPLIT = bool(os.getenv("REPL_ID") or os.getenv("REPLIT_DEV_DOMAIN"))
 print(f"\nDeployment: {IS_DEPLOYMENT}")
 if (
     SESSION_SECRET == DEFAULT_SESSION_SECRET
@@ -39,7 +40,7 @@ app.config["SESSION_FILE_DIR"] = "ui/tmp"
 app.config["SESSION_FILE_THRESHOLD"] = 100
 app.config["SESSION_FILE_MODE"] = 0o600
 app.config["SESSION_PERMANENT"] = False
-app.config["SESSION_COOKIE_SECURE"] = IS_DEPLOYMENT
+app.config["SESSION_COOKIE_SECURE"] = IS_DEPLOYMENT or IS_REPLIT
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
