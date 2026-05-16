@@ -6,11 +6,6 @@ export ODBCSYSINI="${ODBCSYSINI:-$HOME/.odbc}"
 bash setup_odbc.sh
 mkdir -p ui/tmp
 
-# ODBC configuration for Microsoft ODBC Driver 17 for SQL Server
-export ODBCSYSINI=/home/runner/odbc/etc
-export ODBCINSTINI=/home/runner/odbc/etc/odbcinst.ini
-export ODBCINI=/home/runner/odbc/etc/odbc.ini
-
 # stop old nginx if needed
 pkill nginx || true
 pkill -f "gunicorn.*ui.wsgi:app" || true
