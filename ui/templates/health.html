@@ -5,8 +5,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Health Check</title>
 
-        <!-- If style.css is already loaded from your base template, remove this line -->
-        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 
         <style>
             :root {
@@ -44,6 +43,10 @@
                 margin: 0;
             }
 
+            a {
+                color: inherit;
+            }
+
             .health-header-section {
                 background: rgba(255, 255, 255, 0.96);
                 padding: 18px 0;
@@ -70,7 +73,7 @@
             .health-logo-wrap {
                 height: 64px;
                 width: 64px;
-                border-radius: 18px;
+                border-radius: 8px;
                 display: grid;
                 place-items: center;
                 background: white;
@@ -92,7 +95,7 @@
                 font-weight: 850;
                 color: var(--health-blue-dark);
                 margin: 0;
-                letter-spacing: -0.025em;
+                letter-spacing: 0;
             }
 
             .health-subtitle {
@@ -106,6 +109,10 @@
                 color: var(--health-muted);
                 font-size: 0.95rem;
                 line-height: 1.4;
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                background: #fffaf6;
+                padding: 12px 14px;
             }
 
             .health-header-meta strong {
@@ -130,7 +137,7 @@
             .health-jobs-panel {
                 background: var(--health-panel);
                 border: 1px solid var(--health-border);
-                border-radius: 18px;
+                border-radius: 8px;
                 box-shadow: var(--health-shadow-soft);
                 overflow: hidden;
             }
@@ -151,6 +158,11 @@
 
             .health-jobs-panel summary::-webkit-details-marker {
                 display: none;
+            }
+
+            .health-jobs-panel summary:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.35);
+                outline-offset: 2px;
             }
 
             .health-jobs-panel summary::after {
@@ -186,7 +198,7 @@
 
             .health-job {
                 border: 1px solid var(--health-border);
-                border-radius: 14px;
+                border-radius: 8px;
                 padding: 12px 14px;
                 background: #fffaf6;
             }
@@ -216,7 +228,7 @@
             .health-summary-card {
                 background: rgba(255, 255, 255, 0.97);
                 border: 1px solid var(--health-border);
-                border-radius: 20px;
+                border-radius: 8px;
                 padding: 18px;
                 box-shadow: var(--health-shadow-soft);
                 display: flex;
@@ -251,7 +263,7 @@
             .health-summary-icon {
                 height: 44px;
                 width: 44px;
-                border-radius: 16px;
+                border-radius: 8px;
                 display: grid;
                 place-items: center;
                 background: var(--health-orange-soft);
@@ -286,7 +298,13 @@
                 font-size: 1.55rem;
                 color: var(--health-blue-dark);
                 font-weight: 850;
-                letter-spacing: -0.02em;
+                letter-spacing: 0;
+            }
+
+            .health-section-subtitle {
+                color: var(--health-muted);
+                font-size: 0.92rem;
+                margin-top: 4px;
             }
 
             .health-franchise-grid {
@@ -303,7 +321,7 @@
                 position: relative;
                 background: rgba(255, 255, 255, 0.97);
                 border: 1px solid var(--health-border);
-                border-radius: 20px;
+                border-radius: 8px;
                 box-shadow: var(--health-shadow-soft);
                 overflow: hidden;
                 min-height: 100%;
@@ -340,7 +358,7 @@
             .health-card-link:focus-visible {
                 outline: 3px solid rgba(244, 131, 61, 0.42);
                 outline-offset: 2px;
-                border-radius: 20px;
+                border-radius: 8px;
             }
 
             .health-franchise-content {
@@ -369,7 +387,7 @@
                 color: var(--health-blue-dark);
                 font-size: 1.16rem;
                 font-weight: 850;
-                letter-spacing: -0.015em;
+                letter-spacing: 0;
             }
 
             .health-franchise-subtitle {
@@ -381,7 +399,7 @@
             .health-franchise-icon {
                 height: 40px;
                 width: 40px;
-                border-radius: 15px;
+                border-radius: 8px;
                 display: grid;
                 place-items: center;
                 background: var(--health-orange-soft);
@@ -442,6 +460,12 @@
                 color: var(--health-blue-dark);
             }
 
+            .health-badge.action {
+                background: var(--health-blue-soft);
+                border: 1px solid rgba(68, 114, 196, 0.18);
+                color: var(--health-blue-dark);
+            }
+
             .health-error-details {
                 margin-top: 8px;
                 padding-top: 8px;
@@ -470,7 +494,7 @@
                 align-items: baseline;
                 gap: 8px;
                 padding: 8px 10px;
-                border-radius: 12px;
+                border-radius: 8px;
                 background: #fff7f7;
                 border: 1px solid #fee2e2;
                 white-space: normal;
@@ -497,6 +521,25 @@
                 margin-top: 20px;
                 color: var(--health-muted);
                 font-size: 0.9rem;
+            }
+
+            .health-card-action {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 8px;
+                padding-top: 10px;
+                border-top: 1px solid #f0e6de;
+            }
+
+            .health-summary-icon i,
+            .health-franchise-icon i,
+            .health-card-action i {
+                font-size: 0.95rem;
+                line-height: 1;
+            }
+
+            .health-card-action .health-badge {
+                gap: 6px;
             }
 
             @media (max-width: 720px) {
@@ -633,7 +676,9 @@
                         </div>
                     </div>
 
-                    <div class="health-summary-icon">S</div>
+                    <div class="health-summary-icon">
+                        <i class="fa-solid fa-users" aria-hidden="true"></i>
+                    </div>
                 </div>
 
                 <div class="health-summary-card">
@@ -649,7 +694,9 @@
                         </div>
                     </div>
 
-                    <div class="health-summary-icon">✓</div>
+                    <div class="health-summary-icon">
+                        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                    </div>
                 </div>
 
                 <div class="health-summary-card">
@@ -665,12 +712,20 @@
                         </div>
                     </div>
 
-                    <div class="health-summary-icon">!</div>
+                    <div class="health-summary-icon">
+                        <i
+                            class="fa-solid fa-triangle-exclamation"
+                            aria-hidden="true"
+                        ></i>
+                    </div>
                 </div>
             </div>
 
             <div class="health-section-header">
                 <h2>Franchise Health</h2>
+                <div class="health-section-subtitle">
+                    Open a card to inspect student and portal details for that franchise.
+                </div>
             </div>
 
             <div class="health-franchise-grid">
@@ -693,7 +748,9 @@
                                 </div>
                             </div>
 
-                            <div class="health-franchise-icon">TC</div>
+                            <div class="health-franchise-icon">
+                                <i class="fa-solid fa-building" aria-hidden="true"></i>
+                            </div>
                         </div>
 
                         <div class="health-stat-row">
@@ -796,6 +853,16 @@
                             </ul>
                         </details>
                         {% endif %}
+
+                        <div class="health-card-action" aria-hidden="true">
+                            <span class="health-badge action">
+                                <i
+                                    class="fa-solid fa-arrow-up-right-from-square"
+                                    aria-hidden="true"
+                                ></i>
+                                View details
+                            </span>
+                        </div>
                     </div>
                 </div>
                 {% endfor %}

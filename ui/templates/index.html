@@ -1,22 +1,264 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TC Grade Checker</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <link rel="icon" type="image/webp" href="../static/imgs/tc_logo.webp">
-</head>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>TC Grade Checker</title>
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+        <style>
+            body {
+                background: var(--cream);
+                min-height: 100vh;
+            }
 
-<body>
-    <div class="container">
-        <img style="display: block; margin-left: auto; margin-right: auto;" src="../static/imgs/tc_logo.webp" width="10%" height="10%" alt="TC Logo" class="logo-image">
-        <h1 style="margin-top: 10px">Student Grade and Progress Tracker</h1>
-        <form method="POST">
-            <label for="franchise_id">Select a franchise</label>
-            <input type="number" id="franchise_id" name="franchise_id" style="margin-bottom: 16px" required>
-            <button type="submit">Go</button>
-        </form>
-    </div>
-</body>
+            .landing-shell {
+                width: min(960px, calc(100% - 32px));
+                margin: 48px auto;
+            }
+
+            .landing-panel {
+                background: var(--white);
+                border: 1px solid rgba(68, 114, 196, 0.14);
+                border-radius: 8px;
+                box-shadow: 0 18px 42px rgba(68, 114, 196, 0.12);
+                overflow: hidden;
+            }
+
+            .landing-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 24px;
+                padding: 22px 24px;
+                border-bottom: 1px solid rgba(68, 114, 196, 0.14);
+                background: rgba(255, 255, 255, 0.94);
+            }
+
+            .landing-brand {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                min-width: 0;
+            }
+
+            .landing-logo-wrap {
+                width: 64px;
+                height: 64px;
+                display: grid;
+                place-items: center;
+                border: 1px solid rgba(244, 131, 61, 0.26);
+                border-radius: 8px;
+                background: #fffaf2;
+                flex: 0 0 auto;
+            }
+
+            .landing-logo {
+                width: 54px;
+                height: 54px;
+                object-fit: contain;
+            }
+
+            .landing-title {
+                margin: 0;
+                color: var(--tutoring-blue);
+                font-size: 2.15rem;
+                font-weight: 700;
+                line-height: 1.12;
+            }
+
+            .landing-subtitle {
+                margin: 6px 0 0;
+                color: var(--text-light);
+                font-size: 1rem;
+                font-weight: 500;
+            }
+
+            .landing-status {
+                color: var(--tutoring-orange);
+                border: 1px solid rgba(244, 131, 61, 0.28);
+                background: var(--light-orange);
+                border-radius: 999px;
+                padding: 8px 12px;
+                font-size: 0.78rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                white-space: nowrap;
+            }
+
+            .landing-content {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) 320px;
+                gap: 28px;
+                padding: 28px 24px 24px;
+                align-items: stretch;
+            }
+
+            .landing-copy {
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                min-width: 0;
+            }
+
+            .landing-kicker {
+                margin: 0 0 10px;
+                color: var(--tutoring-orange);
+                font-size: 0.78rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+
+            .landing-copy h2 {
+                margin: 0 0 10px;
+                color: var(--text-dark);
+                font-size: 1.85rem;
+                font-weight: 700;
+                line-height: 1.2;
+            }
+
+            .landing-copy p {
+                max-width: 58ch;
+                margin: 0;
+                color: var(--text-light);
+                font-size: 1rem;
+                line-height: 1.55;
+            }
+
+            .franchise-form {
+                border: 1px solid rgba(68, 114, 196, 0.16);
+                border-radius: 8px;
+                background: #fffdf8;
+                padding: 20px;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+            }
+
+            .form-field {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 16px;
+            }
+
+            .form-field label {
+                margin: 0;
+                color: var(--text-dark);
+                font-size: 0.95rem;
+                font-weight: 700;
+            }
+
+            .field-help {
+                color: var(--text-light);
+                font-size: 0.85rem;
+                line-height: 1.4;
+            }
+
+            .franchise-form button {
+                width: 100%;
+                background: var(--tutoring-blue);
+            }
+
+            .franchise-form button:hover {
+                background: #3a648a;
+            }
+
+            @media (max-width: 760px) {
+                .landing-shell {
+                    width: min(100% - 24px, 960px);
+                    margin: 24px auto;
+                }
+
+                .landing-header,
+                .landing-content {
+                    padding: 18px;
+                }
+
+                .landing-header {
+                    align-items: flex-start;
+                    flex-direction: column;
+                }
+
+                .landing-content {
+                    grid-template-columns: 1fr;
+                }
+
+                .landing-status {
+                    white-space: normal;
+                }
+
+                .landing-title {
+                    font-size: 1.55rem;
+                }
+
+                .landing-copy h2 {
+                    font-size: 1.35rem;
+                }
+            }
+        </style>
+    </head>
+
+    <body>
+        <main class="landing-shell" aria-labelledby="page-title">
+            <section class="landing-panel">
+                <header class="landing-header">
+                    <div class="landing-brand">
+                        <div class="landing-logo-wrap">
+                            <img
+                                src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                                alt="Tutoring Club logo"
+                                class="landing-logo"
+                            />
+                        </div>
+                        <div>
+                            <h1 class="landing-title" id="page-title">
+                                Student Grade and Progress Tracker
+                            </h1>
+                            <p class="landing-subtitle">
+                                Tutoring Club reporting dashboard
+                            </p>
+                        </div>
+                    </div>
+                    <div class="landing-status" aria-label="Application area">
+                        Franchise Access
+                    </div>
+                </header>
+
+                <div class="landing-content">
+                    <div class="landing-copy">
+                        <p class="landing-kicker">Dashboard Entry</p>
+                        <h2>Open the student progress view for a franchise.</h2>
+                        <p>
+                            Enter the franchise ID to review synced student data,
+                            grade status, and portal progress in the dashboard.
+                        </p>
+                    </div>
+
+                    <form class="franchise-form" method="POST">
+                        <div class="form-field">
+                            <label for="franchise_id">Franchise ID</label>
+                            <input
+                                type="number"
+                                id="franchise_id"
+                                name="franchise_id"
+                                inputmode="numeric"
+                                min="1"
+                                required
+                                aria-describedby="franchise-help"
+                            />
+                            <span class="field-help" id="franchise-help">
+                                Use the numeric ID assigned to the franchise.
+                            </span>
+                        </div>
+                        <button type="submit">Open Dashboard</button>
+                    </form>
+                </div>
+            </section>
+        </main>
+    </body>
 </html>

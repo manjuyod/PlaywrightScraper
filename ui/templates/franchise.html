@@ -100,7 +100,7 @@
                 font-weight: 850;
                 color: var(--franchise-blue-dark);
                 margin: 0;
-                letter-spacing: -0.025em;
+                letter-spacing: 0;
             }
 
             .franchise-subtitle {
@@ -414,7 +414,7 @@
                 color: white;
                 font-weight: 800;
                 text-transform: uppercase;
-                font-size: clamp(0.68rem, 0.18vw + 0.62rem, 0.78rem);
+                font-size: 0.74rem;
                 letter-spacing: 0.06em;
                 position: sticky;
                 top: 0;
@@ -476,7 +476,7 @@
                 gap: 4px;
                 white-space: normal;
                 margin: 0;
-                font-size: clamp(0.78rem, 0.22vw + 0.72rem, 0.95rem);
+                font-size: 0.9rem;
                 line-height: 1.3;
                 color: var(--franchise-text);
             }
@@ -668,6 +668,89 @@
                 opacity: 0.78;
             }
 
+            .franchise-header-section {
+                background:
+                    linear-gradient(
+                        180deg,
+                        rgba(255, 255, 255, 0.98) 0%,
+                        rgba(255, 248, 243, 0.98) 100%
+                    );
+            }
+
+            .franchise-top-panel,
+            .franchise-progress-container,
+            .franchise-table-card {
+                border-color: rgba(234, 223, 215, 0.95);
+            }
+
+            .franchise-search-panel {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto minmax(280px, 380px);
+                align-items: center;
+                gap: 12px 16px;
+            }
+
+            .franchise-search-label {
+                margin-right: auto;
+            }
+
+            .franchise-filter-control {
+                width: fit-content;
+            }
+
+            .franchise-search-input {
+                justify-self: end;
+                min-height: 48px;
+            }
+
+            .franchise-toolbar > form,
+            .franchise-toolbar > button {
+                flex: 0 0 auto;
+            }
+
+            .franchise-btn:focus-visible,
+            .franchise-filter-option:focus-visible,
+            .franchise-search-input:focus-visible,
+            .btn-edit:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.22);
+                outline-offset: 2px;
+            }
+
+            #students-table tbody tr:nth-child(odd) {
+                background: #fffdfb;
+            }
+
+            #students-table tbody tr:nth-child(even) {
+                background: #ffffff;
+            }
+
+            #students-table tbody tr:hover {
+                background: #fff6ef;
+                box-shadow: inset 0 0 0 9999px rgba(244, 131, 61, 0.03);
+            }
+
+            #students-table tbody tr:focus-within {
+                box-shadow: inset 0 0 0 2px rgba(68, 114, 196, 0.16);
+            }
+
+            #students-table td {
+                line-height: 1.45;
+            }
+
+            #students-table td:nth-child(2),
+            #students-table td:nth-child(3) {
+                vertical-align: middle;
+            }
+
+            #students-table td:last-child {
+                white-space: nowrap;
+            }
+
+            .franchise-btn i {
+                font-size: 0.95rem;
+                line-height: 1;
+            }
+
             @media (min-width: 1500px) {
                 #students-table th,
                 #students-table td {
@@ -751,16 +834,16 @@
 
                 #students-table tbody {
                     display: grid;
-                    gap: 14px;
-                    padding: 14px;
-                    background: #fffaf6;
+                    gap: 12px;
+                    padding: 12px 0 0;
+                    background: transparent;
                 }
 
                 #students-table tbody tr {
                     background: white;
                     border: 1px solid var(--franchise-border);
                     border-radius: 18px;
-                    box-shadow: var(--franchise-shadow-soft);
+                    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
                     overflow: hidden;
                 }
 
@@ -771,9 +854,9 @@
 
                 #students-table td {
                     display: grid;
-                    grid-template-columns: 140px 1fr;
-                    gap: 12px;
-                    padding: 11px 14px;
+                    grid-template-columns: minmax(108px, 128px) minmax(0, 1fr);
+                    gap: 10px;
+                    padding: 12px 14px;
                     border-bottom: 1px solid #f0e6de;
                     text-align: left;
                 }
@@ -784,7 +867,7 @@
 
                 #students-table td::before {
                     font-weight: 850;
-                    color: var(--franchise-blue-dark);
+                    color: var(--franchise-orange-dark);
                     text-transform: uppercase;
                     font-size: 0.72rem;
                     letter-spacing: 0.06em;
@@ -851,10 +934,11 @@
 
                 .franchise-search-panel {
                     align-items: stretch;
-                    flex-direction: column;
+                    grid-template-columns: 1fr;
                 }
 
                 .franchise-search-input {
+                    justify-self: stretch;
                     width: 100%;
                 }
 
@@ -998,7 +1082,11 @@
                                 );
                             "
                         >
-                            Refresh agendas <span class="refresh-icon">↻</span>
+                            Refresh agendas
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
                         </button>
                     </form>
 
@@ -1014,7 +1102,11 @@
                                 );
                             "
                         >
-                            Check grades <span class="refresh-icon">↻</span>
+                            Check grades
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
                         </button>
                     </form>
                 </div>

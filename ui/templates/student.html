@@ -101,7 +101,7 @@
                 font-weight: 850;
                 color: var(--student-blue-dark);
                 margin: 0;
-                letter-spacing: -0.025em;
+                letter-spacing: 0;
                 line-height: 1.1;
             }
 
@@ -229,43 +229,6 @@
 
             .student-portal-card {
                 align-items: stretch;
-            }
-
-            .student-credential-list {
-                margin-top: 14px;
-                display: grid;
-                gap: 8px;
-            }
-
-            .student-credential-row {
-                display: grid;
-                grid-template-columns: 92px minmax(0, 1fr);
-                gap: 10px;
-                align-items: center;
-                padding: 9px 10px;
-                border: 1px solid var(--student-border);
-                border-radius: 12px;
-                background: #fffaf6;
-            }
-
-            .student-credential-label {
-                color: var(--student-muted);
-                font-size: 0.75rem;
-                font-weight: 850;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-
-            .student-credential-value {
-                color: var(--student-blue-dark);
-                background: white;
-                border: 1px solid #f0e6de;
-                border-radius: 9px;
-                padding: 5px 7px;
-                font-size: 0.86rem;
-                font-weight: 800;
-                overflow-wrap: anywhere;
-                white-space: normal;
             }
 
             .student-toolbar-panel {
@@ -442,7 +405,7 @@
                 gap: 5px;
                 white-space: normal;
                 margin: 0;
-                font-size: clamp(0.9rem, 0.18vw + 0.85rem, 1.03rem);
+                font-size: 0.96rem;
                 line-height: 1.35;
                 color: var(--student-text);
             }
@@ -654,7 +617,7 @@
                 color: white;
                 font-weight: 850;
                 text-transform: uppercase;
-                font-size: clamp(0.7rem, 0.18vw + 0.64rem, 0.8rem);
+                font-size: 0.76rem;
                 letter-spacing: 0.06em;
             }
 
@@ -682,6 +645,85 @@
             a:hover {
                 color: var(--student-orange-dark);
                 text-decoration: underline;
+            }
+
+            .student-summary-grid {
+                align-items: stretch;
+            }
+
+            .student-summary-card,
+            .student-toolbar-panel,
+            .student-card,
+            .grade-history-section {
+                border-color: rgba(234, 223, 215, 0.95);
+            }
+
+            .student-summary-card,
+            .student-card-body,
+            .grade-tab-panels {
+                min-width: 0;
+            }
+
+            .student-summary-value a {
+                overflow-wrap: anywhere;
+            }
+
+            .student-toolbar {
+                justify-content: flex-start;
+            }
+
+            .student-toolbar form {
+                flex: 1 1 190px;
+                max-width: 260px;
+            }
+
+            .student-btn {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .student-btn:focus-visible,
+            .student-back-link:focus-visible,
+            .grade-tab-button:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.22);
+                outline-offset: 2px;
+            }
+
+            .student-card-body {
+                display: grid;
+                gap: 14px;
+            }
+
+            .grade-history-table tbody tr:nth-child(odd) {
+                background: #fffdfb;
+            }
+
+            .grade-history-table tbody tr:hover {
+                background: #fff6ef;
+            }
+
+            .grade-history-table td {
+                line-height: 1.45;
+            }
+
+            .grade-history-table td:last-child {
+                white-space: normal;
+            }
+
+            .empty-text {
+                padding: 6px 0;
+            }
+
+            .student-summary-icon i,
+            .student-back-link i,
+            .student-btn i,
+            .student-summary-value a i {
+                font-size: 0.95rem;
+                line-height: 1;
+            }
+
+            .student-summary-value a i {
+                margin-left: 6px;
             }
 
             @media (max-width: 1100px) {
@@ -845,10 +887,6 @@
                     height: 48px;
                 }
 
-                .student-credential-row {
-                    grid-template-columns: 1fr;
-                    gap: 5px;
-                }
             }
 
             @media (prefers-reduced-motion: reduce) {
@@ -898,7 +936,8 @@
                     href="{{ url_for('franchise_view', franchise_id=session.get('franchise_id')) }}"
                     class="student-back-link"
                 >
-                    ← Back to Student List
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                    Back to Student List
                 </a>
             </div>
 
@@ -921,7 +960,9 @@
                             Current student profile
                         </div>
                     </div>
-                    <div class="student-summary-icon">S</div>
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-user-graduate" aria-hidden="true"></i>
+                    </div>
                 </div>
 
                 <div class="student-summary-card student-portal-card">
@@ -929,8 +970,16 @@
                         <div class="student-summary-label">Portal</div>
 
                         <div class="student-summary-value">
-                            <a href="{{ student.portal_link }}" target="_blank">
+                            <a
+                                href="{{ student.portal_link }}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
                                 {{ student.portal }}
+                                <i
+                                    class="fa-solid fa-arrow-up-right-from-square"
+                                    aria-hidden="true"
+                                ></i>
                             </a>
                         </div>
 
@@ -938,28 +987,11 @@
                             Open the connected grade portal
                         </div>
 
-                        <div class="student-credential-list">
-                            <div class="student-credential-row">
-                                <span class="student-credential-label">
-                                    Username
-                                </span>
-                                <code class="student-credential-value">
-                                    {{ student.portal_username or "N/A" }}
-                                </code>
-                            </div>
-
-                            <div class="student-credential-row">
-                                <span class="student-credential-label">
-                                    Password
-                                </span>
-                                <code class="student-credential-value">
-                                    {{ student.portal_password or "N/A" }}
-                                </code>
-                            </div>
-                        </div>
                     </div>
 
-                    <div class="student-summary-icon">↗</div>
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-link" aria-hidden="true"></i>
+                    </div>
                 </div>
 
                 <div class="student-summary-card">
@@ -974,7 +1006,9 @@
                             Current grade standing
                         </div>
                     </div>
-                    <div class="student-summary-icon">✓</div>
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+                    </div>
                 </div>
             </section>
 
@@ -991,7 +1025,11 @@
                                 );
                             "
                         >
-                            Refresh agendas <span class="refresh-icon">↻</span>
+                            Refresh agendas
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
                         </button>
                     </form>
 
@@ -1006,7 +1044,11 @@
                                 );
                             "
                         >
-                            Check grades <span class="refresh-icon">↻</span>
+                            Check grades
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
                         </button>
                     </form>
                 </div>
