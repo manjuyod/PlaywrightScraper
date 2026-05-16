@@ -21,8 +21,9 @@ import json
 import math
 import pathlib
 import re
-from scraper.runner import db_conn, DictCursor, connection
-import psycopg2
+from scraper.runner import db_conn
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import SQLAlchemyError
 from typing import Dict, List
 
 import gspread
@@ -86,19 +87,20 @@ def _retry_on_rate_limit(func):
                     raise
     return wrapper
 
-def _load_sheet_map(conn: connection) -> Dict[int, str]:
+def _load_sheet_map(conn: Connection) -> Dict[int, str]:
     """Return {FranchiseID: <spreadsheet-id>} extracted from URL."""
-    cur = conn.cursor()
-    cur.execute("SELECT franchiseid, spreadsheet FROM Spreadsheets")
+    rows = conn.exec_driver_sql("SELECT franchiseid, spreadsheet FROM Spreadsheets").mappings().all()
     mapping: Dict[int, str] = {}
-    for fid, url in cur.fetchall():
+    for row in rows:
+        fid = row["franchiseid"]
+        url = row["spreadsheet"]
         m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
         if m:
             mapping[fid] = m.group(1)
     return mapping
 
 
-def _query_students(conn: connection) -> pd.DataFrame:
+def _query_students(conn: Connection) -> pd.DataFrame:
     """Return a DataFrame with student rows + WeeklyData used for grade blocks."""
     sql = """
         SELECT
@@ -121,7 +123,7 @@ def _query_students(conn: connection) -> pd.DataFrame:
     return pd.read_sql_query(sql, conn)
 
 
-def _query_login_master(conn: connection) -> pd.DataFrame:
+def _query_login_master(conn: Connection) -> pd.DataFrame:
     """Raw login control data for LoginMaster tab."""
     sql = """
         SELECT
@@ -185,21 +187,20 @@ def _extract_subjects(wdata: dict) -> List[str]:
             names.update(week_payload.keys())
     return sorted(names)
 
-def _load_known_franchise_ids(conn: connection) -> set[int]:
+def _load_known_franchise_ids(conn: Connection) -> set[int]:
     """
     Only allow FranchiseIDs that are present in Spreadsheets.
     (Optionally require a non-empty spreadsheet URL.)
     """
-    cur = conn.cursor()
     try:
-        cur.execute("""
+        rows = conn.exec_driver_sql("""
             SELECT DISTINCT franchiseid
             FROM Spreadsheets
             WHERE franchiseid IS NOT NULL
               AND COALESCE(spreadsheet, '') <> ''   -- comment out this line if URL shouldn't be required
-        """)
-        return {int(r[0]) for r in cur.fetchall() if r[0] is not None}
-    except psycopg2.Error as e:
+        """).mappings().all()
+        return {int(r["franchiseid"]) for r in rows if r["franchiseid"] is not None}
+    except SQLAlchemyError as e:
         print(f"[WARN] Could not load FranchiseIDs from Spreadsheets: {e}")
         return set()
     
@@ -425,7 +426,6 @@ def main() -> None:
         target_fids = {args.franchise_id} & known_fids
         if not target_fids:
             print(f"[SKIP] FranchiseID {args.franchise_id} not in known set; nothing to do.")
-            conn.close()
             return
     else:
         target_fids = known_fids
@@ -501,17 +501,10 @@ def main() -> None:
 
         # (Optional) push to Google Sheets only if you also have a mapping:
         if fid in sheet_map:
-            _push_multi_sheets(sheet_map[fid], {
-                "LoginMaster": (login_master, True),
-                "HS": (hs_df, False),
-                "MS": (ms_df, False),
-                "Error": (err_df, False),
-            })
+            _push_multi_sheets(sheet_map[fid], frames)
             print(f"  Uploaded to spreadsheet {sheet_map[fid]}")
         else:
             print(f"  [SKIP] No spreadsheet configured for FranchiseID {fid}")
-
-    conn.close()
 
 if __name__ == "__main__":
     main()

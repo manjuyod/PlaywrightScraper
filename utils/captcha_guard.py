@@ -1,5 +1,4 @@
 # utils/captcha_guard.py
-import asyncio
 from playwright.async_api import Page
 
 class CaptchaError(RuntimeError):

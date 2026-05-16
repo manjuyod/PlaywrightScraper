@@ -63,7 +63,8 @@ class HowsSchoolGoing(PortalEngine):
                     grades = grade_text.split(' ')
                     if len(grades) == 2:
                         grade = canonicalize_grade(grades[1])
-                    else: grade = canonicalize_grade(grades[0])
+                    else:
+                        grade = canonicalize_grade(grades[0])
                     print(title, grade)
                     # print(f'found {title}\n\tgrade: {grade}')
                     if grade:

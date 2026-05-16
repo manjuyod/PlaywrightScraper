@@ -1,5 +1,6 @@
 
-import asyncio, time, random
+import asyncio
+import time
 
 class TokenBucket:
     """Allow <rate> requests every <per> seconds (sliding window)."""

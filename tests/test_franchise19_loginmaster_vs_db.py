@@ -9,8 +9,6 @@ from typing import Any
 import gspread
 import pytest
 from google.oauth2.service_account import Credentials
-from psycopg2.extras import DictCursor
-
 from scraper.runner import db_conn
 
 
@@ -80,22 +78,24 @@ def _extract_sheet_id(url: str) -> str:
 
 def _get_sheet_id_for_franchise(fid: int) -> str:
     with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT spreadsheet
-            FROM Spreadsheets
-            WHERE franchiseid = %s
-              AND COALESCE(spreadsheet, '') <> ''
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (fid,),
+        row = (
+            conn.exec_driver_sql(
+                """
+                SELECT spreadsheet
+                FROM Spreadsheets
+                WHERE franchiseid = %s
+                  AND COALESCE(spreadsheet, '') <> ''
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (fid,),
+            )
+            .mappings()
+            .fetchone()
         )
-        row = cur.fetchone()
-    if not row or not row[0]:
+    if not row or not row.get("spreadsheet"):
         raise AssertionError(f"No spreadsheet URL found in Spreadsheets table for FranchiseID={fid}")
-    return _extract_sheet_id(str(row[0]))
+    return _extract_sheet_id(str(row["spreadsheet"]))
 
 
 def _gc_client() -> gspread.Client:
@@ -173,26 +173,28 @@ def test_franchise_19_loginmaster_matches_db_exact_cells() -> None:
     )
 
     with db_conn() as conn:
-        cur = conn.cursor(cursor_factory=DictCursor)
-        cur.execute(
-            """
-            SELECT
-                firstname,
-                lastname,
-                grade,
-                portal1,
-                p1username,
-                p1password,
-                portal2,
-                p2username,
-                p2password,
-                passwordgood
-            FROM Student
-            WHERE franchiseid = %s
-            """,
-            (fid,),
+        db_rows = (
+            conn.exec_driver_sql(
+                """
+                SELECT
+                    firstname,
+                    lastname,
+                    grade,
+                    portal1,
+                    p1username,
+                    p1password,
+                    portal2,
+                    p2username,
+                    p2password,
+                    passwordgood
+                FROM Student
+                WHERE franchiseid = %s
+                """,
+                (fid,),
+            )
+            .mappings()
+            .all()
         )
-        db_rows = [dict(r) for r in cur.fetchall()]
 
     assert db_rows, f"DB has 0 Student rows for FranchiseID={fid}"
 

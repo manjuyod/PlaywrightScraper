@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from contextlib import asynccontextmanager
-from typing import Any, Callable, Dict, List, Literal, Optional, Pattern
+from datetime import date, datetime, time, timedelta
+from typing import Callable, Dict, List, Literal, Optional, Pattern, Tuple
 
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Frame, Locator, Page, expect
 from playwright.async_api import TimeoutError as PlaywrightTimeout
-from psycopg2.extensions import NoneAdapter
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -343,7 +344,7 @@ async def check_login_errors(
         if not any(
             pattern.lower() in current_url.lower() for pattern in success_url_patterns
         ):
-            raise login_error_class(f"Login failed: did not reach expected page")
+            raise login_error_class("Login failed: did not reach expected page")
 
 
 # ============================================================================
@@ -646,10 +647,6 @@ async def get_frame_by_url_pattern(
     except PlaywrightTimeout:
         return None
 
-
-import re
-from datetime import date, datetime, time, timedelta
-from typing import Optional, Tuple
 
 _WEEKDAYS = {
     "monday": 0,

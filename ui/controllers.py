@@ -4,7 +4,8 @@ import plotly.express as px
 
 # # Route helpers
 def get_grades_x_weeks_back(raw_grades: dict, weeks_back: int) -> list[CourseGrade]:
-    if len(raw_grades.values()) < weeks_back: return []
+    if len(raw_grades.values()) < weeks_back:
+        return []
     grades_x_weeks_ago: dict[str, str] = list(raw_grades.values())[-weeks_back] # gets the grades from x weeks back. dict[course, grade] 
     return [CourseGrade(k, v) for k, v in grades_x_weeks_ago.items() if isinstance(v, float)]
     
@@ -35,7 +36,8 @@ def compute_student_report(student: Student) -> Student:
     most_recent_grades = get_grades_x_weeks_back(student.grades, 1)
     second_most_recent_grades = get_grades_x_weeks_back(student.grades, 2)
     compute_grade_changes(most_recent_grades, second_most_recent_grades)
-    if len(most_recent_grades) == 0: return student
+    if len(most_recent_grades) == 0:
+        return student
     
     student.grades_snapshot = most_recent_grades
     
@@ -83,12 +85,14 @@ def check_students_status(students: list[DictRow]) -> dict:
             not student.get('portal1') 
             or not student.get('p1username') 
             or not student.get('p1password')
-        ): malformed_inputs += 1
+        ):
+            malformed_inputs += 1
         # check for nonconfigured portals (portal specified but not configured in scraper)
         if (
             student.get('portal1') is not None and
             student.get('portal') is None
-        ): nonconfigured_portals += 1
+        ):
+            nonconfigured_portals += 1
 
     grouped_errors = sorted(
         (

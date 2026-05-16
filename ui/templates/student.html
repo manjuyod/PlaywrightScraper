@@ -4,33 +4,941 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>{{ student.first_name }} {{ student.last_name }} - Report</title>
+
         <link
             rel="stylesheet"
             href="{{ url_for('static', filename='styles.css') }}"
         />
-        <link rel="icon" type="image/webp" href="../static/imgs/tc_logo.webp" />
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+
+        <style>
+            :root {
+                --student-blue: #4472c4;
+                --student-blue-dark: #2f5597;
+                --student-blue-soft: #edf4ff;
+
+                --student-orange: #f4833d;
+                --student-orange-dark: #d76624;
+                --student-orange-soft: #fff0e7;
+
+                --student-bg: #fff8f3;
+                --student-panel: #ffffff;
+                --student-border: #eadfd7;
+                --student-text: #102033;
+                --student-muted: #64748b;
+
+                --student-success: #15803d;
+                --student-danger: #dc2626;
+                --student-warning: #d8a709;
+
+                --student-shadow: 0 14px 35px rgba(244, 131, 61, 0.12);
+                --student-shadow-soft: 0 8px 22px rgba(15, 23, 42, 0.07);
+            }
+
+            body {
+                font-family:
+                    "Inter",
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    sans-serif;
+                background: var(--student-bg);
+                color: var(--student-text);
+                margin: 0;
+            }
+
+            .student-header-section {
+                background: rgba(255, 255, 255, 0.96);
+                padding: 18px 0;
+                margin-bottom: 24px;
+                border-bottom: 1px solid var(--student-border);
+                box-shadow: var(--student-shadow-soft);
+            }
+
+            .student-header-inner {
+                width: min(1800px, calc(100% - 32px));
+                margin: 0 auto;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 24px;
+            }
+
+            .student-brand {
+                display: flex;
+                align-items: center;
+                gap: 18px;
+                min-width: 0;
+            }
+
+            .student-logo-wrap {
+                height: 64px;
+                width: 64px;
+                border-radius: 18px;
+                display: grid;
+                place-items: center;
+                background: #ffffff;
+                border: 1px solid var(--student-border);
+                box-shadow: var(--student-shadow-soft);
+                overflow: hidden;
+                flex: 0 0 auto;
+            }
+
+            .student-logo {
+                width: 54px;
+                height: 54px;
+                object-fit: contain;
+                display: block;
+            }
+
+            .student-title {
+                font-size: 2rem;
+                font-weight: 850;
+                color: var(--student-blue-dark);
+                margin: 0;
+                letter-spacing: 0;
+                line-height: 1.1;
+            }
+
+            .student-subtitle {
+                color: var(--student-muted);
+                font-size: 0.95rem;
+                margin-top: 4px;
+            }
+
+            .student-header-meta {
+                text-align: right;
+                color: var(--student-muted);
+                font-size: 0.95rem;
+                line-height: 1.5;
+                flex: 0 0 auto;
+            }
+
+            .student-header-meta strong {
+                display: block;
+                color: var(--student-orange-dark);
+                margin-bottom: 4px;
+                font-weight: 800;
+            }
+
+            .student-page {
+                width: min(1900px, calc(100% - 32px));
+                margin: 24px auto 48px;
+            }
+
+            .student-back-row {
+                margin-bottom: 16px;
+            }
+
+            .student-back-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                color: var(--student-blue);
+                text-decoration: none;
+                font-weight: 850;
+                background: white;
+                border: 1px solid var(--student-border);
+                border-radius: 999px;
+                padding: 10px 14px;
+                box-shadow: var(--student-shadow-soft);
+            }
+
+            .student-back-link:hover {
+                color: var(--student-orange-dark);
+                text-decoration: none;
+                transform: translateY(-1px);
+            }
+
+            .student-summary-grid {
+                display: grid;
+                grid-template-columns: repeat(
+                    auto-fit,
+                    minmax(min(100%, 300px), 1fr)
+                );
+                gap: 14px;
+                margin-bottom: 18px;
+            }
+
+            .student-summary-card {
+                background: var(--student-panel);
+                border: 1px solid var(--student-border);
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: var(--student-shadow-soft);
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 16px;
+                min-height: 112px;
+            }
+
+            .student-summary-label {
+                color: var(--student-muted);
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                font-weight: 850;
+                margin-bottom: 7px;
+            }
+
+            .student-summary-value {
+                color: var(--student-blue-dark);
+                font-size: 1.25rem;
+                font-weight: 900;
+                line-height: 1.2;
+            }
+
+            .student-summary-note {
+                color: var(--student-muted);
+                font-size: 0.9rem;
+                margin-top: 8px;
+            }
+
+            .student-summary-icon {
+                height: 44px;
+                width: 44px;
+                border-radius: 16px;
+                display: grid;
+                place-items: center;
+                background: var(--student-orange-soft);
+                color: var(--student-orange-dark);
+                font-weight: 900;
+                flex: 0 0 auto;
+            }
+
+            .student-summary-card:nth-child(1) .student-summary-icon {
+                background: var(--student-blue-soft);
+                color: var(--student-blue-dark);
+            }
+
+            .student-summary-card:nth-child(2) .student-summary-icon {
+                background: var(--student-orange-soft);
+                color: var(--student-orange-dark);
+            }
+
+            .student-summary-card:nth-child(3) .student-summary-icon {
+                background: rgba(21, 128, 61, 0.12);
+                color: var(--student-success);
+            }
+
+            .student-portal-card {
+                align-items: stretch;
+            }
+
+            .student-toolbar-panel {
+                background: var(--student-panel);
+                border: 1px solid var(--student-border);
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: var(--student-shadow-soft);
+                margin-bottom: 18px;
+            }
+
+            .student-toolbar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+                align-items: center;
+                justify-content: flex-end;
+            }
+
+            .student-btn {
+                border: none;
+                border-radius: 12px;
+                padding: 11px 16px;
+                font-weight: 800;
+                font-size: 0.86rem;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition:
+                    transform 0.18s ease,
+                    box-shadow 0.18s ease,
+                    background 0.18s ease;
+            }
+
+            .student-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+            }
+
+            .student-btn-primary {
+                background: var(--student-blue);
+                color: white;
+            }
+
+            .student-btn-primary:hover {
+                background: var(--student-blue-dark);
+            }
+
+            .student-btn-gold {
+                background: #f4d03f;
+                color: #3b3b3b;
+            }
+
+            .refresh-icon {
+                margin-left: 5px;
+                font-size: 1.1em;
+            }
+
+            .student-progress-stack {
+                display: grid;
+                gap: 12px;
+                margin-bottom: 18px;
+            }
+
+            .student-progress-container {
+                background: var(--student-panel);
+                border: 1px solid var(--student-border);
+                border-radius: 16px;
+                padding: 15px;
+                box-shadow: var(--student-shadow-soft);
+            }
+
+            .student-progress-label {
+                margin-bottom: 10px;
+                font-size: 0.95rem;
+                font-weight: 800;
+                color: var(--student-orange-dark);
+            }
+
+            .student-progress-bar-bg {
+                width: 100%;
+                height: 12px;
+                background-color: #f0e6de;
+                border-radius: 999px;
+                overflow: hidden;
+            }
+
+            .student-progress-bar-fill {
+                height: 100%;
+                background-color: var(--student-orange);
+                transition: width 0.3s ease;
+            }
+
+            .flash-messages {
+                margin-bottom: 18px;
+            }
+
+            .flash-message {
+                padding: 13px 15px;
+                background: var(--student-orange-soft);
+                border-left: 5px solid var(--student-orange);
+                color: var(--student-text);
+                margin-bottom: 10px;
+                border-radius: 12px;
+                box-shadow: var(--student-shadow-soft);
+                font-weight: 650;
+            }
+
+            .student-grid {
+                display: grid;
+                grid-template-columns: minmax(280px, 0.85fr) minmax(320px, 1.15fr);
+                gap: 18px;
+                align-items: stretch;
+            }
+
+            .student-card {
+                background: var(--student-panel);
+                border: 1px solid var(--student-border);
+                border-radius: 20px;
+                box-shadow: var(--student-shadow-soft);
+                overflow: hidden;
+                min-width: 0;
+            }
+
+            .student-card-header {
+                background: var(--student-orange);
+                color: white;
+                padding: 16px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+
+            .student-card-header h2 {
+                margin: 0;
+                font-size: 1.05rem;
+                font-weight: 850;
+                color: white;
+            }
+
+            .student-card-header span {
+                font-size: 0.88rem;
+                opacity: 0.9;
+                font-weight: 700;
+            }
+
+            .student-card-body {
+                padding: 18px;
+            }
+
+            .grade-snapshot-card {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .snapshot-list {
+                display: grid;
+                gap: 10px;
+            }
+
+            .grade-list {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+                display: grid;
+                gap: 6px;
+            }
+
+            .grade-list li {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 5px;
+                white-space: normal;
+                margin: 0;
+                font-size: 0.96rem;
+                line-height: 1.35;
+                color: var(--student-text);
+            }
+
+            .course-name {
+                font-weight: 800;
+                color: var(--student-text);
+                overflow-wrap: anywhere;
+                min-width: 0;
+            }
+
+            .course-grade {
+                font-weight: 900;
+                white-space: nowrap;
+            }
+
+            .grade-up {
+                color: #2e7d32;
+                margin-left: 4px;
+                font-size: 0.8em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-down {
+                color: #d32f2f;
+                margin-left: 4px;
+                font-size: 0.8em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-no-change {
+                color: #8e8e93;
+                margin-left: 4px;
+                font-size: 0.6em;
+                font-weight: bold;
+                line-height: 1;
+            }
+
+            .grade-red {
+                color: #d32f2f;
+            }
+
+            .grade-orange {
+                color: var(--student-orange);
+            }
+
+            .grade-yellow {
+                color: #d8a709;
+            }
+
+            .grade-green {
+                color: #2e7d32;
+            }
+
+            .standing-good {
+                color: #2e7d32;
+                font-weight: 900;
+            }
+
+            .standing-fair {
+                color: #d8a709;
+                font-weight: 900;
+            }
+
+            .standing-poor {
+                color: #d32f2f;
+                font-weight: 900;
+            }
+
+            .agenda-content {
+                --agenda-item-height: 88px;
+                max-height: calc(var(--agenda-item-height) * 4);
+                overflow-y: auto;
+                padding-right: 8px;
+                display: grid;
+                gap: 10px;
+            }
+
+            .agenda-item {
+                min-height: var(--agenda-item-height);
+                border: 1px solid #f0e6de;
+                border-left: 5px solid var(--student-orange);
+                border-radius: 14px;
+                padding: 12px 14px;
+                background: #fffaf6;
+            }
+
+            .agenda-item h4 {
+                margin: 0;
+                color: var(--student-orange-dark);
+                font-size: 1rem;
+                font-weight: 850;
+            }
+
+            .agenda-item p {
+                margin: 6px 0 0;
+                color: var(--student-muted);
+                font-size: 0.92rem;
+                font-weight: 650;
+            }
+
+            .agenda-content::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .agenda-content::-webkit-scrollbar-track {
+                background: #f1f3f5;
+            }
+
+            .agenda-content::-webkit-scrollbar-thumb {
+                background: #c1c7cd;
+                border-radius: 3px;
+            }
+
+            .agenda-content::-webkit-scrollbar-thumb:hover {
+                background: #a9b0b6;
+            }
+
+            .grade-history-section {
+                grid-column: 1 / -1;
+                background: var(--student-panel);
+                border: 1px solid var(--student-border);
+                border-radius: 20px;
+                box-shadow: var(--student-shadow-soft);
+                overflow: hidden;
+            }
+
+            .grade-history-header {
+                background: var(--student-orange);
+                color: white;
+                padding: 16px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+
+            .grade-history-header h2 {
+                margin: 0;
+                font-size: 1.05rem;
+                font-weight: 850;
+                color: white;
+            }
+
+            .grade-tabs {
+                display: inline-flex;
+                gap: 6px;
+                background: rgba(255, 255, 255, 0.18);
+                padding: 4px;
+                border-radius: 12px;
+            }
+
+            .grade-tab-button {
+                border: none;
+                background: transparent;
+                color: white;
+                font-weight: 800;
+                padding: 7px 13px;
+                border-radius: 10px;
+                cursor: pointer;
+                font-size: 0.9rem;
+                text-transform: none;
+                letter-spacing: 0;
+            }
+
+            .grade-tab-button.active {
+                background: white;
+                color: var(--student-blue-dark);
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+            }
+
+            .grade-tab-panels {
+                padding: 18px;
+            }
+
+            .grade-tab-panel {
+                display: none;
+            }
+
+            .grade-tab-panel.active {
+                display: block;
+            }
+
+            .student-table-container {
+                width: 100%;
+                overflow-x: visible;
+            }
+
+            .grade-history-table {
+                width: 100%;
+                border-collapse: collapse;
+                table-layout: fixed;
+                margin: 0;
+            }
+
+            .grade-history-table th,
+            .grade-history-table td {
+                padding: clamp(10px, 0.7vw, 16px);
+                text-align: left;
+                border-bottom: 1px solid #f0e6de;
+                vertical-align: top;
+                overflow-wrap: anywhere;
+            }
+
+            .grade-history-table th {
+                background: var(--student-blue);
+                color: white;
+                font-weight: 850;
+                text-transform: uppercase;
+                font-size: 0.76rem;
+                letter-spacing: 0.06em;
+            }
+
+            .grade-history-table th:first-child,
+            .grade-history-table td:first-child {
+                width: 180px;
+            }
+
+            .grade-history-table tbody tr:hover {
+                background: #fffaf6;
+            }
+
+            .empty-text {
+                color: var(--student-muted);
+                margin: 0;
+                font-weight: 650;
+            }
+
+            a {
+                color: var(--student-blue);
+                text-decoration: none;
+                font-weight: 750;
+            }
+
+            a:hover {
+                color: var(--student-orange-dark);
+                text-decoration: underline;
+            }
+
+            .student-summary-grid {
+                align-items: stretch;
+            }
+
+            .student-summary-card,
+            .student-toolbar-panel,
+            .student-card,
+            .grade-history-section {
+                border-color: rgba(234, 223, 215, 0.95);
+            }
+
+            .student-summary-card,
+            .student-card-body,
+            .grade-tab-panels {
+                min-width: 0;
+            }
+
+            .student-summary-value a {
+                overflow-wrap: anywhere;
+            }
+
+            .student-toolbar {
+                justify-content: flex-start;
+            }
+
+            .student-toolbar form {
+                flex: 1 1 190px;
+                max-width: 260px;
+            }
+
+            .student-btn {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .student-btn:focus-visible,
+            .student-back-link:focus-visible,
+            .grade-tab-button:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.22);
+                outline-offset: 2px;
+            }
+
+            .student-card-body {
+                display: grid;
+                gap: 14px;
+            }
+
+            .grade-history-table tbody tr:nth-child(odd) {
+                background: #fffdfb;
+            }
+
+            .grade-history-table tbody tr:hover {
+                background: #fff6ef;
+            }
+
+            .grade-history-table td {
+                line-height: 1.45;
+            }
+
+            .grade-history-table td:last-child {
+                white-space: normal;
+            }
+
+            .empty-text {
+                padding: 6px 0;
+            }
+
+            .student-summary-icon i,
+            .student-back-link i,
+            .student-btn i,
+            .student-summary-value a i {
+                font-size: 0.95rem;
+                line-height: 1;
+            }
+
+            .student-summary-value a i {
+                margin-left: 6px;
+            }
+
+            @media (max-width: 1100px) {
+                .student-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (max-width: 900px) {
+                .student-header-inner {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+
+                .student-header-meta {
+                    text-align: left;
+                }
+
+                .student-title {
+                    font-size: 1.4rem;
+                }
+
+                .student-toolbar {
+                    align-items: stretch;
+                    justify-content: stretch;
+                }
+
+                .student-toolbar form,
+                .student-toolbar button {
+                    width: 100%;
+                }
+            }
+
+            @media (max-width: 760px) {
+                .grade-history-header {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+
+                .grade-tabs {
+                    width: 100%;
+                }
+
+                .grade-tab-button {
+                    flex: 1;
+                }
+
+                .student-table-container {
+                    overflow-x: visible;
+                }
+
+                .grade-history-table,
+                .grade-history-table thead,
+                .grade-history-table tbody,
+                .grade-history-table th,
+                .grade-history-table td,
+                .grade-history-table tr {
+                    display: block;
+                    width: 100%;
+                }
+
+                .grade-history-table {
+                    border-collapse: separate;
+                    border-spacing: 0;
+                }
+
+                .grade-history-table thead {
+                    display: none;
+                }
+
+                .grade-history-table tbody {
+                    display: grid;
+                    gap: 14px;
+                    background: #fffaf6;
+                }
+
+                .grade-history-table tbody tr {
+                    background: white;
+                    border: 1px solid var(--student-border);
+                    border-radius: 18px;
+                    box-shadow: var(--student-shadow-soft);
+                    overflow: hidden;
+                }
+
+                .grade-history-table td {
+                    display: grid;
+                    grid-template-columns: 120px 1fr;
+                    gap: 12px;
+                    padding: 12px 14px;
+                    border-bottom: 1px solid #f0e6de;
+                }
+
+                .grade-history-table td:last-child {
+                    border-bottom: none;
+                }
+
+                .grade-history-table td::before {
+                    font-weight: 850;
+                    color: var(--student-blue-dark);
+                    text-transform: uppercase;
+                    font-size: 0.72rem;
+                    letter-spacing: 0.06em;
+                }
+
+                .grade-history-table td:nth-child(1)::before {
+                    content: "Date";
+                }
+
+                .grade-history-table td:nth-child(2)::before {
+                    content: "Grades";
+                }
+
+                .grade-history-table th:first-child,
+                .grade-history-table td:first-child {
+                    width: 100%;
+                }
+            }
+
+            @media (max-width: 640px) {
+                .student-page,
+                .student-header-inner {
+                    width: min(100% - 24px, 1800px);
+                }
+
+                .student-summary-card {
+                    min-height: unset;
+                }
+
+                .student-card-header,
+                .grade-history-header {
+                    padding: 14px 16px;
+                }
+
+                .student-card-body,
+                .grade-tab-panels {
+                    padding: 14px;
+                }
+            }
+
+            @media (max-width: 460px) {
+                .grade-history-table td {
+                    grid-template-columns: 1fr;
+                    gap: 5px;
+                }
+
+                .grade-history-table td::before {
+                    margin-bottom: 2px;
+                }
+
+                .student-brand {
+                    align-items: flex-start;
+                }
+
+                .student-logo-wrap {
+                    height: 56px;
+                    width: 56px;
+                }
+
+                .student-logo {
+                    width: 48px;
+                    height: 48px;
+                }
+
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                * {
+                    transition: none !important;
+                    animation: none !important;
+                }
+            }
+        </style>
     </head>
+
     <body>
-        <div class="container">
-            <div class="logo">
+        <header class="student-header-section">
+            <div class="student-header-inner">
+                <div class="student-brand">
+                    <div class="student-logo-wrap">
+                        <img
+                            src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                            alt="Tutoring Club Logo"
+                            class="student-logo"
+                        />
+                    </div>
+
+                    <div>
+                        <h1 class="student-title">
+                            {{ student.first_name }} {{ student.last_name }}
+                        </h1>
+                        <div class="student-subtitle">
+                            Student grade, agenda, and history report
+                        </div>
+                    </div>
+                </div>
+
+                <div class="student-header-meta">
+                    <strong>Student Report</strong>
+                    Status: {{ student.status }} · Standing:
+                    <span class="standing-{{ student.standing|lower }}">
+                        {{ student.standing }}
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <main class="student-page">
+            <div class="student-back-row">
                 <a
                     href="{{ url_for('franchise_view', franchise_id=session.get('franchise_id')) }}"
-                    class="back-link"
-                    >← Back to Student List</a
+                    class="student-back-link"
                 >
-                <h1>{{ student.first_name }} {{ student.last_name }}</h1>
-                <p>
-                    Status: {{ student.status }} | Standing:
-                    <span class="standing-{{ student.standing|lower }}"
-                        >{{ student.standing }}</span
-                    >
-                </p>
-                <p>
-                    Portal:
-                    <a href="{{ student.portal_link }}" target="_blank"
-                        >{{ student.portal }}</a
-                    >
-                </p>
+                    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                    Back to Student List
+                </a>
             </div>
 
             {% with messages = get_flashed_messages() %} {% if messages %}
@@ -41,218 +949,210 @@
             </div>
             {% endif %} {% endwith %}
 
-            <div class="actions-bar">
-                <form method="POST" style="margin-left: auto">
-                    <button
-                        type="submit"
-                        name="run_agenda"
-                        class="btn btn-agenda"
-                        onclick="
-                            return confirm(
-                                'This will begin a long job and may take a few minutes. Do you want to continue?',
-                            );
-                        "
-                    >
-                        Refresh agendas <span class="refresh-icon">↻</span>
-                    </button>
-                </form>
-                <form method="POST">
-                    <button
-                        type="submit"
-                        name="run_scraper"
-                        class="btn btn-check-grades"
-                        onclick="
-                            return confirm(
-                                'This will begin a long job and may take a few minutes. Do you want to continue?',
-                            );
-                        "
-                    >
-                        Check grades <span class="refresh-icon">↻</span>
-                    </button>
-                </form>
-            </div>
-
-            <div
-                id="progress-container"
-                class="progress-container"
-                style="display: none"
-            >
-                <div id="progress-label" class="progress-label">
-                    Grade collection in progress...
-                </div>
-                <div class="progress-bar-bg">
-                    <div
-                        id="progress-bar-fill"
-                        class="progress-bar-fill"
-                        style="width: 0%"
-                    ></div>
-                </div>
-            </div>
-
-            <div
-                id="progress-container-agenda"
-                class="progress-container"
-                style="display: none"
-            >
-                <div id="progress-label-agenda" class="progress-label">
-                    Agenda refresh in progress...
-                </div>
-                <div class="progress-bar-bg">
-                    <div
-                        id="progress-bar-fill-agenda"
-                        class="progress-bar-fill"
-                        style="width: 0%"
-                    ></div>
-                </div>
-            </div>
-
-            <script>
-                const jobId = "{{ job_id }}";
-                const agendaJobId = "{{ agenda_job_id }}";
-
-                function pollStatus(jobId, elements, inProgressLabel) {
-                    const { container, label, bar } = elements;
-                    fetch(`/status/${jobId}`)
-                        .then((response) => {
-                            if (!response.ok) {
-                                throw new Error(
-                                    "Job not found or error fetching status",
-                                );
-                            }
-                            return response.json();
-                        })
-                        .then((data) => {
-                            if (data.step >= 0 && data.step < data.steps) {
-                                container.style.display = "block";
-                                const percentage = Math.round(data.pct * 100);
-                                console.log(
-                                    `Polling status (${jobId}): ${percentage}%`,
-                                );
-                                bar.style.width = `${percentage}%`;
-                                label.innerText = `${inProgressLabel}: ${data.step} / ${data.total + 2}`;
-                                setTimeout(
-                                    () =>
-                                        pollStatus(
-                                            jobId,
-                                            elements,
-                                            inProgressLabel,
-                                        ),
-                                    2000,
-                                );
-                            } else if (data.step === data.steps) {
-                                container.style.display = "block";
-                                bar.style.width = "100%";
-                                label.innerText = `${inProgressLabel} complete! Reloading...`;
-                                console.log("Job complete!");
-                                setTimeout(
-                                    () => window.location.reload(),
-                                    2000,
-                                );
-                            } else {
-                                console.log(
-                                    "Job not found or error fetching status",
-                                );
-                                container.style.display = "none";
-                            }
-                        })
-                        .catch((error) => {
-                            console.log("Polling stopped or error:", error);
-                            container.style.display = "none";
-                        });
-                }
-
-                if (jobId) {
-                    pollStatus(
-                        jobId,
-                        {
-                            container:
-                                document.getElementById("progress-container"),
-                            label: document.getElementById("progress-label"),
-                            bar: document.getElementById("progress-bar-fill"),
-                        },
-                        "Grade collection in progress",
-                    );
-                }
-
-                if (agendaJobId) {
-                    pollStatus(
-                        agendaJobId,
-                        {
-                            container: document.getElementById(
-                                "progress-container-agenda",
-                            ),
-                            label: document.getElementById(
-                                "progress-label-agenda",
-                            ),
-                            bar: document.getElementById(
-                                "progress-bar-fill-agenda",
-                            ),
-                        },
-                        "Agenda refresh in progress",
-                    );
-                }
-            </script>
-
-            <div class="student-grid">
-                <div class="info-card grade-snapshot-card">
-                    <div class="section-header" style="margin-top: 0">
-                        <h2>Grade Snapshot (Recent)</h2>
+            <section class="student-summary-grid">
+                <div class="student-summary-card">
+                    <div>
+                        <div class="student-summary-label">Student</div>
+                        <div class="student-summary-value">
+                            {{ student.first_name }} {{ student.last_name }}
+                        </div>
+                        <div class="student-summary-note">
+                            Current student profile
+                        </div>
                     </div>
-                    {% if student.grades_snapshot %}
-                    <ul class="grade-list snapshot-list">
-                        {% for cg in student.grades_snapshot %}
-                        <li>
-                            <span class="course-name">{{ cg.course }}:</span>
-                            <span
-                                class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-user-graduate" aria-hidden="true"></i>
+                    </div>
+                </div>
+
+                <div class="student-summary-card student-portal-card">
+                    <div>
+                        <div class="student-summary-label">Portal</div>
+
+                        <div class="student-summary-value">
+                            <a
+                                href="{{ student.portal_link }}"
+                                target="_blank"
+                                rel="noopener noreferrer"
                             >
-                                {{ cg.grade }} {% if cg.change == '+' %}
-                                <span class="grade-up">▲</span>
-                                {% elif cg.change == '-' %}
-                                <span class="grade-down">▼</span>
-                                {% else %}
-                                <span class="grade-no-change">●</span>
-                                {% endif %}
-                            </span>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p>No recent grades available.</p>
-                    {% endif %}
+                                {{ student.portal }}
+                                <i
+                                    class="fa-solid fa-arrow-up-right-from-square"
+                                    aria-hidden="true"
+                                ></i>
+                            </a>
+                        </div>
+
+                        <div class="student-summary-note">
+                            Open the connected grade portal
+                        </div>
+
+                    </div>
+
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-link" aria-hidden="true"></i>
+                    </div>
                 </div>
 
-                <div class="info-card">
-                    <div class="section-header" style="margin-top: 0">
-                        <h2>Student Agenda</h2>
+                <div class="student-summary-card">
+                    <div>
+                        <div class="student-summary-label">Standing</div>
+                        <div class="student-summary-value">
+                            <span class="standing-{{ student.standing|lower }}">
+                                {{ student.standing }}
+                            </span>
+                        </div>
+                        <div class="student-summary-note">
+                            Current grade standing
+                        </div>
                     </div>
-                    <div class="agenda-content">
-                        {% if student.agenda %} {% for due_date, daily in
-                        student.agenda.items() %} {% for assignment in daily %}
-                        <div
-                            class="agenda-item"
-                            style="
-                                margin-bottom: 15px;
-                                border-bottom: 1px solid #444;
-                                padding-bottom: 10px;
+                    <div class="student-summary-icon">
+                        <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+                    </div>
+                </div>
+            </section>
+
+            <section class="student-toolbar-panel">
+                <div class="student-toolbar">
+                    <form method="POST">
+                        <button
+                            type="submit"
+                            name="run_agenda"
+                            class="student-btn student-btn-primary"
+                            onclick="
+                                return confirm(
+                                    'This will begin a long job and may take a few minutes. Do you want to continue?',
+                                );
                             "
                         >
-                            <h4 style="margin: 0; color: #f4833d">
-                                {{ assignment[1] }}
-                            </h4>
-                            <p style="margin: 5px 0; color: #454545">
-                                {{ due_date }} | {{ assignment[0] }}
-                            </p>
-                        </div>
-                        {% endfor %} {% endfor %} {% else %}
-                        <p>No agenda items found.</p>
-                        {% endif %}
+                            Refresh agendas
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
+                        </button>
+                    </form>
+
+                    <form method="POST">
+                        <button
+                            type="submit"
+                            name="run_scraper"
+                            class="student-btn student-btn-gold"
+                            onclick="
+                                return confirm(
+                                    'This will begin a long job and may take a few minutes. Do you want to continue?',
+                                );
+                            "
+                        >
+                            Check grades
+                            <i
+                                class="fa-solid fa-rotate-right refresh-icon"
+                                aria-hidden="true"
+                            ></i>
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <div class="student-progress-stack">
+                <div
+                    id="progress-container"
+                    class="student-progress-container"
+                    style="display: none"
+                >
+                    <div id="progress-label" class="student-progress-label">
+                        Grade collection in progress...
+                    </div>
+                    <div class="student-progress-bar-bg">
+                        <div
+                            id="progress-bar-fill"
+                            class="student-progress-bar-fill"
+                            style="width: 0%"
+                        ></div>
                     </div>
                 </div>
 
-                <div class="grade-history-section">
-                    <div class="section-header grade-history-header">
+                <div
+                    id="progress-container-agenda"
+                    class="student-progress-container"
+                    style="display: none"
+                >
+                    <div
+                        id="progress-label-agenda"
+                        class="student-progress-label"
+                    >
+                        Agenda refresh in progress...
+                    </div>
+                    <div class="student-progress-bar-bg">
+                        <div
+                            id="progress-bar-fill-agenda"
+                            class="student-progress-bar-fill"
+                            style="width: 0%"
+                        ></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="student-grid">
+                <section class="student-card grade-snapshot-card">
+                    <div class="student-card-header">
+                        <h2>Grade Snapshot</h2>
+                        <span>Recent</span>
+                    </div>
+
+                    <div class="student-card-body">
+                        {% if student.grades_snapshot %}
+                        <ul class="grade-list snapshot-list">
+                            {% for cg in student.grades_snapshot %}
+                            <li>
+                                <span class="course-name">
+                                    {{ cg.course }}:
+                                </span>
+                                <span
+                                    class="course-grade {% if cg.grade < 70 %}grade-red{% elif cg.grade < 80 %}grade-orange{% elif cg.grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
+                                >
+                                    {{ cg.grade }} {% if cg.change == '+' %}
+                                    <span class="grade-up">▲</span>
+                                    {% elif cg.change == '-' %}
+                                    <span class="grade-down">▼</span>
+                                    {% else %}
+                                    <span class="grade-no-change">●</span>
+                                    {% endif %}
+                                </span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="empty-text">No recent grades available.</p>
+                        {% endif %}
+                    </div>
+                </section>
+
+                <section class="student-card">
+                    <div class="student-card-header">
+                        <h2>Student Agenda</h2>
+                        <span>Upcoming work</span>
+                    </div>
+
+                    <div class="student-card-body">
+                        <div class="agenda-content">
+                            {% if student.agenda %} {% for due_date, daily in
+                            student.agenda.items() %} {% for assignment in daily %}
+                            <div class="agenda-item">
+                                <h4>{{ assignment[1] }}</h4>
+                                <p>{{ due_date }} | {{ assignment[0] }}</p>
+                            </div>
+                            {% endfor %} {% endfor %} {% else %}
+                            <p class="empty-text">No agenda items found.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="grade-history-section">
+                    <div class="grade-history-header">
                         <h2>Grade History</h2>
+
                         <div
                             class="grade-tabs"
                             role="tablist"
@@ -278,13 +1178,14 @@
                             </button>
                         </div>
                     </div>
+
                     <div class="grade-tab-panels">
                         <div
                             class="grade-tab-panel active"
                             data-tab="history"
                             role="tabpanel"
                         >
-                            <div class="table-container">
+                            <div class="student-table-container">
                                 {% if student.grades %}
                                 <table class="grade-history-table">
                                     <thead>
@@ -297,14 +1198,7 @@
                                         {% for date, grade_batch in
                                         student.grades.items()|reverse %}
                                         <tr>
-                                            <td
-                                                style="
-                                                    vertical-align: top;
-                                                    white-space: nowrap;
-                                                "
-                                            >
-                                                {{ date }}
-                                            </td>
+                                            <td>{{ date }}</td>
                                             <td>
                                                 <ul class="grade-list">
                                                     {% for course, grade in
@@ -313,8 +1207,9 @@
                                                     <li>
                                                         <span
                                                             class="course-name"
-                                                            >{{ course }}:</span
                                                         >
+                                                            {{ course }}:
+                                                        </span>
                                                         <span
                                                             class="course-grade {% if grade < 70 %}grade-red{% elif grade < 80 %}grade-orange{% elif grade < 90 %}grade-yellow{% else %}grade-green{% endif %}"
                                                         >
@@ -329,10 +1224,13 @@
                                     </tbody>
                                 </table>
                                 {% else %}
-                                <p>No grade history available.</p>
+                                <p class="empty-text">
+                                    No grade history available.
+                                </p>
                                 {% endif %}
                             </div>
                         </div>
+
                         <div
                             class="grade-tab-panel"
                             data-tab="heatmap"
@@ -341,64 +1239,93 @@
                             {% include 'student_heatmap.html' %}
                         </div>
                     </div>
-                </div>
+                </section>
             </div>
-        </div>
-
-        <style>
-            .grade-history-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-            }
-
-            .grade-tabs {
-                display: inline-flex;
-                gap: 6px;
-                background: #f1f5f9;
-                padding: 4px;
-                border-radius: 10px;
-            }
-
-            .grade-tab-button {
-                border: none;
-                background: transparent;
-                color: #1f2937;
-                font-weight: 600;
-                padding: 6px 12px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 0.9rem;
-            }
-
-            .grade-tab-button.active {
-                background: #4472c4;
-                color: #fff;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-            }
-
-            .grade-tab-panels {
-                margin-top: 16px;
-            }
-
-            .grade-tab-panel {
-                display: none;
-            }
-
-            .grade-tab-panel.active {
-                display: block;
-            }
-
-            @media (max-width: 720px) {
-                .grade-history-header {
-                    flex-direction: column;
-                    align-items: flex-start;
-                }
-            }
-        </style>
+        </main>
 
         <script>
+            const jobId = "{{ job_id }}";
+            const agendaJobId = "{{ agenda_job_id }}";
+
+            function pollStatus(jobId, elements, inProgressLabel) {
+                const { container, label, bar } = elements;
+                fetch(`/status/${jobId}`)
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error(
+                                "Job not found or error fetching status",
+                            );
+                        }
+                        return response.json();
+                    })
+                    .then((data) => {
+                        if (data.step >= 0 && data.step < data.steps) {
+                            container.style.display = "block";
+                            const percentage = Math.round(data.pct * 100);
+                            console.log(
+                                `Polling status (${jobId}): ${percentage}%`,
+                            );
+                            bar.style.width = `${percentage}%`;
+                            label.innerText = `${inProgressLabel}: ${data.step} / ${data.total + 2}`;
+                            setTimeout(
+                                () =>
+                                    pollStatus(
+                                        jobId,
+                                        elements,
+                                        inProgressLabel,
+                                    ),
+                                2000,
+                            );
+                        } else if (data.step === data.steps) {
+                            container.style.display = "block";
+                            bar.style.width = "100%";
+                            label.innerText = `${inProgressLabel} complete! Reloading...`;
+                            console.log("Job complete!");
+                            setTimeout(() => window.location.reload(), 2000);
+                        } else {
+                            console.log(
+                                "Job not found or error fetching status",
+                            );
+                            container.style.display = "none";
+                        }
+                    })
+                    .catch((error) => {
+                        console.log("Polling stopped or error:", error);
+                        container.style.display = "none";
+                    });
+            }
+
+            if (jobId) {
+                pollStatus(
+                    jobId,
+                    {
+                        container:
+                            document.getElementById("progress-container"),
+                        label: document.getElementById("progress-label"),
+                        bar: document.getElementById("progress-bar-fill"),
+                    },
+                    "Grade collection in progress",
+                );
+            }
+
+            if (agendaJobId) {
+                pollStatus(
+                    agendaJobId,
+                    {
+                        container: document.getElementById(
+                            "progress-container-agenda",
+                        ),
+                        label: document.getElementById(
+                            "progress-label-agenda",
+                        ),
+                        bar: document.getElementById(
+                            "progress-bar-fill-agenda",
+                        ),
+                    },
+                    "Agenda refresh in progress",
+                );
+            }
+
             const tabButtons = document.querySelectorAll(".grade-tab-button");
             const tabPanels = document.querySelectorAll(".grade-tab-panel");
 

@@ -8,7 +8,9 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 
 Routes:
 
-- `/` is the protected entry point. In normal mode it requires `X-Franchise` and `X-Internal-Key` headers, stores the franchise in the session, and redirects to that franchise dashboard.
+- `/` starts the dashboard auth flow and always redirects to `/login`.
+- `/login` allows CRM authentication via `dbo.usp_login` (through `ui/auth.py`). Franchise ID `1` routes to the health dashboard; other valid franchises route to their franchise dashboard.
+- `/logout` clears the dashboard session.
 - `/health` shows all active franchises, active/background jobs, synced student counts, bad login counts, malformed inputs, nonconfigured portals, and grouped scraper errors.
 - `/franchise/<franchise_id>` shows a searchable, sortable student table for one franchise. It includes portal links, recent grade snapshots, low/high grades, standing, status, edit/delete controls, and buttons to refresh grades or agendas for the full franchise.
 - `/franchise/<franchise_id>/student/<student_id>` shows one student's report, including current standing, recent grades, agenda items, grade history, and a heatmap view.
@@ -25,28 +27,14 @@ uv sync
 uv run playwright install
 ```
 
-For local dashboard development, enable the dev bypass so `/` opens the health dashboard without the internal header handoff:
+For local dashboard development, set a strong session secret and start Flask:
 
 ```powershell
-$env:DEV_BYPASS = "1"
-$env:SESSION_SECRET = "dev-session-secret"
+$env:SESSION_SECRET = "local-development-session-secret-2026"
 uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/`.
-
-For a production-style request, leave `DEV_BYPASS` unset or set it to `0`, set `INTERNAL_KEY`, and include the handoff headers:
-
-```powershell
-$env:INTERNAL_KEY = "replace-me"
-$env:SESSION_SECRET = "replace-me"
-uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
-
-curl -i `
-  -H "X-Franchise: 19" `
-  -H "X-Internal-Key: replace-me" `
-  http://127.0.0.1:8080/
-```
+Open `http://127.0.0.1:8080/` and sign in with CRM credentials.
 
 The Replit/nginx entrypoint is `ui/start.sh`. It runs Gunicorn on `127.0.0.1:3000` and proxies public traffic through nginx on port `8080`.
 
@@ -64,9 +52,12 @@ Required for database access:
 
 Dashboard/session settings:
 
-- `INTERNAL_KEY` gates production-style dashboard entry.
-- `SESSION_SECRET` signs Flask sessions.
-- `DEV_BYPASS=1` enables local dashboard access without the internal headers.
+- `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` provide CRM authentication connectivity. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
+- `CRM_TRUST_SERVER_CERTIFICATE` controls SQL Server certificate trust (default `no`). `1`, `true`, and `yes` (case-insensitive) are accepted values for enabling `TrustServerCertificate=yes`.
+- The CRM SQL Server connection uses encrypted ODBC transport with certificate validation controlled by `CRM_TRUST_SERVER_CERTIFICATE`.
+- `SESSION_SECRET` signs Flask sessions. It must be a strong non-default value of at least 32 characters.
+
+The bundled nginx config forwards `X-Forwarded-For` and `X-Forwarded-Proto`; Flask applies trusted proxy handling so login rate limiting can use the real client address behind nginx.
 
 Optional:
 

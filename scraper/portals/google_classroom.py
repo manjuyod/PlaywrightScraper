@@ -46,7 +46,7 @@ class GoogleClassroom(PortalEngine):
         agenda: dict[str, list[tuple]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
         try:
             menu_sidebar_selector = 'button[aria-label="Main Menu"]'
-            await self.page.wait_for_selector(menu_sidebar_selector, timeout=10000);
+            await self.page.wait_for_selector(menu_sidebar_selector, timeout=10000)
             todo_tab_button = self.page.get_by_role('menuitem', name='To-do')
             # todo_tab_button = self.page.locator('a[aria-label="To-do"]')
 
@@ -104,13 +104,15 @@ class GoogleClassroom(PortalEngine):
 
 
                 # print(title, course, day, due_at)
-                if not title or not course or not day: continue
+                if not title or not course or not day:
+                    continue
                 due_date = day.strftime("%m/%d/%Y")
                 due_time = due_at.strftime("%H:%M") if due_at else None
 
                 if not agenda.get(due_date):
                     agenda[due_date] = [(course, title, due_time)]
-                else: agenda[due_date].append((course, title, due_time))
+                else:
+                    agenda[due_date].append((course, title, due_time))
             # return agenda
         except Exception as e:
             import traceback

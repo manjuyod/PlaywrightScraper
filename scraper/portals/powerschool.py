@@ -1,15 +1,13 @@
 from __future__ import annotations
-from pathlib import Path
 from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
-import unicodedata
 import re
 
 from scraper.portals.base import PortalEngine
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from .utils import *
+from .utils import canonicalize_course_title, universal_login_flow, wait_after_nav
 DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
 
 @register_portal("powerschool")
@@ -43,10 +41,8 @@ class PowerSchool(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         # grab full HTML
         html = await self.page.content()
-        try:
-            parsed = self._parse_gradebook(html)
-            print(parsed)
-        finally: pass
+        parsed = self._parse_gradebook(html)
+        print(parsed)
         return {"parsed_grades": parsed}
 
     @staticmethod

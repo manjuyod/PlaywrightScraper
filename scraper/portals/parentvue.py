@@ -1,14 +1,10 @@
 from __future__ import annotations
-from pathlib import Path
-from datetime import datetime
 from typing import Any, Dict, Optional
-from bs4 import BeautifulSoup
-import re
 
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from .utils import *
+from .utils import grades_table_to_dict, universal_login_flow, wait_after_nav
 
 @register_portal("parentvue")
 class ParentVUE(PortalEngine):

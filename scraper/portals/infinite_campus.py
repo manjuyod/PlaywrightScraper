@@ -1,8 +1,13 @@
 from __future__ import annotations
+from datetime import datetime
+from typing import Any, Optional
+
+from playwright.async_api import Frame, Page, expect
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from . import register_portal  # helper we'll create in __init__.py
 from .base import PortalEngine, PlaywrightTimeout
-from .utils import *
+from .utils import exists, grades_table_to_dict, universal_login_flow
 
 
 @register_portal("infinite_campus")
@@ -30,7 +35,7 @@ class InfiniteCampus(PortalEngine):
                 microsoft_callback=self.microsoft_login,
                 google_callback=self.google_login
             )
-            print(f"[IC] Attemped login, waiting for nav-wrapper.")
+            print("[IC] Attemped login, waiting for nav-wrapper.")
 
             invalid_creds_msg = "Incorrect Username and/or Password"
             login_failed = await exists(self.page.get_by_text(invalid_creds_msg, exact=False))
@@ -81,9 +86,8 @@ class InfiniteCampus(PortalEngine):
 
         Return: 1 for Fall, 2 for Spring
         """
-        from datetime import datetime
         now = datetime.now()
-        m, y = now.month, now.year
+        m = now.month
         if m >= 8:  # Aug–Dec → Fall of current year
             sem = 1
         elif m <= 5:  # Jan–May → Spring of previous fall year

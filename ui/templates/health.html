@@ -4,391 +4,873 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Health Check</title>
+
+        <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+
         <style>
             :root {
-                color-scheme: light;
-                --bg: #f6f7fb;
-                --panel: #ffffff;
-                --border: #e5e7eb;
-                --text: #0f172a;
-                --muted: #64748b;
-                --accent: #2563eb;
-                --danger: #dc2626;
-                --warning: #f59e0b;
-                --success: #16a34a;
-                --shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-            }
+                --health-blue: #4472c4;
+                --health-blue-dark: #2f5597;
+                --health-blue-soft: #edf4ff;
 
-            * {
-                box-sizing: border-box;
+                --health-orange: #f4833d;
+                --health-orange-dark: #d76624;
+                --health-orange-soft: #fff0e7;
+
+                --health-bg: #fff8f3;
+                --health-panel: #ffffff;
+                --health-border: #eadfd7;
+                --health-text: #102033;
+                --health-muted: #64748b;
+
+                --health-success: #15803d;
+                --health-danger: #dc2626;
+
+                --health-shadow: 0 14px 35px rgba(244, 131, 61, 0.12);
+                --health-shadow-soft: 0 8px 22px rgba(15, 23, 42, 0.07);
             }
 
             body {
-                margin: 0;
                 font-family:
                     "Inter",
                     "Segoe UI",
                     system-ui,
                     -apple-system,
+                    BlinkMacSystemFont,
                     sans-serif;
-                font-size: 16px;
-                background: var(--bg);
-                color: var(--text);
+                background: #fff8f3;
+                color: var(--health-text);
+                margin: 0;
             }
 
-            .page {
-                display: grid;
-                grid-template-columns: 280px 1fr;
-                min-height: 100vh;
+            a {
+                color: inherit;
             }
 
-            .sidebar {
-                padding: 24px;
-                background: var(--panel);
-                border-right: 1px solid var(--border);
-            }
-
-            .sidebar h2 {
-                margin: 0 0 12px 0;
-                font-size: 1.1rem;
-            }
-
-            .sidebar .section {
+            .health-header-section {
+                background: rgba(255, 255, 255, 0.96);
+                padding: 18px 0;
                 margin-bottom: 24px;
+                border-bottom: 1px solid var(--health-border);
+                box-shadow: var(--health-shadow-soft);
             }
 
-            .job {
-                border: 1px solid var(--border);
-                border-radius: 12px;
-                padding: 12px;
-                margin-bottom: 12px;
-                background: #f9fafb;
-            }
-
-            .job-title {
-                font-weight: 600;
-            }
-
-            .job-meta {
-                color: var(--muted);
-                font-size: 0.95rem;
-                margin-top: 6px;
-            }
-
-            .content {
-                padding: 28px 32px 48px;
-            }
-
-            .header {
+            .health-header-inner {
+                width: min(1800px, calc(100% - 32px));
+                margin: 0 auto;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 24px;
+                gap: 24px;
             }
 
-            .header h1 {
-                margin: 0;
-                font-size: 1.8rem;
+            .health-brand {
+                display: flex;
+                align-items: center;
+                gap: 18px;
             }
 
-            .count-pill {
-                background: var(--panel);
-                border: 1px solid var(--border);
-                border-radius: 999px;
-                padding: 8px 16px;
-                font-weight: 600;
-                box-shadow: var(--shadow);
-            }
-
-            .franchise-grid {
+            .health-logo-wrap {
+                height: 64px;
+                width: 64px;
+                border-radius: 8px;
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 16px;
+                place-items: center;
+                background: white;
+                border: 1px solid var(--health-border);
+                box-shadow: var(--health-shadow-soft);
+                overflow: hidden;
+                flex: 0 0 auto;
             }
 
-            .card {
-                position: relative;
-                background: var(--panel);
-                border: 1px solid var(--border);
-                border-radius: 16px;
-                padding: 16px;
-                box-shadow: var(--shadow);
-                transition:
-                    transform 0.15s ease,
-                    box-shadow 0.15s ease,
-                    border-color 0.15s ease;
-            }
-
-            .card:hover {
-                transform: translateY(-2px);
-                border-color: rgba(37, 99, 235, 0.4);
-                box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
-            }
-
-            .card-link {
-                position: absolute;
-                inset: 0;
-                border-radius: 16px;
-                z-index: 1;
-                text-decoration: none;
-                color: inherit;
+            .health-logo {
+                width: 54px;
+                height: 54px;
+                object-fit: contain;
                 display: block;
             }
 
-            .card-link:focus-visible {
-                outline: 3px solid rgba(37, 99, 235, 0.5);
+            .health-title {
+                font-size: 2rem;
+                font-weight: 850;
+                color: var(--health-blue-dark);
+                margin: 0;
+                letter-spacing: 0;
+            }
+
+            .health-subtitle {
+                color: var(--health-muted);
+                font-size: 0.95rem;
+                margin-top: 4px;
+            }
+
+            .health-header-meta {
+                text-align: right;
+                color: var(--health-muted);
+                font-size: 0.95rem;
+                line-height: 1.4;
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                background: #fffaf6;
+                padding: 12px 14px;
+            }
+
+            .health-header-meta strong {
+                display: block;
+                color: var(--health-orange-dark);
+                margin-bottom: 4px;
+                font-weight: 800;
+            }
+
+            .health-page {
+                width: min(1800px, calc(100% - 32px));
+                margin: 24px auto 48px;
+            }
+
+            .health-top-row {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 16px;
+                margin-bottom: 20px;
+            }
+
+            .health-jobs-panel {
+                background: var(--health-panel);
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                box-shadow: var(--health-shadow-soft);
+                overflow: hidden;
+            }
+
+            .health-jobs-panel summary {
+                cursor: pointer;
+                list-style: none;
+                background: var(--health-orange);
+                color: white;
+                font-weight: 800;
+                font-size: 1rem;
+                padding: 16px 20px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .health-jobs-panel summary::-webkit-details-marker {
+                display: none;
+            }
+
+            .health-jobs-panel summary:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.35);
                 outline-offset: 2px;
             }
 
-            .card-content {
+            .health-jobs-panel summary::after {
+                content: "+";
+                font-size: 1.45rem;
+                font-weight: 900;
+                line-height: 1;
+            }
+
+            .health-jobs-panel[open] summary::after {
+                content: "–";
+            }
+
+            .health-jobs-count {
+                font-size: 0.88rem;
+                opacity: 0.9;
+                margin-left: auto;
+                font-weight: 700;
+            }
+
+            .health-jobs-body {
+                padding: 16px;
+            }
+
+            .health-jobs-grid {
+                display: grid;
+                grid-template-columns: repeat(
+                    auto-fit,
+                    minmax(min(100%, 260px), 1fr)
+                );
+                gap: 12px;
+            }
+
+            .health-job {
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                padding: 12px 14px;
+                background: #fffaf6;
+            }
+
+            .health-job-title {
+                font-weight: 800;
+                color: var(--health-orange-dark);
+                margin-bottom: 4px;
+            }
+
+            .health-job-meta {
+                color: var(--health-muted);
+                font-size: 0.92rem;
+                line-height: 1.4;
+            }
+
+            .health-summary-grid {
+                display: grid;
+                grid-template-columns: repeat(
+                    auto-fit,
+                    minmax(min(100%, 300px), 1fr)
+                );
+                gap: 14px;
+                margin-bottom: 22px;
+            }
+
+            .health-summary-card {
+                background: rgba(255, 255, 255, 0.97);
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                padding: 18px;
+                box-shadow: var(--health-shadow-soft);
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 16px;
+                min-height: 118px;
+            }
+
+            .health-summary-label {
+                color: var(--health-muted);
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                font-weight: 800;
+                margin-bottom: 7px;
+            }
+
+            .health-summary-value {
+                color: var(--health-blue-dark);
+                font-size: 1.9rem;
+                font-weight: 900;
+                line-height: 1;
+            }
+
+            .health-summary-note {
+                color: var(--health-muted);
+                font-size: 0.9rem;
+                margin-top: 8px;
+            }
+
+            .health-summary-icon {
+                height: 44px;
+                width: 44px;
+                border-radius: 8px;
+                display: grid;
+                place-items: center;
+                background: var(--health-orange-soft);
+                color: var(--health-orange-dark);
+                font-weight: 900;
+                flex: 0 0 auto;
+            }
+
+            .health-summary-card:nth-child(1) .health-summary-icon {
+                background: var(--health-blue-soft);
+                color: var(--health-blue-dark);
+            }
+
+            .health-summary-card:nth-child(2) .health-summary-icon {
+                background: rgba(21, 128, 61, 0.12);
+                color: var(--health-success);
+            }
+
+            .health-summary-card:nth-child(3) .health-summary-icon {
+                background: var(--health-orange-soft);
+                color: var(--health-orange-dark);
+            }
+
+            .health-section-header {
+                margin: 8px 0 16px;
+                border-bottom: 2px solid rgba(244, 131, 61, 0.32);
+                padding-bottom: 10px;
+            }
+
+            .health-section-header h2 {
+                margin: 0;
+                font-size: 1.55rem;
+                color: var(--health-blue-dark);
+                font-weight: 850;
+                letter-spacing: 0;
+            }
+
+            .health-section-subtitle {
+                color: var(--health-muted);
+                font-size: 0.92rem;
+                margin-top: 4px;
+            }
+
+            .health-franchise-grid {
+                display: grid;
+                grid-template-columns: repeat(
+                    auto-fit,
+                    minmax(min(100%, 340px), 1fr)
+                );
+                gap: 14px;
+                align-items: stretch;
+            }
+
+            .health-franchise-card {
+                position: relative;
+                background: rgba(255, 255, 255, 0.97);
+                border: 1px solid var(--health-border);
+                border-radius: 8px;
+                box-shadow: var(--health-shadow-soft);
+                overflow: hidden;
+                min-height: 100%;
+                transition:
+                    transform 0.18s ease,
+                    box-shadow 0.18s ease,
+                    border-color 0.18s ease;
+            }
+
+            .health-franchise-card:hover {
+                transform: translateY(-3px);
+                border-color: rgba(244, 131, 61, 0.42);
+                box-shadow: 0 18px 36px rgba(244, 131, 61, 0.16);
+            }
+
+            .health-franchise-card::before {
+                content: "";
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 6px;
+                background: var(--health-orange);
+            }
+
+            .health-card-link {
+                position: absolute;
+                inset: 0;
+                z-index: 1;
+                text-decoration: none;
+                color: inherit;
+            }
+
+            .health-card-link:focus-visible {
+                outline: 3px solid rgba(244, 131, 61, 0.42);
+                outline-offset: 2px;
+                border-radius: 8px;
+            }
+
+            .health-franchise-content {
                 position: relative;
                 z-index: 2;
+                padding: 15px 17px 15px 24px;
                 pointer-events: none;
             }
 
-            .card-content .error-details {
+            .health-franchise-content .health-error-details {
                 pointer-events: auto;
                 position: relative;
                 z-index: 3;
             }
 
-            .card h3 {
-                margin: 0 0 8px 0;
-                font-size: 1.2rem;
+            .health-franchise-top {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 12px;
+                margin-bottom: 9px;
             }
 
-            .stat-row {
+            .health-franchise-title {
+                margin: 0;
+                color: var(--health-blue-dark);
+                font-size: 1.16rem;
+                font-weight: 850;
+                letter-spacing: 0;
+            }
+
+            .health-franchise-subtitle {
+                color: var(--health-muted);
+                font-size: 0.88rem;
+                margin-top: 2px;
+            }
+
+            .health-franchise-icon {
+                height: 40px;
+                width: 40px;
+                border-radius: 8px;
+                display: grid;
+                place-items: center;
+                background: var(--health-orange-soft);
+                color: var(--health-orange-dark);
+                font-weight: 900;
+                flex: 0 0 auto;
+            }
+
+            .health-stat-row {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                margin-top: 8px;
+                gap: 14px;
+                padding: 7px 0;
+                border-top: 1px solid #f0e6de;
             }
 
-            .stat-label {
-                color: var(--muted);
-                font-size: 0.95rem;
+            .health-stat-label {
+                color: var(--health-muted);
+                font-size: 0.92rem;
             }
 
-            .stat-value {
-                font-weight: 600;
+            .health-stat-value {
+                color: var(--health-text);
+                font-weight: 800;
+                text-align: right;
             }
 
-            .badge {
+            .health-badge {
                 display: inline-flex;
                 align-items: center;
-                gap: 6px;
-                padding: 4px 10px;
+                justify-content: center;
+                padding: 5px 10px;
                 border-radius: 999px;
-                font-size: 0.8rem;
-                font-weight: 600;
-            }
-
-            .badge.success {
-                background: rgba(22, 163, 74, 0.15);
-                color: var(--success);
-            }
-            .badge.warning {
-                background: rgba(245, 158, 11, 0.2);
-                color: var(--warning);
-            }
-            .badge.danger {
-                background: rgba(220, 38, 38, 0.15);
-                color: var(--danger);
-            }
-
-            .error-details {
-                margin-top: 10px;
-            }
-
-            .error-details summary {
-                cursor: pointer;
-                color: var(--danger);
-                font-weight: 600;
-                font-size: 0.85rem;
-            }
-
-            .error-group-list {
-                margin: 8px 0 0;
-                padding: 0;
-                list-style: none;
-                display: grid;
-                gap: 6px;
-                max-height: 140px;
-                overflow-y: auto;
-            }
-
-            .error-group-item {
-                display: flex;
-                align-items: baseline;
-                gap: 8px;
-            }
-
-            .error-count {
-                background: rgba(220, 38, 38, 0.15);
-                color: var(--danger);
-                padding: 2px 8px;
-                border-radius: 999px;
-                font-size: 0.75rem;
-                font-weight: 600;
+                font-size: 0.76rem;
+                font-weight: 900;
+                line-height: 1;
                 white-space: nowrap;
             }
 
-            .error-label {
-                color: var(--danger);
-                font-size: 0.85rem;
+            .health-badge.success {
+                background: rgba(21, 128, 61, 0.12);
+                color: var(--health-success);
+            }
+
+            .health-badge.warning {
+                background: var(--health-orange-soft);
+                color: var(--health-orange-dark);
+            }
+
+            .health-badge.danger {
+                background: rgba(220, 38, 38, 0.12);
+                color: var(--health-danger);
+            }
+
+            .health-badge.neutral {
+                background: var(--health-blue-soft);
+                color: var(--health-blue-dark);
+            }
+
+            .health-badge.action {
+                background: var(--health-blue-soft);
+                border: 1px solid rgba(68, 114, 196, 0.18);
+                color: var(--health-blue-dark);
+            }
+
+            .health-error-details {
+                margin-top: 8px;
+                padding-top: 8px;
+                border-top: 1px solid #f0e6de;
+            }
+
+            .health-error-details summary {
+                cursor: pointer;
+                color: var(--health-danger);
+                font-size: 0.86rem;
+                font-weight: 900;
+            }
+
+            .health-error-list {
+                margin: 10px 0 0;
+                padding: 0;
+                list-style: none;
+                display: grid;
+                gap: 8px;
+                max-height: 150px;
+                overflow-y: auto;
+            }
+
+            .health-error-item {
+                display: flex;
+                align-items: baseline;
+                gap: 8px;
+                padding: 8px 10px;
+                border-radius: 8px;
+                background: #fff7f7;
+                border: 1px solid #fee2e2;
+                white-space: normal;
+            }
+
+            .health-error-count {
+                background: rgba(220, 38, 38, 0.12);
+                color: var(--health-danger);
+                padding: 3px 8px;
+                border-radius: 999px;
+                font-size: 0.74rem;
+                font-weight: 900;
+                white-space: nowrap;
+            }
+
+            .health-error-label {
+                color: #991b1b;
+                font-size: 0.84rem;
+                line-height: 1.35;
                 word-break: break-word;
             }
 
-            .footer-note {
-                margin-top: 24px;
-                color: var(--muted);
-                font-size: 0.85rem;
+            .health-footer-note {
+                margin-top: 20px;
+                color: var(--health-muted);
+                font-size: 0.9rem;
             }
 
-            @media (max-width: 900px) {
-                .page {
-                    grid-template-columns: 1fr;
+            .health-card-action {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 8px;
+                padding-top: 10px;
+                border-top: 1px solid #f0e6de;
+            }
+
+            .health-summary-icon i,
+            .health-franchise-icon i,
+            .health-card-action i {
+                font-size: 0.95rem;
+                line-height: 1;
+            }
+
+            .health-card-action .health-badge {
+                gap: 6px;
+            }
+
+            @media (max-width: 720px) {
+                .health-header-inner {
+                    flex-direction: column;
+                    align-items: flex-start;
                 }
 
-                .sidebar {
-                    border-right: none;
-                    border-bottom: 1px solid var(--border);
+                .health-header-meta {
+                    text-align: left;
+                }
+
+                .health-title {
+                    font-size: 1.35rem;
+                }
+
+                .health-page,
+                .health-header-inner {
+                    width: min(100% - 24px, 1800px);
+                }
+
+                .health-franchise-grid,
+                .health-jobs-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .health-franchise-card,
+                .health-franchise-card:hover {
+                    transition: none;
+                    transform: none;
                 }
             }
         </style>
     </head>
+
     <body>
-        <div class="page">
-            <aside class="sidebar">
-                <div class="section">
-                    <h2>Active Jobs</h2>
-                    {% if jobs %} {% for job_id, job in jobs.items() %}
-                    <div class="job">
-                        <div class="job-title">Job {{ job_id }}</div>
-                        <div class="job-meta">
-                            {% if job is mapping %} {% if job.total is defined
-                            %}Total: {{ job.total }}{% endif %} {% if job.step
-                            is defined %} · Step: {{ job.step }}{% endif %} {%
-                            if job.steps is defined %} / {{ job.steps }}{% endif
-                            %} {% if job.pct is defined %} · {{ job.pct }}%{%
-                            endif %} {% else %} {{ job }} {% endif %}
+        <header class="health-header-section">
+            <div class="health-header-inner">
+                <div class="health-brand">
+                    <div class="health-logo-wrap">
+                        <img
+                            src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                            alt="Tutoring Club Logo"
+                            class="health-logo"
+                        />
+                    </div>
+
+                    <div>
+                        <h1 class="health-title">
+                            Tutoring Club Scraper Health Page
+                        </h1>
+                        <div class="health-subtitle">
+                            Internal scraper and portal health dashboard
                         </div>
                     </div>
-                    {% endfor %} {% else %}
-                    <p class="job-meta">No active jobs.</p>
-                    {% endif %}
-                </div>
-            </aside>
-
-            <main class="content">
-                <div class="header">
-                    <h1>Health Check</h1>
-                    <div class="count-pill">
-                        Active students: {{ count_all }} · Synced: {{
-                        count_synced }} · Bad logins: {{ count_bad_logins }}
-                    </div>
                 </div>
 
-                <div class="franchise-grid">
-                    {% for franchise in health %}
-                    <div class="card">
-                        <a
-                            class="card-link"
-                            href="{{ url_for('franchise_view', franchise_id=franchise.id) }}"
-                            aria-label="Open franchise {{ franchise.id }}"
-                        ></a>
-                        <div class="card-content">
-                            <h3>Franchise {{ franchise.id }}</h3>
+                <div class="health-header-meta">
+                    <strong>Health Check</strong>
+                    Active students: {{ count_all }} · Synced:
+                    {{ count_synced }} · Bad logins:
+                    {{ count_bad_logins }}
+                </div>
+            </div>
+        </header>
 
-                            <div class="stat-row">
-                                <span class="stat-label">Synced students</span>
-                                <span class="stat-value"
-                                    >{{ franchise.synced }} / {{ franchise.total
-                                    }}</span
-                                >
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Malformed inputs</span>
-                                <span class="stat-value">
-                                    {% if franchise.malformed_inputs and
-                                    franchise.malformed_inputs > 0 %}
-                                    <span class="badge warning"
-                                        >{{ franchise.malformed_inputs }}</span
-                                    >
-                                    {% else %}0{% endif %}
-                                </span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label"
-                                    >Nonconfigured portals</span
-                                >
-                                <span class="stat-value">
-                                    {% if franchise.nonconfigured_portals and
-                                    franchise.nonconfigured_portals > 0 %}
-                                    <span class="badge warning"
-                                        >{{ franchise.nonconfigured_portals
-                                        }}</span
-                                    >
-                                    {% else %}0{% endif %}
-                                </span>
-                            </div>
-                            <div class="stat-row">
-                                <span class="stat-label">Bad logins</span>
-                                <span class="stat-value">
-                                    {% if franchise.bad_logins and
-                                    franchise.bad_logins > 0 %}
-                                    <span class="badge warning"
-                                        >{{ franchise.bad_logins }}</span
-                                    >
-                                    {% else %}0{% endif %}
-                                </span>
-                            </div>
-
-                            <div class="stat-row">
-                                <span class="stat-label">Last updated</span>
-                                <span class="stat-value"
-                                    >{{ franchise.last_updated }}</span
-                                >
-                            </div>
-
-                            <div class="stat-row">
-                                <span class="stat-label">Errors</span>
-                                {% if franchise.error_count and
-                                franchise.error_count > 0 %}
-                                <span class="badge danger"
-                                    >{{ franchise.error_count }} active</span
-                                >
-                                {% else %}
-                                <span class="badge success">None</span>
-                                {% endif %}
-                            </div>
-                            {% if franchise.error_groups and
-                            franchise.error_groups|length > 0 %}
-                            <details class="error-details">
-                                <summary>
-                                    Grouped errors ({{
-                                    franchise.error_groups|length }})
-                                </summary>
-                                <ul class="error-group-list">
-                                    {% for group in franchise.error_groups %}
-                                    <li class="error-group-item">
-                                        <span class="error-count"
-                                            >{{ group.count }}x</span
-                                        >
-                                        <span class="error-label"
-                                            >{{ group.label }}</span
-                                        >
-                                    </li>
-                                    {% endfor %}
-                                </ul>
-                            </details>
+        <main class="health-page">
+            <div class="health-top-row">
+                <details class="health-jobs-panel">
+                    <summary>
+                        <span>Active Jobs</span>
+                        <span class="health-jobs-count">
+                            {% if jobs %}
+                                {{ jobs|length }} running
+                            {% else %}
+                                None
                             {% endif %}
+                        </span>
+                    </summary>
+
+                    <div class="health-jobs-body">
+                        {% if jobs %}
+                        <div class="health-jobs-grid">
+                            {% for job_id, job in jobs.items() %}
+                            <div class="health-job">
+                                <div class="health-job-title">
+                                    Job {{ job_id }}
+                                </div>
+
+                                <div class="health-job-meta">
+                                    {% if job is mapping %}
+                                        {% if job.total is defined %}
+                                            Total: {{ job.total }}
+                                        {% endif %}
+
+                                        {% if job.step is defined %}
+                                            · Step: {{ job.step }}
+                                        {% endif %}
+
+                                        {% if job.steps is defined %}
+                                            / {{ job.steps }}
+                                        {% endif %}
+
+                                        {% if job.pct is defined %}
+                                            · {{ job.pct }}%
+                                        {% endif %}
+                                    {% else %}
+                                        {{ job }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="health-job-meta">No active jobs.</p>
+                        {% endif %}
+                    </div>
+                </details>
+            </div>
+
+            <div class="health-summary-grid">
+                <div class="health-summary-card">
+                    <div>
+                        <div class="health-summary-label">
+                            Active Students
+                        </div>
+                        <div class="health-summary-value">
+                            {{ count_all }}
+                        </div>
+                        <div class="health-summary-note">
+                            Total students currently tracked
                         </div>
                     </div>
 
-                    {% endfor %}
+                    <div class="health-summary-icon">
+                        <i class="fa-solid fa-users" aria-hidden="true"></i>
+                    </div>
                 </div>
-            </main>
-        </div>
+
+                <div class="health-summary-card">
+                    <div>
+                        <div class="health-summary-label">
+                            Synced Students
+                        </div>
+                        <div class="health-summary-value">
+                            {{ count_synced }}
+                        </div>
+                        <div class="health-summary-note">
+                            Students with current portal data
+                        </div>
+                    </div>
+
+                    <div class="health-summary-icon">
+                        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                    </div>
+                </div>
+
+                <div class="health-summary-card">
+                    <div>
+                        <div class="health-summary-label">
+                            Bad Logins
+                        </div>
+                        <div class="health-summary-value">
+                            {{ count_bad_logins }}
+                        </div>
+                        <div class="health-summary-note">
+                            Students needing attention
+                        </div>
+                    </div>
+
+                    <div class="health-summary-icon">
+                        <i
+                            class="fa-solid fa-triangle-exclamation"
+                            aria-hidden="true"
+                        ></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="health-section-header">
+                <h2>Franchise Health</h2>
+                <div class="health-section-subtitle">
+                    Open a card to inspect student and portal details for that franchise.
+                </div>
+            </div>
+
+            <div class="health-franchise-grid">
+                {% for franchise in health %}
+                <div class="health-franchise-card">
+                    <a
+                        class="health-card-link"
+                        href="{{ url_for('franchise_view', franchise_id=franchise.id) }}"
+                        aria-label="Open franchise {{ franchise.id }}"
+                    ></a>
+
+                    <div class="health-franchise-content">
+                        <div class="health-franchise-top">
+                            <div>
+                                <h3 class="health-franchise-title">
+                                    Franchise {{ franchise.id }}
+                                </h3>
+                                <div class="health-franchise-subtitle">
+                                    Student sync and portal status
+                                </div>
+                            </div>
+
+                            <div class="health-franchise-icon">
+                                <i class="fa-solid fa-building" aria-hidden="true"></i>
+                            </div>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Synced students
+                            </span>
+                            <span class="health-stat-value">
+                                {{ franchise.synced }} / {{ franchise.total }}
+                            </span>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Malformed inputs
+                            </span>
+                            <span class="health-stat-value">
+                                {% if franchise.malformed_inputs and franchise.malformed_inputs > 0 %}
+                                <span class="health-badge warning">
+                                    {{ franchise.malformed_inputs }}
+                                </span>
+                                {% else %}
+                                <span class="health-badge neutral">0</span>
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Nonconfigured portals
+                            </span>
+                            <span class="health-stat-value">
+                                {% if franchise.nonconfigured_portals and franchise.nonconfigured_portals > 0 %}
+                                <span class="health-badge warning">
+                                    {{ franchise.nonconfigured_portals }}
+                                </span>
+                                {% else %}
+                                <span class="health-badge neutral">0</span>
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Bad logins
+                            </span>
+                            <span class="health-stat-value">
+                                {% if franchise.bad_logins and franchise.bad_logins > 0 %}
+                                <span class="health-badge warning">
+                                    {{ franchise.bad_logins }}
+                                </span>
+                                {% else %}
+                                <span class="health-badge neutral">0</span>
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Last updated
+                            </span>
+                            <span class="health-stat-value">
+                                {{ franchise.last_updated }}
+                            </span>
+                        </div>
+
+                        <div class="health-stat-row">
+                            <span class="health-stat-label">
+                                Errors
+                            </span>
+                            <span class="health-stat-value">
+                                {% if franchise.error_count and franchise.error_count > 0 %}
+                                <span class="health-badge danger">
+                                    {{ franchise.error_count }} active
+                                </span>
+                                {% else %}
+                                <span class="health-badge success">
+                                    None
+                                </span>
+                                {% endif %}
+                            </span>
+                        </div>
+
+                        {% if franchise.error_groups and franchise.error_groups|length > 0 %}
+                        <details class="health-error-details">
+                            <summary>
+                                Grouped errors ({{ franchise.error_groups|length }})
+                            </summary>
+
+                            <ul class="health-error-list">
+                                {% for group in franchise.error_groups %}
+                                <li class="health-error-item">
+                                    <span class="health-error-count">
+                                        {{ group.count }}x
+                                    </span>
+                                    <span class="health-error-label">
+                                        {{ group.label }}
+                                    </span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+
+                        <div class="health-card-action" aria-hidden="true">
+                            <span class="health-badge action">
+                                <i
+                                    class="fa-solid fa-arrow-up-right-from-square"
+                                    aria-hidden="true"
+                                ></i>
+                                View details
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="health-footer-note">
+                Click any franchise card to view detailed student and portal health information.
+            </div>
+        </main>
     </body>
 </html>

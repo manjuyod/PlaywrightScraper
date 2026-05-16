@@ -1,12 +1,10 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
-from bs4 import BeautifulSoup
-import re
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from .utils import *
+from .utils import exists, grades_table_to_dict, universal_login_flow, wait_after_nav
 @register_portal("schooltool")
 class SchoolTool(PortalEngine):
     @retry(
@@ -44,7 +42,8 @@ class SchoolTool(PortalEngine):
                         await self.page.click(grades_page_selector)         
                         print('clicked grades page, waiting for nav...')   
                         await wait_after_nav(self.page, wait_after_load=5000)
-            else: print("Could not find student record page, may unable to fetch grades")
+            else:
+                print("Could not find student record page, may unable to fetch grades")
         except Exception as e:
             print(type(e), e)
             raise

@@ -1,8 +1,14 @@
 """To be used as a final test for each portal currently being managed"""
 
+import argparse
+import asyncio
+import random
+from time import time
+
 from scraper.runner import students as get_students, scrape_one
 from db import filter_group
-import random
+from playwright.async_api import async_playwright
+from scraper.portals import managed_portals
 
 async def test_portal(browser, portal, student: dict | None = None) -> bool:
     print(portal)
@@ -10,7 +16,8 @@ async def test_portal(browser, portal, student: dict | None = None) -> bool:
         _students = filter_group(students, 'portal', portal)
         student = random.choice(_students) if len(_students) > 0 else None
         print(student)
-        if student is None: return True
+        if student is None:
+            return True
     try:
         await scrape_one(browser, student)
         return True
@@ -45,9 +52,6 @@ async def full_test(pw) -> dict[str, bool]:
     for (portal, result) in zip(portals, results):
         output[portal] = result
     return output
-
-from playwright.async_api import async_playwright
-from time import time
 async def main(portal: str | None):
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=False)
@@ -67,10 +71,6 @@ async def main(portal: str | None):
 
     seconds_elapsed = end_time - start_time
     print(f"The process took {seconds_elapsed} seconds.")
-
-from scraper.portals import managed_portals
-import asyncio
-import argparse
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Test portions of the grade checker.")
     parser.add_argument(

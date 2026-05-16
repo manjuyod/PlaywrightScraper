@@ -1,13 +1,15 @@
+import argparse
 import asyncio
+import json
 import queue
+from typing import Literal
+
+from db import filter_group
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, BrowserContext
 
 from scraper.portals.utils import get_portal_key_from_url
-from scraper.runner import get_students_from_db, get_portal, db_conn
-from db import filter_group
-import json
-from typing import Literal
+from scraper.runner import db_conn, get_portal, get_students_from_db
 
 load_dotenv()
 async def fetch_agenda(ctx: BrowserContext, student: dict, target: Literal["upcoming", "missing"]) -> tuple[dict, dict]: # maybe make this just a db id (int)
@@ -46,7 +48,7 @@ async def fetch_agenda(ctx: BrowserContext, student: dict, target: Literal["upco
             await scraper.login(first_name=student.get("student_name"))
             print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
             return await scraper.get_agenda(get=target), student
-        except:
+        except Exception:
             return {}, student
     finally:
         await page.close()
@@ -94,8 +96,11 @@ async def main(
             print(f"Agenda collected for student {student['student_name']}: {agenda}")
             
             with db_conn() as conn: # add the agenda to the student in the database
-                cur = conn.cursor()
-                cur.execute("UPDATE Student SET weekly_agenda = %s WHERE ID = %s", (json.dumps(agenda), student["db_id"]))
+                conn.exec_driver_sql(
+                    "UPDATE Student SET weekly_agenda = %s WHERE ID = %s",
+                    (json.dumps(agenda), student["db_id"]),
+                )
+                conn.commit()
             print(f"Agenda saved for student {student['student_name']}")
 
             if state and state_q:
@@ -106,8 +111,6 @@ async def main(
             state.next_step()
             state_q.put((job_id, state))
 
-
-import argparse
 if __name__ == '__main__':
     # For manual testing i.e. `python -m scraper.agenda -f 57 -s 442`
     parser = argparse.ArgumentParser(description="Collect student agendas.")
