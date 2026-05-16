@@ -275,6 +275,43 @@
                 box-shadow: 0 0 0 0.2rem rgba(244, 131, 61, 0.2);
             }
 
+            .franchise-filter-control {
+                display: inline-flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                padding: 4px;
+                border: 1px solid var(--franchise-border);
+                border-radius: 14px;
+                background: #ffffff;
+            }
+
+            .franchise-filter-option {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 36px;
+                padding: 0 12px;
+                border-radius: 10px;
+                color: var(--franchise-blue-dark);
+                font-size: 0.82rem;
+                font-weight: 850;
+                text-decoration: none;
+                white-space: nowrap;
+            }
+
+            .franchise-filter-option:hover {
+                background: var(--franchise-blue-soft);
+            }
+
+            .franchise-filter-option.is-active {
+                background: var(--franchise-blue);
+                color: #ffffff;
+            }
+
+            .franchise-filter-option.is-active:hover {
+                background: var(--franchise-blue-dark);
+            }
+
             /* =========================
                Dynamic Student Table
                ========================= */
@@ -821,6 +858,18 @@
                     width: 100%;
                 }
 
+                .franchise-filter-control {
+                    display: grid;
+                    grid-template-columns: repeat(3, minmax(0, 1fr));
+                    width: 100%;
+                }
+
+                .franchise-filter-option {
+                    padding: 0 8px;
+                    text-align: center;
+                    white-space: normal;
+                }
+
                 .modal {
                     padding: 12px;
                 }
@@ -1029,6 +1078,30 @@
                         <div class="franchise-search-label">
                             Student Reports
                         </div>
+
+                        <nav
+                            class="franchise-filter-control"
+                            aria-label="Filter students by grade level"
+                        >
+                            <a
+                                class="franchise-filter-option {% if grade_filter == 'all' %}is-active{% endif %}"
+                                href="{{ url_for('franchise_view', franchise_id=franchise_id) }}"
+                            >
+                                All
+                            </a>
+                            <a
+                                class="franchise-filter-option {% if grade_filter == 'middle_school' %}is-active{% endif %}"
+                                href="{{ url_for('franchise_view', franchise_id=franchise_id, grade_filter='middle_school') }}"
+                            >
+                                Middle School
+                            </a>
+                            <a
+                                class="franchise-filter-option {% if grade_filter == 'high_school' %}is-active{% endif %}"
+                                href="{{ url_for('franchise_view', franchise_id=franchise_id, grade_filter='high_school') }}"
+                            >
+                                High School
+                            </a>
+                        </nav>
 
                         <input
                             type="text"
@@ -1555,7 +1628,7 @@
                 }
 
                 form.reset();
-                form.action = "{{ url_for('franchise_view', franchise_id=franchise_id) }}";
+                form.action = "{{ url_for('franchise_view', franchise_id=franchise_id, grade_filter=grade_filter) }}";
                 document.getElementById("portal_username").required = true;
                 document.getElementById("portal_password").required = true;
                 document.getElementById("portal_username").placeholder = "";
@@ -1579,7 +1652,7 @@
                 const student = JSON.parse(btn.getAttribute("data-student"));
                 modalTitle.innerText = "Edit Student";
                 form.action =
-                    "{{ url_for('franchise_view', franchise_id=franchise_id) }}?student_id=" +
+                    "{{ url_for('franchise_view', franchise_id=franchise_id, grade_filter=grade_filter) }}&student_id=" +
                     student.id;
 
                 document.getElementById("first_name").value = student.first_name;

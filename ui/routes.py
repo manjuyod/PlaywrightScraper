@@ -1,5 +1,6 @@
 # builtins
 import json
+import re
 from collections.abc import Mapping
 from typing import cast
 # external
@@ -77,6 +78,43 @@ def _form_or_existing(field_name: str, existing_student: Student | Mapping | Non
         if existing is not None:
             return str(existing)
     return ""
+
+
+GRADE_FILTER_LEVELS = {
+    "middle_school": {6, 7, 8},
+    "high_school": {9, 10, 11, 12},
+}
+
+
+def _normalize_grade_filter(raw_filter: str | None) -> str:
+    if raw_filter in GRADE_FILTER_LEVELS:
+        return raw_filter
+    return "all"
+
+
+def _grade_level_int(grade_level: object) -> int | None:
+    if grade_level is None or isinstance(grade_level, bool):
+        return None
+    if isinstance(grade_level, int):
+        return grade_level
+    if isinstance(grade_level, float) and grade_level.is_integer():
+        return int(grade_level)
+
+    match = re.search(r"\d+", str(grade_level))
+    if match is None:
+        return None
+    return int(match.group())
+
+
+def _filter_students_by_grade(students: list[Student], grade_filter: str) -> list[Student]:
+    grade_levels = GRADE_FILTER_LEVELS.get(grade_filter)
+    if grade_levels is None:
+        return students
+    return [
+        student
+        for student in students
+        if _grade_level_int(student.grade_level) in grade_levels
+    ]
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -174,6 +212,7 @@ async def franchise_view(franchise_id: int):
     """Here we show a list of students for the given franchise.
     Student data is fetched from the database.
     Comprised of the students' first/last name, portal links, most recent grades"""
+    grade_filter = _normalize_grade_filter(request.args.get("grade_filter"))
     students = get_students_from_session(franchise_id)
 
     if students is None:
@@ -182,7 +221,8 @@ async def franchise_view(franchise_id: int):
         store_students_in_session(franchise_id, students)
 
     assert students is not None
-    student_reports = [compute_student_report(student) for student in students]
+    visible_students = _filter_students_by_grade(students, grade_filter)
+    student_reports = [compute_student_report(student) for student in visible_students]
     # print(student_reports[0:1])
     job_id = f"{franchise_id}"
     agenda_job_id = f"{franchise_id}_agenda"
@@ -228,12 +268,20 @@ async def franchise_view(franchise_id: int):
                     else:
                         flash("Incorrect master password.")
                         return redirect(
-                            url_for("franchise_view", franchise_id=franchise_id)
+                            url_for(
+                                "franchise_view",
+                                franchise_id=franchise_id,
+                                grade_filter=grade_filter,
+                            )
                         )
                 else:
                     flash("Master password required.")
                     return redirect(
-                        url_for("franchise_view", franchise_id=franchise_id)
+                        url_for(
+                            "franchise_view",
+                            franchise_id=franchise_id,
+                            grade_filter=grade_filter,
+                        )
                     )
 
             student_id = request.args.get("student_id", type=int)
@@ -282,7 +330,13 @@ async def franchise_view(franchise_id: int):
                     student_id=int(student_id), student=student, master_key=dek
                 )
                 flash(f"Updated student {student.first_name}")
-                return redirect(url_for("franchise_view", franchise_id=franchise_id))
+                return redirect(
+                    url_for(
+                        "franchise_view",
+                        franchise_id=franchise_id,
+                        grade_filter=grade_filter,
+                    )
+                )
             else:
                 return "Invalid form submission", 400
     # print("Job id", job_id)
@@ -290,6 +344,7 @@ async def franchise_view(franchise_id: int):
         "franchise.html",
         student_reports=student_reports,
         franchise_id=franchise_id,
+        grade_filter=grade_filter,
         job_id=job_id,
         agenda_job_id=agenda_job_id,
     )

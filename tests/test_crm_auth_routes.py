@@ -442,6 +442,130 @@ def _sample_student(**overrides: object) -> Student:
     return Student(**data)
 
 
+def _filter_fixture_students() -> list[Student]:
+    return [
+        _sample_student(id=101, grade_level=6, first_name="Maya", last_name="Six"),
+        _sample_student(id=102, grade_level=8, first_name="Eli", last_name="Eight"),
+        _sample_student(id=201, grade_level=9, first_name="Noah", last_name="Nine"),
+        _sample_student(id=202, grade_level=12, first_name="Zoe", last_name="Twelve"),
+    ]
+
+
+def test_franchise_page_middle_school_filter_renders_only_grades_6_to_8() -> None:
+    app, routes = _create_auth_client()
+    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        response = client.get("/franchise/11?grade_filter=middle_school")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Maya" in body
+    assert "Eli" in body
+    assert "Noah" not in body
+    assert "Zoe" not in body
+
+
+def test_franchise_page_high_school_filter_renders_only_grades_9_to_12() -> None:
+    app, routes = _create_auth_client()
+    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        response = client.get("/franchise/11?grade_filter=high_school")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Maya" not in body
+    assert "Eli" not in body
+    assert "Noah" in body
+    assert "Zoe" in body
+
+
+def test_franchise_page_invalid_or_missing_grade_filter_renders_all_students() -> None:
+    app, routes = _create_auth_client()
+    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        missing_response = client.get("/franchise/11")
+        invalid_response = client.get("/franchise/11?grade_filter=elementary")
+
+    for response in (missing_response, invalid_response):
+        body = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert "Maya" in body
+        assert "Eli" in body
+        assert "Noah" in body
+        assert "Zoe" in body
+
+
+def test_franchise_page_grade_filter_accepts_neon_grade_labels() -> None:
+    app, routes = _create_auth_client()
+    routes.db.get_students = lambda _franchise_id: [
+        _sample_student(id=301, grade_level="6th", first_name="Iris"),
+        _sample_student(id=302, grade_level="8th", first_name="Omar"),
+        _sample_student(id=303, grade_level="10th", first_name="Pia"),
+        _sample_student(id=304, grade_level="", first_name="Quinn"),
+    ]
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        response = client.get("/franchise/11?grade_filter=middle_school")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Iris" in body
+    assert "Omar" in body
+    assert "Pia" not in body
+    assert "Quinn" not in body
+
+
+def test_franchise_page_filtered_scraper_post_uses_full_franchise_count() -> None:
+    app, routes = _create_auth_client()
+    captured_jobs: list[tuple[str, int, str]] = []
+    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+    routes.run_job = lambda job_id, total, type="grade": captured_jobs.append(
+        (job_id, total, type)
+    )
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        response = client.post(
+            "/franchise/11?grade_filter=middle_school",
+            data={"csrf_token": "token-1", "run_scraper": "1"},
+        )
+
+    assert response.status_code == 200
+    assert captured_jobs == [("11", 4, "grade")]
+
+
 def test_franchise_page_does_not_render_student_portal_credentials() -> None:
     app, routes = _create_auth_client()
     student = _sample_student()
