@@ -44,6 +44,7 @@ tmp
 *.swo
 .replit
 *.replit
+replit.nix
 
 # OS-specific
 .DS_Store
