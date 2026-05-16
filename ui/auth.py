@@ -70,7 +70,8 @@ _DRIVER_PATH = "/home/runner/odbc/lib/libmsodbcsql-17.10.so.6.1"
 
 
 def _resolve_driver() -> str:
-    if _DRIVER_NAME in pyodbc.drivers():
+    drivers = getattr(pyodbc, "drivers", None)
+    if callable(drivers) and _DRIVER_NAME in drivers():
         return "{" + _DRIVER_NAME + "}"
     return _DRIVER_PATH
 
