@@ -1,11 +1,14 @@
 # scraper/work_flows/insert_grades.py
 import json
-from scraper.runner import db_conn, DictCursor
-import psycopg2
 import pathlib
+from sqlalchemy.exc import SQLAlchemyError
+
+from scraper.runner import db_conn, project_root
 from datetime import date, timedelta
 
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
+PROJECT_ROOT = project_root()
+print(f"Project root: {PROJECT_ROOT}")
+
 JSONL_PATH = PROJECT_ROOT / "output/phase1totuples/grades.jsonl"
 
 def get_monday_anchor() -> str:
@@ -13,11 +16,18 @@ def get_monday_anchor() -> str:
     monday = today - timedelta(days=today.weekday())
     return monday.strftime("%Y-%m-%d")
 
-def safe_load_json(s: str):
-    try:
-        return json.loads(s) if s else {}
-    except Exception:
+def safe_load_json(value):
+    if not value:
         return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
     """
@@ -33,16 +43,15 @@ def clear_grades_jsonl(path: pathlib.Path = JSONL_PATH) -> None:
     except Exception as e:
         print(f"Warning: could not delete {path}: {e}")
 
-def insert_grades():
+def insert_grades(): 
+    # TODO: Here we need to identify if "new" courses are actually new or not
+    # TODO: We will then need to alter jsons in the database to contain one canonical title for each course (separate script)
+    # "American History" should not be different from "1: AMERICAN HISTORY" although they contain differences
     monday_anchor = get_monday_anchor()
     print(f"Using Monday anchor date: {monday_anchor}")
-    print(f"DB: {db_conn().info}")
     print(f"Input: {JSONL_PATH}")
-
     try:
-        with db_conn() as conn , open(JSONL_PATH, "r", encoding="utf-8") as f:
-            cur = conn.cursor(cursor_factory=DictCursor)
-
+        with db_conn() as conn, open(JSONL_PATH, "r", encoding="utf-8") as f:
             for raw in f:
                 raw = raw.strip()
                 if not raw:
@@ -54,49 +63,61 @@ def insert_grades():
                     print(f"Skipping non-JSON line: {raw[:120]}…")
                     continue
 
+                student_id = data.get("db_id")
                 # Skip error payloads
                 if "error" in data:
                     print(f"Skipping error entry for {data.get('id')}: {data.get('error')}")
+                    update_status(conn, student_id, "error", error_msg=data['error'])
                     continue
 
                 # Accept both NEW and OLD shapes:
                 # NEW: {"db_id": 1, "id": "...", "parsed_grades": {...}}
                 # OLD: {"db_id": 1, "id": "...", "grades": {"parsed_grades": {...}}}
-                student_id = data.get("db_id")
                 grades = data.get("parsed_grades")
                 if grades is None and isinstance(data.get("grades"), dict):
                     grades = data["grades"].get("parsed_grades")
-
-                if not student_id or not isinstance(grades, dict) or not grades:
+                if not isinstance(grades, dict) or not grades:
                     print(f"Skipping line (missing student_id or parsed_grades): {raw[:120]}…")
+                    update_status(conn, student_id, "missing grades")
                     continue
 
                 # Fetch existing WeeklyData
-                cur.execute("SELECT WeeklyData FROM Student WHERE ID = %s", (student_id,))
-                row = cur.fetchone()
+                row = conn.exec_driver_sql(
+                    "SELECT WeeklyData FROM Student WHERE ID = %s",
+                    (student_id,)
+                ).mappings().fetchone()
                 if not row:
                     print(f"Student with ID '{student_id}' not found.")
                     continue
 
+                # Postgres JSON columns may come back as either a string or a native dict.
                 weekly_data = safe_load_json(row["weeklydata"])
 
                 # Update current week's bucket
                 weekly_data[monday_anchor] = grades
-
                 # Persist
-                cur.execute(
+                conn.exec_driver_sql(
                     "UPDATE Student SET WeeklyData = %s WHERE ID = %s",
                     (json.dumps(weekly_data, ensure_ascii=False), student_id)
                 )
+                update_status(conn, student_id, 'synced')
                 print(f"Updated student ID {student_id} for week {monday_anchor} with {len(grades)} courses.")
 
             conn.commit()
 
     except FileNotFoundError:
         print(f"Error: Output file not found at {JSONL_PATH}")
-    except psycopg2.Error as e:
+    except SQLAlchemyError as e:
         print(f"Database error: {e}")
 
+def update_status(cur, student_id: int, status: str, error_msg: str | None = None):
+    """ Modifies a students update status (synced, missing grades, error) in the database
+        If the status is 'error' we will update the error_msg field in the database"""
+    cur.exec_driver_sql("update student set status = %s where ID = %s", (status, student_id,))
+    if status == 'error':
+        cur.exec_driver_sql("update student set error_msg = %s where ID = %s", (error_msg, student_id,))
+    else:
+        cur.exec_driver_sql("update student set error_msg = NULL where ID = %s", (student_id,))
 if __name__ == "__main__":
     try:
         insert_grades()

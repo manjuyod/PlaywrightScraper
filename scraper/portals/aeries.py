@@ -1,156 +1,217 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime, timedelta  # ← added timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from time import monotonic
+from typing import Any, Dict, Optional
 
-import bs4
-from bs4 import BeautifulSoup
-from tenacity import (retry, retry_if_exception_type, stop_after_attempt,
-                      wait_exponential, retry_if_not_exception_type, RetryError)
+from bs4 import Tag
+
+from . import register_portal
 from .base import PortalEngine
-from . import register_portal, LoginError
-from playwright.async_api import Locator, Dialog, TimeoutError, Page
+from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict, canonicalize_course_title, canonicalize_grade, PlaywrightTimeout
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 
 @register_portal("aeries")
 class Aeries(PortalEngine):
-    """Portal scraper for Aeries portal.
+    async def _is_logged_in(self) -> bool:
+        url = self.page.url or ""
 
-    The class uses Playwright to automate login and extract quarter grades
-    for each course. Grades are returned as a list of course/grade
-    dictionaries under the ``parsed_grades`` key.
-    """
+        success_selectors = [
+            "#StudentNameDropDown",
+            "#NavMainGrades",
+            "#divClass",
+            "a[href*='Dashboard']",
+            "a[href*='Grades']",
+        ]
+
+        for sel in success_selectors:
+            try:
+                if await exists(self.page.locator(sel), timeout=700):
+                    return True
+            except Exception:
+                pass
+
+        return any(x in url.lower() for x in ("dashboard", "grades", "student"))
+
+    async def _has_login_error(self) -> bool:
+        error_targets = [
+            self.page.get_by_role("alert"),
+            self.page.locator(".alert"),
+            self.page.locator(".validation-summary-errors"),
+            self.page.locator("#divError"),
+            self.page.locator("text=/invalid|incorrect|failed|try again|username|password/i"),
+        ]
+
+        for target in error_targets:
+            try:
+                if await exists(target, timeout=700):
+                    return True
+            except Exception:
+                pass
+
+        return False
+
+    async def _wait_for_login_result(self, timeout_ms: int = 12000) -> bool:
+        deadline = monotonic() + (timeout_ms / 1000)
+
+        while monotonic() < deadline:
+            try:
+                await self.page.wait_for_load_state("domcontentloaded", timeout=800)
+            except Exception:
+                pass
+
+            if await self._is_logged_in():
+                return True
+
+            if await self._has_login_error():
+                return False
+
+            await self.page.wait_for_timeout(500)
+
+        raise PlaywrightTimeout(f"Timed out waiting for Aeries login result (url={self.page.url})")
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(TimeoutError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        """Authenticate the user on the Aeries parent portal."""
         try:
-            await self.page.context.tracing.start(screenshots=True, snapshots=True)
-            await self.page.goto(self.login_url, timeout=60000) # it should never take 60 seconds to reach the page, just for safety
-            # Username
-            await self.page.fill("input#portalAccountUsername", self.sid)
-            await self.page.wait_for_timeout(2000)
-            await self.page.locator("#next").click()
-            # Password or Google Sign in
+            username_selector = "input#portalAccountUsername"
+            password_selector = "input#portalAccountPassword"
+            sso_login_selector = "#LoginButton"
+
+            await universal_login_flow(
+                self.page,
+                self.login_url,
+                self.sid,
+                self.pw,
+                username_selector,
+                password_selector,
+                google_callback=self.google_login,
+                alt_sso_callback=self.iusd_login,
+                sso_login_selector=sso_login_selector,
+            )
+
+            login_ok = await self._wait_for_login_result(timeout_ms=14000)
+            if not login_ok:
+                raise self.LoginError("Invalid username/password")
+
             try:
-                await self.page.fill("input#portalAccountPassword", self.pw, timeout=3000)
-                await self.page.wait_for_timeout(2000)
-                await self.page.locator("#LoginButton").click()
-            except TimeoutError: # password field DNE, must be Google signin
-                await self.page.locator("#LoginButton").click()
-                await self.google_signin()
+                await wait_after_nav(self.page, pattern="**/Dashboard**", timeout=10000)
+            except Exception:
+                if not await self._is_logged_in():
+                    raise
+            
+            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
 
-
-            #handle failed login
-            error_box: Locator = self.page.locator("#errorContainer")
-            if await error_box.is_visible():
-                error_msg = await self.page.locator("#errorMessage").inner_text()
-                print(f"Login Error: {error_msg}")
-                raise LoginError(error_msg)
-
-            await self.page.wait_for_url('**/Dashboard**', timeout=30000)
-            await self.page.wait_for_load_state(timeout=45000)
+            # TODO: gate on bad login alert
+            # if await exists(self.page.get_by_text("""
+            #     The Username or Password entered are incorrect.
+            #     Try again with Valid Credentials.
+            # """, exact=False)):
+            #     raise self.LoginError("Invalid credentials")
         except Exception as e:
             print(e)
+            raise
         finally:
             await self.page.context.tracing.stop()
             print("stopped tracing")
-    # ---------------------- FETCH (notifications → latest per subject) -------
+
+    async def iusd_login(self):
+        username_selector = "#input28"
+        pw_selector = "#input62"
+        await universal_login_flow(
+            self.page,
+            self.page.url,
+            self.sid,
+            self.pw,
+            username_selector,
+            pw_selector,
+        )
+
+    async def nav_to_grades(self) -> bool:
+        main_grades_selector = "#NavMainGrades"
+        sub_grades_selector = "#NavSubGrades"
+        await self.page.click(main_grades_selector)
+        sub_grades_elem = self.page.locator(sub_grades_selector)
+        if await exists(sub_grades_elem):
+            await self.page.click(sub_grades_selector)
+            await wait_after_nav(self.page, pattern="**/Grades**", timeout=5000)
+            return True
+        return False
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(TimeoutError),
+        retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
-        """Stay on HOME and scrape notifications; return latest Semester Grade per subject."""
         print("\nfetching grades")
-        # ensure we have reached the next page
-        if "Dashboard" not in self.page.url:
-            raise LoginError
-        await self.page.wait_for_timeout(3000) # wait some to allow population
+        try:
+            await self.raise_login_error_if("Dashboard" not in self.page.url)
+            await self.page.wait_for_timeout(3000)
 
-        soup = await self.get_soup()
-        courses_dict = {}
-
-        # get class table
-        class_table = soup.find('div', id="divClass")
-        if 'nmusd' not in self.login_url:
-            if class_table is None: # failed to find class table
+            soup = await self.get_soup()
+            class_table = soup.find("div", id="divClass")
+            if class_table is None:
                 await self.page.click("#StudentNameDropDown")
                 await self.page.click("#StudentNameDropDownMenu")
                 await self.page.wait_for_load_state()
                 await self.page.wait_for_timeout(3000)
-                # try again with new page
-                soup = await self.get_soup()
-                class_table = soup.find('div', id='divClass')
-            # parse the class table
-            class_cards = class_table.select('div.Card')
-            print(f"[AERIES] found {len(class_cards)} courses")
-            for card in class_cards:  # parse the cards
-                # course name
-                class_link = card.find("a", class_="TextHeading")
-                course_name: str = class_link.text.strip()
-                # grade
-                grade_div = card.find("div", class_="Grade")
-                grade_span = grade_div.find("span")
-                if grade_span is not None:
-                    grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
-                    grade_str = grade_str.replace("(", "").replace(")", "").replace("%","") if grade_str is not None else None
-                    grade = grade_str
-                    # add to dictionary
-                    courses_dict[course_name.upper()] = grade
-        else: # newport portals are weird
-            await self.page.click('#NavMainGrades')
-            await self.page.click('#NavSubGrades')
-            await self.page.wait_for_url('**/Grades**', timeout=10000)
-            soup = await self.get_soup()
-            # find the table first
-            table = soup.find("table", attrs={"id": "ctl00_MainContent_subGRD_tblEverything"})
-            # classes
-            course_table = table.select("tr[id$='ReadRow1']")
-            print(course_table)
-            for course in course_table:
-                course_name = course.find("td", {'data-tcfc': 'CRS.CO'}) # course name
-                course_name.find('label').decompose()
-                course_name = course_name.get_text(strip=True)
 
-                course_letter = course.find('td', {'data-tcfc': 'GRD.M1'}) # course letter
-                course_letter.find('label').decompose()
-                course_letter = course_letter.get_text(strip=True)
-                print(course_name, course_letter)
-                grade = float(self.percent_from_letter_grade(course_letter)) # nmusd uses letter grades, no numbers, so we parse here
-                if grade > 0:
-                    # add to dictionary
-                    courses_dict[course_name.upper()] = grade
-        print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
-        # await self.page.pause()
-        return {"parsed_grades": courses_dict}
+            grades_page_exists = await self.nav_to_grades()
+            if grades_page_exists:
+                table_selector = "tr[id$='ReadRow1']"
+                course_selector = "td[data-tcfc='CRS.CO']"
+                grade_selector = "td[data-tcfc='GRD.M2']"
 
-    # helper
-    @staticmethod
-    def percent_from_letter_grade(letter_grade: str):
-        minus = letter_grade.endswith("-")
-        plus = letter_grade.endswith("+")
-        modifier = -5 if minus else 5 if plus else 0
-        grade = 95
-        if modifier != 0:
-            letter_grade = letter_grade.replace("-", "")
-            letter_grade = letter_grade.replace("+", "")
-        match letter_grade:
-            case 'A': pass
-            case 'B': grade -= 11 # 89
-            case 'C': grade -= 21 # 79
-            case 'D': grade -= 31 # 69
-            case 'F': grade -= 40 # 60
-            case _: grade = -1
-        return grade + modifier if grade > 0 else grade
+                courses_dict = await grades_table_to_dict(
+                    self.page,
+                    table_selector,
+                    course_selector,
+                    grade_selector,
+                    decompose_labels=True,
+                )
+                print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
+                return {"parsed_grades": courses_dict}
+            else:
+                print("grades tab DNE, parsing grades from dashboard")
+                await self.page.reload()
+                courses_dict = {}
 
+                if isinstance(class_table, Tag) and len(class_table.select("div.Card")) > 0:
+                    class_cards = class_table.select("div.Card")
+                    print(f"[AERIES] found {len(class_cards)}")
+                    for card in class_cards:
+                        class_link = card.find("a", class_="TextHeading")
+                        if class_link is None: 
+                            continue
+                        course_name: str = class_link.text.strip()
 
-    # ---------------------- LOGOUT ----------------------
+                        grade_div = card.find("div", class_="Grade")
+                        if not isinstance(grade_div, Tag):
+                            continue
+                        grade_span = grade_div.find("span")
+                        if grade_span is None:
+                            continue
+                        grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
+                        if not grade_str:
+                            continue
+                        title = canonicalize_course_title(course_name)
+                        grade = canonicalize_grade(grade_str)
+                        courses_dict[title] = grade
+
+                import pprint
+                pprint.pprint(courses_dict)
+                return courses_dict
+
+        except Exception as e:
+            print(e)
+            raise
+        finally:
+            await self.page.context.tracing.stop()
+
     async def logout(self) -> None:
-        # await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)

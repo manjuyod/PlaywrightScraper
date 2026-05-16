@@ -1,0 +1,402 @@
+<div class="student-heatmap-tab" data-tab="heatmap">
+    <div class="heatmap-header">
+        <div>
+            <h3>Grade Heatmap</h3>
+            <p class="heatmap-subtitle">Weeks across the top, courses down the side</p>
+        </div>
+
+        <div class="heatmap-chip">
+            <span id="heatmap-course-count">0</span> courses
+        </div>
+    </div>
+
+    <div
+        class="heatmap-table-wrapper"
+        role="region"
+        aria-label="Student grade heatmap"
+    >
+        <table class="heatmap-table" id="student-heatmap-table">
+            <thead id="heatmap-header"></thead>
+            <tbody id="heatmap-body"></tbody>
+        </table>
+    </div>
+
+    <div class="heatmap-footer">
+        <div class="heatmap-legend">
+            <span>Lower</span>
+            <div class="legend-bar"></div>
+            <span>Higher</span>
+        </div>
+
+        <div class="heatmap-note">
+            Darker green indicates stronger grades. Blank cells mean no grade was recorded for that week.
+        </div>
+    </div>
+</div>
+
+<style>
+    .student-heatmap-tab {
+        padding: 0;
+    }
+
+    .heatmap-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 14px;
+    }
+
+    .heatmap-header h3 {
+        margin: 0;
+        color: var(--student-blue-dark, #2f5597);
+        font-size: 1.25rem;
+        font-weight: 850;
+        letter-spacing: 0;
+    }
+
+    .heatmap-subtitle {
+        margin: 5px 0 0;
+        color: var(--student-muted, #64748b);
+        font-size: 0.92rem;
+        font-weight: 650;
+    }
+
+    .heatmap-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: var(--student-orange-soft, #fff0e7);
+        color: var(--student-orange-dark, #d76624);
+        font-size: 0.82rem;
+        font-weight: 850;
+        white-space: nowrap;
+    }
+
+    .heatmap-table-wrapper {
+        overflow: auto;
+        border-radius: 18px;
+        border: 1px solid var(--student-border, #eadfd7);
+        background: #ffffff;
+        max-width: 100%;
+        box-shadow: var(--student-shadow-soft, 0 8px 22px rgba(15, 23, 42, 0.07));
+    }
+
+    .heatmap-table {
+        width: max-content;
+        min-width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: auto;
+    }
+
+    .heatmap-table th,
+    .heatmap-table td {
+        border-bottom: 1px solid #f0e6de;
+        border-right: 1px solid #f0e6de;
+        padding: 8px;
+        text-align: center;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .heatmap-table th {
+        position: sticky;
+        top: 0;
+        background: var(--student-blue, #4472c4);
+        color: #ffffff;
+        z-index: 3;
+        font-size: 0.74rem;
+        font-weight: 850;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+    }
+
+    .heatmap-table th:first-child,
+    .heatmap-table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        text-align: left;
+        width: max-content;
+        min-width: 280px;
+        max-width: 380px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .heatmap-table th:first-child {
+        background: var(--student-blue-dark, #2f5597);
+        color: #ffffff;
+    }
+
+    .heatmap-table td:first-child {
+        background: #fffaf6;
+        color: var(--student-text, #102033);
+        font-weight: 850;
+        border-right: 2px solid var(--student-orange, #f4833d);
+    }
+
+    .heatmap-table tbody tr:hover td:first-child {
+        background: var(--student-orange-soft, #fff0e7);
+    }
+
+    .heatmap-table tbody tr:hover td:not(:first-child) {
+        filter: brightness(0.98);
+    }
+
+    .heatmap-cell {
+        min-width: 54px;
+        height: 38px;
+        color: #102033;
+        font-weight: 900;
+        border-radius: 10px;
+        box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+    }
+
+    .heatmap-cell.empty {
+        background: #f8fafc;
+        color: #94a3b8;
+        font-weight: 700;
+        box-shadow: inset 0 0 0 1px #e5e7eb;
+    }
+
+    .heatmap-footer {
+        margin-top: 14px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+
+    .heatmap-legend {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+        color: var(--student-muted, #64748b);
+        font-weight: 750;
+    }
+
+    .legend-bar {
+        width: 160px;
+        height: 10px;
+        border-radius: 999px;
+        background: linear-gradient(
+            90deg,
+            #fecaca 0%,
+            #fde68a 50%,
+            #86efac 100%
+        );
+        border: 1px solid var(--student-border, #eadfd7);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+    }
+
+    .heatmap-note {
+        color: var(--student-muted, #64748b);
+        font-size: 0.85rem;
+        font-weight: 650;
+    }
+
+    .heatmap-empty-state {
+        padding: 18px;
+        color: var(--student-muted, #64748b);
+        font-weight: 650;
+        background: #fffaf6;
+        border-radius: 14px;
+        border: 1px solid var(--student-border, #eadfd7);
+    }
+
+    .student-heatmap-tab {
+        min-width: 0;
+    }
+
+    .heatmap-table-wrapper {
+        max-height: min(72vh, 760px);
+        scrollbar-gutter: stable;
+    }
+
+    .heatmap-table th,
+    .heatmap-table td {
+        padding: 9px 10px;
+    }
+
+    .heatmap-cell {
+        min-width: 58px;
+        height: 40px;
+        border-radius: 10px;
+    }
+
+    .heatmap-empty-state {
+        text-align: left;
+    }
+
+    .heatmap-footer {
+        align-items: flex-start;
+    }
+
+    @media (max-width: 760px) {
+        .heatmap-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .heatmap-chip {
+            align-self: flex-start;
+        }
+
+        .heatmap-table th:first-child,
+        .heatmap-table td:first-child {
+            min-width: 220px;
+            max-width: 280px;
+        }
+
+        .heatmap-cell {
+            min-width: 48px;
+            height: 34px;
+            font-size: 0.8rem;
+        }
+
+        .heatmap-footer {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+    }
+</style>
+
+<script type="application/json" id="student-grades-data">
+    {{ student.grades | tojson | safe }}
+</script>
+
+<script>
+    const gradesDataElement = document.getElementById("student-grades-data");
+    const gradesData = gradesDataElement
+        ? JSON.parse(gradesDataElement.textContent || "{}")
+        : {};
+
+    const weeks = gradesData ? Object.keys(gradesData) : [];
+
+    const courseSet = new Set();
+
+    weeks.forEach((week) => {
+        const courseGrades = gradesData[week] || {};
+        Object.keys(courseGrades).forEach((course) => {
+            const value = courseGrades[course];
+            if (typeof value === "number") {
+                courseSet.add(course);
+            }
+        });
+    });
+
+    const courses = Array.from(courseSet).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+
+    const header = document.getElementById("heatmap-header");
+    const body = document.getElementById("heatmap-body");
+    const courseCount = document.getElementById("heatmap-course-count");
+
+    if (courseCount) {
+        courseCount.textContent = String(courses.length);
+    }
+
+    if (header && body) {
+        header.innerHTML = "";
+        body.innerHTML = "";
+
+        if (!weeks.length || !courses.length) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = Math.max(weeks.length + 1, 1);
+            cell.innerHTML =
+                '<div class="heatmap-empty-state">No heatmap data available yet.</div>';
+            row.appendChild(cell);
+            body.appendChild(row);
+        } else {
+            const headerRow = document.createElement("tr");
+            const corner = document.createElement("th");
+            corner.textContent = "Course / Week";
+            headerRow.appendChild(corner);
+
+            weeks.forEach((week) => {
+                const th = document.createElement("th");
+                th.textContent = formatWeekLabel(week);
+                th.title = week;
+                headerRow.appendChild(th);
+            });
+
+            header.appendChild(headerRow);
+
+            courses.forEach((course) => {
+                const row = document.createElement("tr");
+
+                const courseCell = document.createElement("td");
+                courseCell.textContent = course;
+                row.appendChild(courseCell);
+
+                weeks.forEach((week) => {
+                    const cell = document.createElement("td");
+                    const grade = gradesData?.[week]?.[course];
+
+                    if (typeof grade === "number") {
+                        cell.className = "heatmap-cell";
+                        cell.textContent = String(grade);
+                        cell.style.background = gradeToColor(grade);
+                        cell.title = `${course} • ${week}: ${grade}`;
+                    } else {
+                        cell.className = "heatmap-cell empty";
+                        cell.textContent = "—";
+                        cell.title = `${course} • ${week}: no grade recorded`;
+                    }
+
+                    row.appendChild(cell);
+                });
+
+                body.appendChild(row);
+            });
+        }
+    }
+
+    function gradeToColor(grade) {
+        const clamped = Math.max(0, Math.min(100, grade));
+
+        if (clamped < 70) {
+            return interpolateHsl(0, 78, 88, 0, 72, 78, clamped / 70);
+        }
+
+        if (clamped < 80) {
+            return interpolateHsl(35, 86, 84, 45, 88, 76, (clamped - 70) / 10);
+        }
+
+        if (clamped < 90) {
+            return interpolateHsl(52, 86, 80, 78, 72, 74, (clamped - 80) / 10);
+        }
+
+        return interpolateHsl(105, 62, 76, 135, 60, 70, (clamped - 90) / 10);
+    }
+
+    function interpolateHsl(h1, s1, l1, h2, s2, l2, t) {
+        const pct = Math.max(0, Math.min(1, t));
+        const h = h1 + (h2 - h1) * pct;
+        const s = s1 + (s2 - s1) * pct;
+        const l = l1 + (l2 - l1) * pct;
+        return `hsl(${h}, ${s}%, ${l}%)`;
+    }
+
+    function formatWeekLabel(week) {
+        const text = String(week || "");
+
+        const d = new Date(text);
+        if (!Number.isNaN(d.getTime())) {
+            return d.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+            });
+        }
+
+        return text;
+    }
+</script>

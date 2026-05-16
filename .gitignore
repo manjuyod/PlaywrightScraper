@@ -7,6 +7,8 @@ __pycache__/
 
 # Virtual Environment
 env/
+*.env
+.env/
 venv/
 .venv/
 scraper/.env
@@ -29,13 +31,26 @@ output/
 captcha.png
 gilbert_parent_portal.html
 *.jsonl
+tmp
+.playwright-cli/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
 # IDE / Editor
 .idea/
 .vscode/
 *.swp
 *.swo
+.replit
+*.replit
 
 # OS-specific
 .DS_Store
 Thumbs.db
+.gitnexus
+
+# agentic items as a result of gitnexus
+.claude
+CLAUDE.md
+AGENTS.md

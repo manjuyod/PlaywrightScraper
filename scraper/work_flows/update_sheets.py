@@ -21,8 +21,9 @@ import json
 import math
 import pathlib
 import re
-from scraper.runner import db_conn, DictCursor, connection
-import psycopg2
+from scraper.runner import db_conn
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import SQLAlchemyError
 from typing import Dict, List
 
 import gspread
@@ -86,19 +87,20 @@ def _retry_on_rate_limit(func):
                     raise
     return wrapper
 
-def _load_sheet_map(conn: connection) -> Dict[int, str]:
+def _load_sheet_map(conn: Connection) -> Dict[int, str]:
     """Return {FranchiseID: <spreadsheet-id>} extracted from URL."""
-    cur = conn.cursor()
-    cur.execute("SELECT franchiseid, spreadsheet FROM Spreadsheets")
+    rows = conn.exec_driver_sql("SELECT franchiseid, spreadsheet FROM Spreadsheets").mappings().all()
     mapping: Dict[int, str] = {}
-    for fid, url in cur.fetchall():
+    for row in rows:
+        fid = row["franchiseid"]
+        url = row["spreadsheet"]
         m = re.search(r"/d/([A-Za-z0-9_-]+)", url or "")
         if m:
             mapping[fid] = m.group(1)
     return mapping
 
 
-def _query_students(conn: connection) -> pd.DataFrame:
+def _query_students(conn: Connection) -> pd.DataFrame:
     """Return a DataFrame with student rows + WeeklyData used for grade blocks."""
     sql = """
         SELECT
@@ -113,13 +115,15 @@ def _query_students(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            error_msg,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
 
 
-def _query_login_master(conn: connection) -> pd.DataFrame:
+def _query_login_master(conn: Connection) -> pd.DataFrame:
     """Raw login control data for LoginMaster tab."""
     sql = """
         SELECT
@@ -135,7 +139,8 @@ def _query_login_master(conn: connection) -> pd.DataFrame:
             p2username,
             p2password,
             weeklydata,
-            passwordgood
+            passwordgood,
+            status
         FROM Student
     """
     return pd.read_sql_query(sql, conn)
@@ -156,14 +161,18 @@ def _is_hs_grade(grade: str | None) -> bool:
     return False
 
 
-def _safe_json_loads(s: str | None) -> dict:
+def _safe_json_loads(s) -> dict:
     if not s:
         return {}
-    try:
-        v = json.loads(s)
-        return v if isinstance(v, dict) else {}
-    except Exception:
-        return {}
+    if isinstance(s, dict):
+        return s
+    if isinstance(s, str):
+        try:
+            v = json.loads(s)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def _coerce_str(x) -> str:
@@ -178,21 +187,20 @@ def _extract_subjects(wdata: dict) -> List[str]:
             names.update(week_payload.keys())
     return sorted(names)
 
-def _load_known_franchise_ids(conn: connection) -> set[int]:
+def _load_known_franchise_ids(conn: Connection) -> set[int]:
     """
     Only allow FranchiseIDs that are present in Spreadsheets.
     (Optionally require a non-empty spreadsheet URL.)
     """
-    cur = conn.cursor()
     try:
-        cur.execute("""
+        rows = conn.exec_driver_sql("""
             SELECT DISTINCT franchiseid
             FROM Spreadsheets
             WHERE franchiseid IS NOT NULL
               AND COALESCE(spreadsheet, '') <> ''   -- comment out this line if URL shouldn't be required
-        """)
-        return {int(r[0]) for r in cur.fetchall() if r[0] is not None}
-    except psycopg2.Error as e:
+        """).mappings().all()
+        return {int(r["franchiseid"]) for r in rows if r["franchiseid"] is not None}
+    except SQLAlchemyError as e:
         print(f"[WARN] Could not load FranchiseIDs from Spreadsheets: {e}")
         return set()
     
@@ -226,25 +234,12 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
      meta rows (A/B only) → two blanks → subject rows with week columns.
     We align each student’s block to the franchise-wide weeks after computing per-student data.
     """
-    good_pw = row["passwordgood"] == 1
-
     # 1) meta rows (explicit strings, no NaN bleed)
     meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
     meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
 
     # 2) two blank spacer rows
     blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
-
-    if not good_pw:
-        err = pd.DataFrame(
-            [
-                {"Field": "Error", "Value": "invalid entry, check credentials"},
-                {"Field": "", "Value": ""},
-                {"Field": "", "Value": ""},
-            ],
-            columns=["Field", "Value"],
-        )
-        return pd.concat([meta, err], ignore_index=True)
 
     # 3) subject → grades for this student only
     wdata = _safe_json_loads(row["weeklydata"])
@@ -283,24 +278,75 @@ def _build_student_block(row: pd.Series, weeks_all: List[str]) -> pd.DataFrame:
     # Final block for this student
     return pd.concat([meta, pivot_df, blank], ignore_index=True)
 
+def _build_student_err_block(row: pd.Series) -> pd.DataFrame:
+    """
+    Return one student’s error block:
+     meta rows (A/B only) → two blanks → subject rows with week columns.
+    We align each student’s block to the franchise-wide weeks after computing per-student data.
+    """
+    good_pw = row["passwordgood"] == 1
+    good_fetch = row["status"] == 'synced'
+    # 1) meta rows (explicit strings, no NaN bleed)
+    meta_rows = [{"Field": lbl, "Value": _coerce_str(row[src])} for lbl, src in META_FIELDS]
+    meta = pd.DataFrame(meta_rows, columns=["Field", "Value"])
+
+    # 2) two blank spacer rows
+    blank = pd.DataFrame([{"Field": "", "Value": ""}] * 2, columns=["Field", "Value"])
+    # handle fails / not updated
+    if not good_pw:
+        err = pd.DataFrame(
+            [
+                {"Field": "Bad Password", "Value": "invalid entry, check credentials"},
+            ],
+            columns=["Field", "Value"],
+        )
+        return pd.concat([meta, err, blank], ignore_index=True)
+    if not good_fetch:
+        if row['status'] == 'never':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Never updated", "Value": "Student has never been updated"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        if row['status'] == 'missing grades':
+            err = pd.DataFrame(
+                [
+                    {"Field": "Missing Grades", "Value": "failed to collect grades for student"},
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+        elif row['status'] == 'error':
+            err = pd.DataFrame(
+                [ # there should be more info here
+                    {"Field": "Error", "Value": "something bad happened"},
+                    {"Field": "Message", "Value": row['error_msg']}
+                ],
+                columns=["Field", "Value"],
+            )
+            return pd.concat([meta, err, blank], ignore_index=True)
+    raise Exception("This student does not appear to be errored")
 
 def _collect_weeks(df: pd.DataFrame) -> List[str]:
     weeks: set[str] = set()
     for wd_json in df["weeklydata"]:
-        try:
-            weeks.update(json.loads(wd_json).keys())
-        except Exception:
-            pass
+        wd = _safe_json_loads(wd_json)
+        weeks.update(wd.keys())
     return sorted(weeks)
 
 
-def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str]) -> pd.DataFrame:
+def _build_dataframe_for_group(df_sub: pd.DataFrame, weeks: List[str], err_group: bool = False) -> pd.DataFrame:
     """Legend + all student blocks in df_sub, aligned to the provided weeks."""
     legend = _build_legend_rows(weeks)
     if df_sub.empty:
         note = pd.DataFrame([{"Field": "", "Value": "(no students)"}])
         return pd.concat([legend, note], ignore_index=True)
-    frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
+    if err_group:
+        frames = [_build_student_err_block(row) for _, row in df_sub.iterrows()]
+    else:
+        frames = [_build_student_block(row, weeks) for _, row in df_sub.iterrows()]
     return pd.concat([legend, *frames], ignore_index=True)
 
 
@@ -369,19 +415,17 @@ def _parse_args():
 def main() -> None:
     #ArgParse First
     args = _parse_args()
-    
-    conn = db_conn()
-    sheet_map = _load_sheet_map(conn)
-    df_all = _query_students(conn)       # has WeeklyData for grade blocks
-    df_login_all = _query_login_master(conn)  # flat login rows
-    known_fids = _load_known_franchise_ids(conn)
+    with db_conn() as conn:
+        sheet_map = _load_sheet_map(conn)
+        df_all = _query_students(conn)       # has WeeklyData for grade blocks
+        df_login_all = _query_login_master(conn)  # flat login rows
+        known_fids = _load_known_franchise_ids(conn)
 
     # NEW: compute target set (either the single requested ID, or all known)
     if args.franchise_id is not None:
         target_fids = {args.franchise_id} & known_fids
         if not target_fids:
             print(f"[SKIP] FranchiseID {args.franchise_id} not in known set; nothing to do.")
-            conn.close()
             return
     else:
         target_fids = known_fids
@@ -414,12 +458,15 @@ def main() -> None:
 
         # Build ID sets for HS / MS / Error from LoginMaster (authoritative for Grade/PasswordGood)
         login_f = df_login_all[df_login_all["franchiseid"] == fid].copy()
-        good = login_f["passwordgood"] == 1
         is_hs = login_f["grade"].apply(_is_hs_grade)
+        good_fetch = login_f["status"] == 'synced'
+        has_been_updated = login_f['status'] != 'never'
+        good_password = login_f["passwordgood"] == 1
+        good = good_fetch & good_password
 
-        hs_ids  = set(login_f.loc[good & is_hs,  "id"].tolist())
-        ms_ids  = set(login_f.loc[good & ~is_hs, "id"].tolist())
-        err_ids = set(login_f.loc[~good,         "id"].tolist())
+        hs_ids  = set(login_f.loc[is_hs & has_been_updated,  "id"].tolist())
+        ms_ids  = set(login_f.loc[~is_hs & has_been_updated, "id"].tolist())
+        err_ids = set(login_f.loc[~good, "id"].tolist())
 
         # Slice the grade-pivot source to those students
         grp_hs  = grp[grp["id"].isin(hs_ids)]
@@ -429,7 +476,7 @@ def main() -> None:
         # Build the 3 grade tabs using the SAME weeks list
         hs_df  = _build_dataframe_for_group(grp_hs,  weeks)
         ms_df  = _build_dataframe_for_group(grp_ms,  weeks)
-        err_df = _build_dataframe_for_group(grp_err, weeks)
+        err_df = _build_dataframe_for_group(grp_err, weeks, err_group=True)
 
         # Assemble sheets with header flags
         frames = {
@@ -454,17 +501,10 @@ def main() -> None:
 
         # (Optional) push to Google Sheets only if you also have a mapping:
         if fid in sheet_map:
-            _push_multi_sheets(sheet_map[fid], {
-                "LoginMaster": (login_master, True),
-                "HS": (hs_df, False),
-                "MS": (ms_df, False),
-                "Error": (err_df, False),
-            })
-            print(f"  ✓ Uploaded to spreadsheet {sheet_map[fid]}")
+            _push_multi_sheets(sheet_map[fid], frames)
+            print(f"  Uploaded to spreadsheet {sheet_map[fid]}")
         else:
             print(f"  [SKIP] No spreadsheet configured for FranchiseID {fid}")
-
-    conn.close()
 
 if __name__ == "__main__":
     main()

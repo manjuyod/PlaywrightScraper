@@ -1,26 +1,14 @@
 from __future__ import annotations
-from pathlib import Path
 from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
-import unicodedata
 import re
 
 from scraper.portals.base import PortalEngine
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from .utils import canonicalize_course_title, universal_login_flow, wait_after_nav
 DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
-
-def canonicalize_course(text: str) -> str:
-    """
-    Normalize Unicode, convert NBSP to space, unify dashes to '-',
-    collapse whitespace. Does NOT drop prefixes/suffixes.
-    """
-    t = unicodedata.normalize("NFKC", text)
-    t = t.replace("\xa0", " ")
-    t = re.sub(DASHES, "-", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
 
 @register_portal("powerschool")
 class PowerSchool(PortalEngine):
@@ -30,17 +18,20 @@ class PowerSchool(PortalEngine):
         retry=retry_if_exception_type(Exception),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        # 1) Load login page
-        await self.page.goto(self.login_url, wait_until="domcontentloaded")
-        await self.page.wait_for_timeout(500)
+        username_selector = "#fieldAccount"
+        password_selector = "#fieldPassword"
 
-        # 2) Fill & submit
-        await self.page.fill("#fieldAccount", self.sid)
-        await self.page.fill("#fieldPassword", self.pw)
-        await self.page.click("#btn-enter-sign-in")
+        await universal_login_flow(
+            self.page,
+            self.login_url,
+            self.sid,
+            self.pw,
+            username_selector,
+            password_selector,
+            microsoft_callback=self.microsoft_login
+        )
 
-        # 3) Give it time to load the gradebook table
-        await self.page.wait_for_timeout(8000)
+        await wait_after_nav(self.page, wait_after_load=3000)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -50,10 +41,8 @@ class PowerSchool(PortalEngine):
     async def fetch_grades(self) -> Dict[str, Any]:
         # grab full HTML
         html = await self.page.content()
-        try:
-            parsed = self._parse_gradebook(html)
-            print(parsed)
-        finally: pass
+        parsed = self._parse_gradebook(html)
+        print(parsed)
         return {"parsed_grades": parsed}
 
     @staticmethod
@@ -65,33 +54,31 @@ class PowerSchool(PortalEngine):
         """
         soup = BeautifulSoup(html, "html.parser")
         results: Dict[str, Any] = {}
-
+        table_selector = "tr[id^=ccid_]"
         # Select each student row by id starting with ccid_
-        for tr in soup.select("tr[id^=ccid_]"):
-            course_td = tr.select_one("td.table-element-text-align-start")
-            if not course_td:
+        table = soup.select(table_selector)
+        for course in table:
+            title_elem = course.select_one("td.table-element-text-align-start")
+            if not title_elem:
                 continue
 
-            # get raw text, then SANITIZE once
-            course_raw = course_td.get_text(" ", strip=True)
-            course = canonicalize_course(course_raw)   # <-- use sanitized
-
-            bold_links = tr.select("a.bold")
-            if not bold_links:
-                results[course] = ""
+            title = title_elem.get_text(strip=True)
+            if 'placeholder' in title.lower():
                 continue
+            truncate_on = "Email"
+            title = canonicalize_course_title(title, truncate_on=truncate_on)
 
-            link = bold_links[0]
-            text = link.get_text("\n", strip=True)
-            parts = text.splitlines()
-
-            value: Any = ""
-            if len(parts) >= 2:
-                m = re.search(r"\d+(?:\.\d+)?", parts[1])  # handles 87 / 87.5 / 87%
-                value = float(m.group(0)) if m else ("" if parts[0].upper() in ("N/A", "-", "") else parts[0])
-            else:
-                letter = parts[0].strip() if parts else ""
-                value = "" if letter.upper() in ("N/A", "-", "") else letter
-
-            results[course] = value
+            cols = course.select("td")[:-2] # exclude the absences and tardies rows
+            grade: float | None = None
+            for col in reversed(cols): # make sure we grab the most recent grade
+                grades_text = col.get_text(separator='\n', strip=True)
+                grades = grades_text.splitlines()
+                if title in grades_text: # there may not be a grade here, bail
+                    break
+                if len(grades) == 2:
+                    m = re.search(r"\d+(?:\.\d+)?", grades[1])  # handles 87 / 87.5 / 87%
+                    grade = float(m.group(0)) if m else ("" if grades[0].upper() in ("N/A", "-", "") else grades[0])
+                    break
+            if grade:
+                results[title] = grade
         return results
