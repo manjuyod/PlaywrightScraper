@@ -62,11 +62,16 @@ The app uses `.env` through `python-dotenv`.
 
 Database:
 
-- `PGHOST`
-- `PGDATABASE`
-- `PGUSER`
-- `PGPASSWORD`
-- `PGPORT`
+- `GRADES_NEON_URL`, or all of:
+- `GRADES_NEON_HOST`
+- `GRADES_NEON_DB`
+- `GRADES_NEON_USER`
+- `GRADES_NEON_PASSWORD`
+- `GRADES_NEON_PORT`
+
+`GRADES_NEON_URL` is preferred when set. Otherwise, the app builds the
+Postgres connection from the component variables above. Legacy `PG*` variables
+are intentionally ignored because Replit may overwrite them.
 
 Dashboard:
 

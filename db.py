@@ -21,8 +21,16 @@ connection = Connection
 
 def db_conn() -> connection:
     print("db_conn(): creating connection...", flush=True)
-    print("PGHOST:", os.getenv("PGHOST"), flush=True)
-    print("PGDATABASE:", os.getenv("PGDATABASE"), flush=True)
+    print("GRADES_NEON_URL set:", bool(os.getenv("GRADES_NEON_URL")), flush=True)
+    print("GRADES_NEON_HOST:", os.getenv("GRADES_NEON_HOST"), flush=True)
+    print("GRADES_NEON_DB:", os.getenv("GRADES_NEON_DB"), flush=True)
+    print("GRADES_NEON_USER set:", bool(os.getenv("GRADES_NEON_USER")), flush=True)
+    print("GRADES_NEON_PORT:", os.getenv("GRADES_NEON_PORT"), flush=True)
+    print(
+        "GRADES_NEON_PASSWORD set:",
+        bool(os.getenv("GRADES_NEON_PASSWORD")),
+        flush=True,
+    )
     return get_connection()
 
 

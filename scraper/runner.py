@@ -37,11 +37,24 @@ def _debug_env():
 
     print("[runner] Python:", _sys.executable, _sys.version, flush=True)
     print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
-    print("[runner] ENV PGHOST:", os.getenv("PGHOST"), flush=True)
-    print("[runner] ENV PGDATABASE:", os.getenv("PGDATABASE"), flush=True)
-    print("[runner] ENV PGUSER:", os.getenv("PGUSER"), flush=True)
-    print("[runner] ENV PGPORT:", os.getenv("PGPORT"), flush=True)
-    print("[runner] ENV (PGPASSWORD set?):", bool(os.getenv("PGPASSWORD")), flush=True)
+    print(
+        "[runner] ENV GRADES_NEON_URL set:",
+        bool(os.getenv("GRADES_NEON_URL")),
+        flush=True,
+    )
+    print("[runner] ENV GRADES_NEON_HOST:", os.getenv("GRADES_NEON_HOST"), flush=True)
+    print("[runner] ENV GRADES_NEON_DB:", os.getenv("GRADES_NEON_DB"), flush=True)
+    print(
+        "[runner] ENV GRADES_NEON_USER set:",
+        bool(os.getenv("GRADES_NEON_USER")),
+        flush=True,
+    )
+    print("[runner] ENV GRADES_NEON_PORT:", os.getenv("GRADES_NEON_PORT"), flush=True)
+    print(
+        "[runner] ENV GRADES_NEON_PASSWORD set:",
+        bool(os.getenv("GRADES_NEON_PASSWORD")),
+        flush=True,
+    )
 
 
 def db_conn() -> Connection:
