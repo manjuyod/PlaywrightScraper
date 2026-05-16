@@ -65,6 +65,16 @@ def _extract_candidate(row: dict[str, Any], candidates: tuple[str, ...]) -> Any:
     return None
 
 
+_DRIVER_NAME = "ODBC Driver 17 for SQL Server"
+_DRIVER_PATH = "/home/runner/odbc/lib/libmsodbcsql-17.10.so.6.1"
+
+
+def _resolve_driver() -> str:
+    if _DRIVER_NAME in pyodbc.drivers():
+        return "{" + _DRIVER_NAME + "}"
+    return _DRIVER_PATH
+
+
 def _connect_string() -> str:
     database = os.getenv("CRMSrvDb", "").strip()
     if not database:
@@ -77,7 +87,7 @@ def _connect_string() -> str:
         in {"1", "true", "yes"}
     )
     return (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"DRIVER={_resolve_driver()};"
         f"SERVER={os.getenv('CRMSrvAddress', '')};"
         f"DATABASE={database};"
         f"UID={os.getenv('CRMSrvUs', '')};"
