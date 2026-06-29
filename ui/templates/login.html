@@ -5,202 +5,22 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>CRM Login</title>
         <link
-            rel="stylesheet"
-            href="{{ url_for('static', filename='styles.css') }}"
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
         />
-        <style>
-            :root {
-                --health-blue: #4472c4;
-                --health-blue-dark: #2f5597;
-                --health-blue-soft: #edf4ff;
-
-                --health-orange: #f4833d;
-                --health-orange-dark: #d76624;
-                --health-orange-soft: #fff0e7;
-
-                --health-bg: #fff8f3;
-                --health-panel: #ffffff;
-                --health-border: #eadfd7;
-                --health-text: #102033;
-                --health-muted: #64748b;
-                --health-success: #15803d;
-                --health-danger: #dc2626;
-
-                --health-shadow: 0 14px 35px rgba(244, 131, 61, 0.12);
-                --health-shadow-soft: 0 8px 22px rgba(15, 23, 42, 0.07);
-            }
-
-            body {
-                font-family:
-                    "Inter",
-                    "Segoe UI",
-                    system-ui,
-                    -apple-system,
-                    BlinkMacSystemFont,
-                    sans-serif;
-                background: var(--health-bg);
-                color: var(--health-text);
-                margin: 0;
-                min-height: 100vh;
-                display: grid;
-                place-items: center;
-            }
-
-            .login-wrap {
-                width: min(460px, calc(100% - 32px));
-                background: var(--health-panel);
-                border: 1px solid var(--health-border);
-                border-radius: 8px;
-                box-shadow: var(--health-shadow);
-                padding: 24px;
-            }
-
-            .login-brand {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 12px;
-                margin-bottom: 18px;
-            }
-
-            .login-logo {
-                width: 48px;
-                height: 48px;
-                object-fit: contain;
-            }
-
-            .login-title {
-                margin: 0 0 4px;
-                color: var(--health-blue-dark);
-                font-size: 1.75rem;
-                font-weight: 800;
-                text-align: left;
-            }
-
-            .login-subtitle {
-                color: var(--health-muted);
-                text-align: left;
-                margin: 0;
-                font-weight: 500;
-            }
-
-            .field {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                margin-bottom: 14px;
-            }
-
-            label {
-                font-weight: 700;
-                color: var(--health-text);
-            }
-
-            input[type="text"],
-            input[type="password"] {
-                padding: 10px 12px;
-                border: 1px solid var(--health-border);
-                border-radius: 8px;
-                font-size: 0.98rem;
-                background: #fff;
-                color: var(--health-text);
-            }
-
-            input[type="text"]:focus,
-            input[type="password"]:focus {
-                border-color: var(--health-blue);
-                box-shadow: 0 0 0 3px rgba(68, 114, 196, 0.18);
-                outline: none;
-            }
-
-            .login-actions {
-                display: flex;
-                gap: 10px;
-                margin-top: 18px;
-            }
-
-            .btn {
-                border: 0;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-weight: 700;
-                cursor: pointer;
-                width: 100%;
-            }
-
-            .btn-primary {
-                background: var(--health-orange);
-                color: white;
-            }
-
-            .btn-primary:hover {
-                background: var(--health-orange-dark);
-            }
-
-            .flash {
-                background: #fff1f2;
-                color: var(--health-danger);
-                border: 1px solid #fecdd3;
-                border-radius: 8px;
-                padding: 10px 12px;
-                margin-bottom: 16px;
-            }
-
-            @media (max-width: 520px) {
-                .login-wrap {
-                    padding: 18px;
-                }
-
-                .login-brand {
-                    justify-content: flex-start;
-                }
-            }
-        </style>
+        {% include "_react_assets.html" %}
     </head>
     <body>
-        <main class="login-wrap">
-            <div class="login-brand">
-                <img
-                    src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
-                    alt="Tutoring Club Logo"
-                    class="login-logo"
-                />
-                <div>
-                    <h1 class="login-title">CRM Login</h1>
-                    <p class="login-subtitle">Tutoring Club Dashboard</p>
-                </div>
-            </div>
-            {% with messages = get_flashed_messages() %} {% if messages %}
-            <div class="flash">{{ messages[0] }}</div>
-            {% endif %} {% endwith %}
-            <form method="POST">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <div class="field">
-                    <label for="username">Username</label>
-                    <input
-                        id="username"
-                        name="username"
-                        type="text"
-                        required
-                        autocomplete="username"
-                    />
-                </div>
-                <div class="field">
-                    <label for="password">Password</label>
-                    <input
-                        id="password"
-                        name="password"
-                        type="password"
-                        required
-                        autocomplete="current-password"
-                    />
-                </div>
-                <div class="login-actions">
-                    <button type="submit" class="btn btn-primary">
-                        Sign in
-                    </button>
-                </div>
-            </form>
-        </main>
+        {% set messages = get_flashed_messages() %}
+        <div id="tc-react-root"></div>
+        <script id="tc-page-data" type="application/json">
+            {
+                "page": "login",
+                "csrfToken": {{ csrf_token|tojson }},
+                "logoUrl": {{ url_for('static', filename='imgs/tc_logo.webp')|tojson }},
+                "messages": {{ messages|tojson }}
+            }
+        </script>
     </body>
 </html>
