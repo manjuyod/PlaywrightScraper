@@ -44,6 +44,7 @@ def get_portal(key: str) -> Type[PortalEngine]:
 # Map of portal keys -> list of URL substrings commonly found in their login URLs.
 # (Useful for auto-detect; runner can use detect_portal_from_url when DB portal is NULL.)
 managed_portals: Dict[str, list[str]] = {
+    "allenisd": ["portal.allenisd.org"],
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
