@@ -36,6 +36,7 @@ tmp
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+replit.nix
 
 # IDE / Editor
 .idea/
