@@ -62,11 +62,14 @@ The app uses `.env` through `python-dotenv`.
 
 Database:
 
-- `PGHOST`
-- `PGDATABASE`
-- `PGUSER`
-- `PGPASSWORD`
-- `PGPORT`
+- `GRADES_NEON_URL`, or these component values:
+- `GRADES_NEON_HOST`
+- `GRADES_NEON_DB`
+- `GRADES_NEON_USER`
+- `GRADES_NEON_PASSWORD`
+- `GRADES_NEON_PORT`
+
+The legacy `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGPORT` names are still supported.
 
 Dashboard:
 

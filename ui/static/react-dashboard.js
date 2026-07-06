@@ -1698,6 +1698,15 @@
         );
     }
 
+    function studentTabFromHash(hash) {
+        const tab = String(hash || "").replace(/^#/, "").toLowerCase();
+        return tab === "heatmap" ? "heatmap" : "history";
+    }
+
+    function studentTabHash(tab) {
+        return tab === "heatmap" ? "#heatmap" : "#history";
+    }
+
     function StudentTable({
         deleteMode,
         onEdit,
@@ -1822,14 +1831,25 @@
                             h(
                                 "td",
                                 { className: "px-4 py-4 align-top" },
-                                h(Button, {
-                                    variant: "outline",
-                                    size: "sm",
-                                    onClick: (event) => {
-                                        event.stopPropagation();
-                                        onEdit(student);
-                                    },
-                                }, "Edit"),
+                                h(
+                                    "div",
+                                    { className: "flex flex-wrap gap-2" },
+                                    h(Button, {
+                                        variant: "outline",
+                                        size: "sm",
+                                        onClick: (event) => {
+                                            event.stopPropagation();
+                                            onEdit(student);
+                                        },
+                                    }, "Edit"),
+                                    h(Button, {
+                                        href: `${student.detailUrl}#heatmap`,
+                                        variant: "orange",
+                                        size: "sm",
+                                        icon: "grid",
+                                        onClick: (event) => event.stopPropagation(),
+                                    }, "Heatmap"),
+                                ),
                             ),
                         ),
                     ),
@@ -1840,8 +1860,26 @@
 
     function StudentPage({ data }) {
         const student = data.student || {};
-        const [activeTab, setActiveTab] = useState("history");
+        const [activeTab, setActiveTab] = useState(() => studentTabFromHash(window.location.hash));
         const grades = student.grades || {};
+        useEffect(() => {
+            function handleHashChange() {
+                setActiveTab(studentTabFromHash(window.location.hash));
+            }
+
+            window.addEventListener("hashchange", handleHashChange);
+            return () => window.removeEventListener("hashchange", handleHashChange);
+        }, []);
+
+        function selectStudentTab(tab) {
+            setActiveTab(tab);
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, "", studentTabHash(tab));
+            } else {
+                window.location.hash = studentTabHash(tab);
+            }
+        }
+
         return h(
             Shell,
             null,
@@ -2045,7 +2083,7 @@
                                                     ? "bg-white text-brand-blueDark"
                                                     : "text-white hover:bg-white/10",
                                             ),
-                                            onClick: () => setActiveTab(tab),
+                                            onClick: () => selectStudentTab(tab),
                                         },
                                         tab,
                                     ),

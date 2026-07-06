@@ -34,3 +34,13 @@ def test_templates_do_not_assign_raw_jinja_inside_javascript() -> None:
                 offenders.append(str(template_path.relative_to(PROJECT_ROOT)))
 
     assert offenders == []
+
+
+def test_dashboard_exposes_student_heatmap_deep_link() -> None:
+    script = (PROJECT_ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "`${student.detailUrl}#heatmap`" in script
+    assert "Heatmap" in script
+    assert "studentTabFromHash(window.location.hash)" in script
