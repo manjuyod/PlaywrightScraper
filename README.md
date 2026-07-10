@@ -1,113 +1,160 @@
 # Student Grade Checker
 
-PlaywrightScraper collects student grades and agenda data from supported school portals, stores the results in Postgres, and exposes a Flask dashboard for franchise-level monitoring.
+PlaywrightScraper is a security-separated grade and agenda collection system.
+CRM SQL Server is authoritative for students, Neon stores scraper state/jobs,
+Rust/Axum is the only database boundary, Flask is the browser-facing BFF, and
+the existing Windows EC2 host schedules and executes Playwright jobs through
+private APIs only.
 
-## Dashboard
+## Production topology
 
-The UI lives in `ui/` and is served by `ui.wsgi:app`.
+```text
+Cloudflare -> frontend Ubuntu EC2: Nginx -> Flask/Gunicorn on 127.0.0.1:8080
+                                              |
+                                              +-- private DNS + mTLS
+                                                  -> API Ubuntu EC2: Nginx
+                                                     -> Axum on 127.0.0.1:3000
+                                                        |-> CRM
+                                                        `-> Neon
 
-Routes:
+Windows worker/scheduler/operator CLI -------- private mTLS + bearer --------^
+```
 
-- `/` starts the dashboard auth flow and always redirects to `/login`.
-- `/login` allows CRM authentication via `dbo.usp_login` (through `ui/auth.py`). Franchise ID `1` routes to the health dashboard; other valid franchises route to their franchise dashboard.
-- `/logout` clears the dashboard session.
-- `/health` shows all active franchises, active/background jobs, synced student counts, bad login counts, malformed inputs, nonconfigured portals, and grouped scraper errors.
-- `/franchise/<franchise_id>` shows a searchable, sortable student table for one franchise. It includes portal links, recent grade snapshots, low/high grades, standing, status, edit/delete controls, and buttons to refresh grades or agendas for the full franchise.
-- `/franchise/<franchise_id>/student/<student_id>` shows one student's report, including current standing, recent grades, agenda items, grade history, and a heatmap view.
-- `/status/<job_id>` returns JSON progress for the dashboard's grade and agenda refresh progress bars.
+The frontend and API are never co-located in production. The API has no public
+IP or public DNS record. `grades-api.tutoringclub.com` is private VPC DNS only.
+No AWS, Cloudflare, certificate, migration, backfill, or database command has
+been run by Codex; those remain manual operator actions.
 
-Background dashboard jobs are managed in `ui/ext_jobs.py` with a small thread pool. Franchise-level job IDs use the franchise ID, student-level jobs use `<franchise_id>_<student_id>`, and agenda jobs add the `_agenda` suffix.
+## Components
 
-## Local Dashboard Run
+- `api/`: Rust API, migrations `001`–`006`, encrypted alternate credentials,
+  scheduler/operator/worker contracts, and the dry-run-default backfill binary.
+- `ui/`: Flask signed-session BFF and credential-free report DTOs. Dashboard
+  student identity is read-only; grade and agenda refresh remain available.
+- `scraper/`: API-only worker, agenda collector, portal engines, mTLS clients,
+  accurate progress, and lease-abandonment behavior for ambiguous delivery.
+- `scripts/windows_pipeline.py`: reconcile, deterministic UUIDv5 enqueue, and
+  drain commands used by Windows Task Scheduler.
+- `scripts/operator_credentials.py`: masked/stdin operator credential CLI;
+  credentials are never command-line arguments, returned, or logged.
+- `deploy/`: separate systemd/Nginx/environment/release/PKI artifacts and
+  manual runbooks. Application IaC and application containers are out of scope.
 
-Install dependencies and Playwright browsers first:
+## API surface
+
+Public/private probes:
+
+- `GET /livez`: dependency-free static liveness.
+- `GET /readyz`: readiness bearer plus short concurrent CRM/Neon probes.
+
+Dashboard-signed routes retain login, student/franchise reads,
+`POST /api/jobs/manual-pull`, safe UUID job reads, and
+`GET /api/dashboard/health`. Dashboard student `POST/PATCH/DELETE` routes and
+browser controls are removed.
+
+Service routes:
+
+- Worker: claim, context, heartbeat, event, result, complete, and fail routes,
+  all lease-protected after claim.
+- Scheduler: `POST /api/scheduler/jobs` and
+  `POST /api/scheduler/reconcile-students`.
+- Operator: alternate-credential `PUT/DELETE` under
+  `/api/operator/students/{id}/alternate-credentials`.
+
+Dashboard HMAC replay claims are atomic PostgreSQL rows shared by API
+instances. Rust accepts active/previous verification keys and Flask signs with
+one active key. Alternate credentials use AES-256-GCM with environment, table,
+schema version, field, and CRM student ID as AAD.
+
+## Install, build, and test
 
 ```powershell
-uv sync
+uv sync --frozen
 uv run playwright install
-```
-
-For local dashboard development, set a strong session secret and start Flask:
-
-```powershell
-$env:SESSION_SECRET = "local-development-session-secret-2026"
-uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
-```
-
-Open `http://127.0.0.1:8080/` and sign in with CRM credentials.
-
-The Replit/nginx entrypoint is `ui/start.sh`. It runs Gunicorn on `127.0.0.1:3000` and proxies public traffic through nginx on port `8080`.
-
-## Configuration
-
-The scraper and dashboard read environment variables from `.env` via `python-dotenv`.
-
-Required for database access:
-
-- `GRADES_NEON_URL`, or these component values:
-- `GRADES_NEON_HOST`
-- `GRADES_NEON_DB`
-- `GRADES_NEON_USER`
-- `GRADES_NEON_PASSWORD`
-- `GRADES_NEON_PORT`
-
-The legacy `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGPORT` names are still supported.
-
-Dashboard/session settings:
-
-- `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` provide CRM authentication connectivity. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
-- `CRM_TRUST_SERVER_CERTIFICATE` controls SQL Server certificate trust (default `no`). `1`, `true`, and `yes` (case-insensitive) are accepted values for enabling `TrustServerCertificate=yes`.
-- The CRM SQL Server connection uses encrypted ODBC transport with certificate validation controlled by `CRM_TRUST_SERVER_CERTIFICATE`.
-- `SESSION_SECRET` signs Flask sessions. It must be a strong non-default value of at least 32 characters.
-
-The bundled nginx config forwards `X-Forwarded-For` and `X-Forwarded-Proto`; Flask applies trusted proxy handling so login rate limiting can use the real client address behind nginx.
-
-Optional:
-
-- `PYTHON_ENV=dev` affects runner notification behavior.
-- `SLACK_WEBHOOK_URL` enables Slack notifications.
-- `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
-- `OPENAI_API_KEY` and `OPENAI_MODEL` are used by GPT-assisted portal utilities.
-
-## Scraper Runs
-
-Run grade collection from the CLI:
-
-```powershell
-uv run python -m scraper.runner
-uv run python -m scraper.runner --franchise-id 19
-uv run python -m scraper.runner --franchise-id 19 --student-id 123
-```
-
-Run agenda collection:
-
-```powershell
-uv run python -m scraper.agenda --franchise-id 19
-```
-
-Batch helpers live in `batches/`, including per-franchise pipelines and `pipeline_all_franchises.bat`.
-
-## Tests
-
-```powershell
+uv run ruff check .
 uv run pytest -q
-uv run pytest -q --run-integration
-$env:TEST_FRANCHISE_ID = "19"; uv run pytest -q --run-integration
+
+npm ci
+npm run build
+npm test
+
+cd api
+cargo fmt --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets
 ```
 
-## Portal Development
+Build role-separated Linux artifacts on a trusted Linux build host:
 
-Portal engines live in `scraper/portals/`.
+```bash
+sh deploy/bin/build-release-artifacts VERSION /approved/output/directory
+```
 
-To add or update a portal:
+The script uses frozen/locked Python, frontend, and Rust dependencies and emits
+independent API/frontend archives plus SHA-256 files.
 
-1. Implement the portal module under `scraper/portals/`.
-2. Register the portal key in `scraper/portals/__init__.py`.
-3. Make sure `scraper/portals/utils.py` can infer the portal key from the stored portal URL.
-4. Add or update fixtures/tests when the parsing behavior changes.
+## Configuration inventories
 
-## Current TODOs
+Use the complete examples in `deploy/api/api.env.example`,
+`deploy/frontend/frontend.env.example`, and
+`deploy/windows/windows.env.example`. Tokens must be globally unique across
+worker, scheduler, and operator identities.
 
-- Make logging consistent across dashboard jobs and scraper runs.
-- Continue adding portal engines.
-- Propagate scraper errors cleanly through retry wrappers and dashboard status.
+- Frontend only: Flask session active/previous secrets, dashboard signing key,
+  and frontend mTLS client material.
+- API only: CRM/Neon URLs, dashboard verification keyring, readiness token,
+  worker/scheduler/operator token maps, AES keyring, and API TLS/CA/CRL files.
+- Windows only: the matching worker/scheduler/operator tokens and separate
+  role certificates, scheduled franchise list, and private API CA.
+
+`ALLOW_PLAINTEXT_ALTERNATE_CREDENTIALS=true` is permitted only during the
+explicit migration-005/backfill overlap. After verification and migration 006,
+set it to `false` and restart only the API role.
+
+## Windows API-only pipeline
+
+```powershell
+uv run python scripts\windows_pipeline.py
+uv run python scripts\windows_pipeline.py --reconcile
+uv run python scripts\windows_pipeline.py --enqueue
+uv run python scripts\windows_pipeline.py --drain
+```
+
+The default performs one reconciliation, enqueues configured franchises with
+daily deterministic UUIDv5 keys, and drains until no work remains. Existing
+per-franchise batch filenames remain as Task Scheduler compatibility wrappers.
+There are no Python SQL/ODBC/Sheets/JSONL write paths.
+
+Operator credentials:
+
+```powershell
+uv run python scripts\operator_credentials.py set 123
+Get-Content .\credential-input.json |
+  uv run python scripts\operator_credentials.py set 123 --stdin
+uv run python scripts\operator_credentials.py delete 123
+```
+
+Protect and remove any stdin file through the approved secret-handling process.
+Do not place credential values in arguments, shell history, logs, or tickets.
+
+## Migrations and rollout
+
+Migrations are additive and ordered:
+
+1. boundary tables;
+2. worker result idempotency;
+3. worker leases;
+4. shared replay claims and scheduler idempotency;
+5. encrypted alternate-credential envelope;
+6. verified plaintext removal and constrained-null legacy columns.
+
+Agents must not apply these migrations or run backfill write mode against user
+databases. Operators should follow the numbered launch and deployment runbooks
+in order, adjusting the sequence only through an approved rollout review:
+
+1. [`01-aws-network-controls.md`](docs/runbooks/01-aws-network-controls.md)
+2. [`02-private-pki.md`](docs/runbooks/02-private-pki.md)
+3. [`03-hmac-replay-and-clock.md`](docs/runbooks/03-hmac-replay-and-clock.md)
+4. [`04-ubuntu-two-instance-deployment.md`](docs/runbooks/04-ubuntu-two-instance-deployment.md)
+5. [`05-secret-rotation-and-credential-backfill.md`](docs/runbooks/05-secret-rotation-and-credential-backfill.md)
+6. [`06-cloudflare-public-origin.md`](docs/runbooks/06-cloudflare-public-origin.md)

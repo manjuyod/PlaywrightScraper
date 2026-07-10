@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ] || [ "$#" -ne 1 ]; then
+    echo "Usage (as root): rollback-release api|frontend" >&2
+    exit 2
+fi
+
+role=$1
+case "$role" in
+    api) service=grade-api.service ;;
+    frontend) service=grade-frontend.service ;;
+    *) echo "Role must be api or frontend" >&2; exit 2 ;;
+esac
+
+role_root=/opt/grade-$role
+if [ ! -L "$role_root/current" ] || [ ! -L "$role_root/previous" ]; then
+    echo "Both current and previous release links are required" >&2
+    exit 1
+fi
+
+current_target=$(readlink -f "$role_root/current")
+previous_target=$(readlink -f "$role_root/previous")
+ln -sfn "$previous_target" "$role_root/current.next"
+mv -Tf "$role_root/current.next" "$role_root/current"
+ln -sfn "$current_target" "$role_root/previous.next"
+mv -Tf "$role_root/previous.next" "$role_root/previous"
+
+systemctl restart "$service"
+systemctl --quiet is-active "$service"

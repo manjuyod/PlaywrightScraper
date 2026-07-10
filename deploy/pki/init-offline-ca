@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+set -eu
+umask 077
+
+if [ "$#" -ne 1 ]; then
+    echo "Usage: init-offline-ca NEW_OFFLINE_DIRECTORY" >&2
+    exit 2
+fi
+
+workspace=$1
+if [ -e "$workspace" ]; then
+    echo "Refusing to reuse an existing CA directory" >&2
+    exit 1
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+mkdir -p "$workspace/root/private" "$workspace/root/certs" "$workspace/root/crl" "$workspace/root/newcerts"
+mkdir -p "$workspace/intermediate/private" "$workspace/intermediate/certs" "$workspace/intermediate/csr" "$workspace/intermediate/crl" "$workspace/intermediate/newcerts"
+: > "$workspace/root/index.txt"
+: > "$workspace/intermediate/index.txt"
+printf '1000\n' > "$workspace/root/serial"
+printf '1000\n' > "$workspace/intermediate/serial"
+printf '1000\n' > "$workspace/intermediate/crlnumber"
+export PKI_ROOT
+PKI_ROOT=$(realpath "$workspace")
+
+openssl genpkey -algorithm RSA -aes-256-cbc -pkeyopt rsa_keygen_bits:4096 -out "$PKI_ROOT/root/private/root-ca.key.pem"
+openssl req -config "$script_dir/openssl-root.cnf" -key "$PKI_ROOT/root/private/root-ca.key.pem" -new -x509 -days 7300 -sha256 -extensions v3_root_ca -out "$PKI_ROOT/root/certs/root-ca.crt.pem"
+
+openssl genpkey -algorithm RSA -aes-256-cbc -pkeyopt rsa_keygen_bits:4096 -out "$PKI_ROOT/intermediate/private/intermediate-ca.key.pem"
+openssl req -config "$script_dir/openssl-intermediate.cnf" -key "$PKI_ROOT/intermediate/private/intermediate-ca.key.pem" -new -sha256 -out "$PKI_ROOT/intermediate/csr/intermediate-ca.csr.pem"
+openssl ca -config "$script_dir/openssl-root.cnf" -extensions v3_intermediate_ca -days 3650 -notext -md sha256 -in "$PKI_ROOT/intermediate/csr/intermediate-ca.csr.pem" -out "$PKI_ROOT/intermediate/certs/intermediate-ca.crt.pem"
+cat "$PKI_ROOT/intermediate/certs/intermediate-ca.crt.pem" "$PKI_ROOT/root/certs/root-ca.crt.pem" > "$PKI_ROOT/intermediate/certs/ca-chain.crt.pem"
+
+echo "Offline root and intermediate created. Keep this directory offline and backed up securely."

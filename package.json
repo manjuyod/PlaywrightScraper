@@ -1,0 +1,23 @@
+{
+  "name": "grade-dashboard-assets",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "clean": "node frontend/clean.mjs",
+    "build:tailwind": "tailwindcss -c tailwind.config.cjs -i frontend/src/tailwind.css -o frontend/build/tailwind.css --minify",
+    "build:css": "esbuild frontend/src/dashboard.css --bundle --minify --loader:.woff=file --loader:.woff2=file --asset-names=fonts/[name]-[hash] --outfile=ui/static/dist/dashboard.css",
+    "build:js": "node frontend/prepare-dashboard.mjs && esbuild frontend/src/dashboard.cjs --bundle --minify --platform=browser --outfile=ui/static/dist/dashboard.js",
+    "build": "npm run clean && npm run build:tailwind && npm run build:css && npm run build:js",
+    "test": "node --test frontend/tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@fontsource/fira-code": "5.2.7",
+    "@fontsource/fira-sans": "5.2.7",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "tailwindcss": "3.4.17"
+  }
+}

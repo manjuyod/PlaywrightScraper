@@ -4,6 +4,7 @@ import asyncio
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
+from urllib.parse import unquote_plus
 from typing import Callable, Dict, List, Literal, Optional, Pattern, Tuple
 
 from bs4 import BeautifulSoup, Tag
@@ -31,8 +32,9 @@ def get_portal_key_from_url(url: str) -> str | None:
     """
     if not url:
         return None
+    normalized_url = unquote_plus(url).lower()
     for portal, rules in managed_portals.items():
-        if any(rule in url for rule in rules):
+        if any(rule.lower() in normalized_url for rule in rules):
             return portal
     return None
 

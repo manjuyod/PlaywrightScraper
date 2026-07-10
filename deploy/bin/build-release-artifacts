@@ -1,0 +1,43 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: build-release-artifacts VERSION OUTPUT_DIRECTORY" >&2
+    exit 2
+fi
+
+version=$1
+output=$2
+case "$version" in
+    *[!A-Za-z0-9._-]*|'') echo "Invalid release version" >&2; exit 2 ;;
+esac
+
+repo=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+output=$(mkdir -p "$output" && CDPATH= cd -- "$output" && pwd)
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT HUP INT TERM
+
+cd "$repo"
+cargo build --manifest-path api/Cargo.toml --release --locked \
+    --bin api --bin backfill_alternate_credentials
+npm ci
+npm run build
+uv sync --frozen --no-dev
+
+install -d -m 0755 "$stage/api/migrations"
+install -m 0755 api/target/release/api "$stage/api/api"
+install -m 0755 api/target/release/backfill_alternate_credentials \
+    "$stage/api/backfill_alternate_credentials"
+cp api/migrations/*.sql "$stage/api/migrations/"
+
+install -d -m 0755 "$stage/frontend"
+cp -R ui "$stage/frontend/ui"
+cp -R .venv "$stage/frontend/.venv"
+cp api_transport.py pyproject.toml uv.lock "$stage/frontend/"
+
+api_archive="$output/api-$version.tar.gz"
+frontend_archive="$output/frontend-$version.tar.gz"
+tar -C "$stage/api" -czf "$api_archive" .
+tar -C "$stage/frontend" -czf "$frontend_archive" .
+(cd "$output" && sha256sum "$(basename "$api_archive")" > "$(basename "$api_archive").sha256")
+(cd "$output" && sha256sum "$(basename "$frontend_archive")" > "$(basename "$frontend_archive").sha256")

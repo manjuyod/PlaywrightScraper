@@ -1,128 +1,179 @@
-import argparse
+from __future__ import annotations
+
 import asyncio
-import json
-import queue
+import os
 from typing import Literal
 
-from db import filter_group
 from dotenv import load_dotenv
-from playwright.async_api import async_playwright, BrowserContext
+from playwright.async_api import BrowserContext, async_playwright
 
+from scraper import api_client as worker_api
+from scraper.portals import LoginError, get_portal
 from scraper.portals.utils import get_portal_key_from_url
-from scraper.runner import db_conn, get_portal, get_students_from_db
+from scraper.runner import ReportedBadLogin, mark_bad_login
+from scraper.safe_logging import suppress_portal_output
+
 
 load_dotenv()
-async def fetch_agenda(ctx: BrowserContext, student: dict, target: Literal["upcoming", "missing"]) -> tuple[dict, dict]: # maybe make this just a db id (int)
-    # logins for canvas and google classroom are stored in the alternate fields, unless the students main login is canvas
-    page = await ctx.new_page()
-    if student["portal"] == 'canvas':
-        login_url = student["login_url"]
-        sid = student["id"]
-        password = student["password"]
-    else:
-        login_url = student["alt_login_url"]
-        sid = student["alt_id"]
-        password = student["alt_password"]
 
+
+def _headless_worker() -> bool:
+    return os.getenv("WORKER_HEADLESS", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+    }
+
+
+def _agenda_credentials(student: dict) -> tuple[str, str | None, str | None]:
+    if student.get("portal") == "canvas":
+        return (
+            str(student.get("login_url") or ""),
+            student.get("id"),
+            student.get("password"),
+        )
+    return (
+        str(student.get("alt_login_url") or ""),
+        student.get("alt_id"),
+        student.get("alt_password"),
+    )
+
+
+async def fetch_agenda(
+    ctx: BrowserContext,
+    student: dict,
+    target: Literal["upcoming", "missing"],
+) -> tuple[dict, dict]:
+    login_url, student_login, password = _agenda_credentials(student)
     portal = get_portal_key_from_url(login_url)
-    assert portal in ("canvas", "google_classroom"), f"Portal {portal} not supported for agenda collection"
-    
-    Engine = get_portal(portal)
-    scraper = Engine(
+    if portal not in {"canvas", "google_classroom"}:
+        raise ValueError("Student has no supported agenda portal")
+    if not student_login or not password:
+        mark_bad_login(student)
+        raise ReportedBadLogin()
+
+    page = await ctx.new_page()
+    scraper = get_portal(portal)(
         page,
-        sid,
+        student_login,
         password,
-        alt_student_id=student["alt_id"],
-        alt_password=student["alt_password"],
+        alt_student_id=student.get("alt_id"),
+        alt_password=student.get("alt_password"),
         login_url=login_url,
         alt_portal_url=student.get("alt_login_url"),
         student_name=student.get("student_name"),
     )
-
-    # Only GPS uses pictograph answers
-    if student.get("auth_images") and student["portal"] == "gps":
+    if student.get("auth_images") and portal == "gps":
         setattr(scraper, "auth_images", student["auth_images"])
+
     try:
-        print(f"Starting login for {student['id']}", flush=True)
         try:
             await scraper.login(first_name=student.get("student_name"))
-            print(f"Login successful for {student['id']}, collecting agenda…", flush=True)
-            return await scraper.get_agenda(get=target), student
-        except Exception:
-            return {}, student
+        except LoginError as exc:
+            mark_bad_login(student)
+            raise ReportedBadLogin() from exc
+        agenda = await scraper.get_agenda(get=target)
+        if not isinstance(agenda, dict):
+            raise ValueError("Agenda portal returned an invalid result")
+        return agenda, student
     finally:
         await page.close()
 
 
-async def main(
-    franchise_id: int | None,
-    student_id: int | None,
+def save_agenda_result(
+    student: dict,
+    agenda: dict,
     job_id: str | None = None,
-    state_q: queue.Queue | None = None,
-    target: Literal["upcoming", "missing"] = "upcoming"
-):
-    _students = get_students_from_db(student_id=student_id, franchise_id=franchise_id)
-    students = filter_group(_students, 'track_agenda', True)
+    lease_token: str | None = None,
+) -> None:
+    if not job_id or not lease_token:
+        raise ValueError("Agenda results require a leased worker job")
+    worker_api.result(
+        job_id,
+        lease_token,
+        crmstudentid=int(student["db_id"]),
+        status="agenda_synced",
+        weekly_agenda=agenda,
+    )
 
-    if job_id and state_q:
-        from ui.ext_jobs import JobState
-        state = JobState(total=len(students), steps=len(students) + 2)
-        state.next_step()
-        state_q.put((job_id, state))
-    else:
-        state = None
 
-    async with async_playwright() as pw:
-        browser_args = [
-            "--disable-blink-features=AutomationControlled",
-        ]
-        browser = await pw.chromium.launch(headless=False, args=browser_args)
+async def collect_agendas(
+    students: list[dict],
+    job_id: str | None = None,
+    lease_token: str | None = None,
+    target: Literal["upcoming", "missing"] = "upcoming",
+) -> dict[str, int]:
+    if not job_id or not lease_token:
+        raise ValueError("Agenda collection requires a leased worker job")
+    tracked_students = [student for student in students if student.get("track_agenda")]
+    summary = {"attempted": 0, "success": 0, "errors": 0}
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            headless=_headless_worker(),
+            args=["--disable-blink-features=AutomationControlled"],
+        )
         context = await browser.new_context()
         context.set_default_timeout(5_000)
         context.set_default_navigation_timeout(5_000)
-        
-        tasks = {
-            asyncio.create_task(fetch_agenda(context, student, target)): student
-            for student in students
-        }
 
-        for task in asyncio.as_completed(tasks):
-            agenda, student = await task
-            
-            if len(agenda) == 0:
-                print(f"No {target} assignments found for student {student['student_name']} or failed to fetch agenda.")
-                continue
-           
-            print(f"Agenda collected for student {student['student_name']}: {agenda}")
-            
-            with db_conn() as conn: # add the agenda to the student in the database
-                conn.exec_driver_sql(
-                    "UPDATE Student SET weekly_agenda = %s WHERE ID = %s",
-                    (json.dumps(agenda), student["db_id"]),
+        async def collect_one(student: dict) -> bool:
+            worker_api.event(
+                job_id,
+                lease_token,
+                "student_started",
+                crmstudentid=int(student["db_id"]),
+            )
+            try:
+                agenda, fetched_student = await fetch_agenda(context, student, target)
+                save_agenda_result(
+                    fetched_student,
+                    agenda,
+                    job_id=job_id,
+                    lease_token=lease_token,
                 )
-                conn.commit()
-            print(f"Agenda saved for student {student['student_name']}")
+                return True
+            except worker_api.ResultDeliveryAmbiguous:
+                raise
+            except ReportedBadLogin:
+                return False
+            except Exception:
+                worker_api.result(
+                    job_id,
+                    lease_token,
+                    crmstudentid=int(student["db_id"]),
+                    status="failed",
+                    failure_code="portal_failure",
+                )
+                return False
 
-            if state and state_q:
-                state.next_step()
-                state_q.put((job_id, state))
+        try:
+            with suppress_portal_output():
+                tasks = [
+                    asyncio.create_task(collect_one(student))
+                    for student in tracked_students
+                ]
+                try:
+                    for completed in asyncio.as_completed(tasks):
+                        succeeded = await completed
+                        summary["attempted"] += 1
+                        if succeeded:
+                            summary["success"] += 1
+                        else:
+                            summary["errors"] += 1
+                except worker_api.ResultDeliveryAmbiguous:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+        finally:
+            await context.close()
+            await browser.close()
 
-        if state and state_q:
-            state.next_step()
-            state_q.put((job_id, state))
+    return summary
 
-if __name__ == '__main__':
-    # For manual testing i.e. `python -m scraper.agenda -f 57 -s 442`
-    parser = argparse.ArgumentParser(description="Collect student agendas.")
-    parser.add_argument(
-        "-f", "--franchise-id",
-        type=int,
-        help="Franchise for which to gather agendas."
-    )
-    parser.add_argument(
-        "-s", "--student",
-        type=int,
-        help="Student for which to fetch agenda."
-    )
-    args = parser.parse_args()
-    asyncio.run(main(args.franchise_id, args.student))
+
+if __name__ == "__main__":
+    from scraper.runner import drain_worker
+
+    asyncio.run(drain_worker())

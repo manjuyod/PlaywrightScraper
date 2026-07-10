@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+set -eu
+umask 077
+
+if [ "$#" -ne 4 ]; then
+    echo "Usage: issue-client CA_DIRECTORY frontend|worker|scheduler|operator COMMON_NAME OUTPUT_DIRECTORY" >&2
+    exit 2
+fi
+
+export PKI_ROOT
+PKI_ROOT=$(realpath "$1")
+role=$2
+common_name=$3
+output=$4
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+case "$role" in
+    frontend|worker|scheduler|operator) ;;
+    *) echo "Invalid client role" >&2; exit 2 ;;
+esac
+case "$common_name" in
+    *[!A-Za-z0-9._-]*|'') echo "Invalid common name" >&2; exit 2 ;;
+esac
+
+mkdir -p "$output"
+key="$output/$common_name.key.pem"
+csr="$output/$common_name.csr.pem"
+certificate="$output/$common_name.crt.pem"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key"
+openssl req -new -sha256 -key "$key" -subj "/O=Tutoring Club Grade Boundary/OU=$role/CN=$common_name" -out "$csr"
+openssl ca -batch -config "$script_dir/openssl-intermediate.cnf" -extensions client_cert -days 30 -notext -md sha256 -in "$csr" -out "$certificate"
+chmod 0600 "$key"
+chmod 0644 "$certificate"
+rm -f "$csr"
+echo "Issued $role certificate $certificate; transfer the private key through the approved secret channel."

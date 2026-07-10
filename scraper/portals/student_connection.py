@@ -133,8 +133,6 @@ class StudentConnection(PortalEngine):
                 grade = grade_content[percent_grade_idx]
 
             percent_grade = canonicalize_grade(grade)
-            print(grade_content)
-            print(course_name, percent_grade)
             truncate_on = ": "
             course_name = canonicalize_course_title(course_name, truncate_on=truncate_on, truncate_before=True)
             parsed[course_name] = percent_grade
@@ -167,9 +165,6 @@ class StudentConnection(PortalEngine):
                 timeout=4_000,
             )
         except PlaywrightTimeout:
-            html = await self.page.content()
-            print("Pulse table had no rows. Dumping snippet for debug…")
-            print(html[:4000])
             return {}
 
         # Map the header indices so we don’t rely on column order.
@@ -195,9 +190,6 @@ class StudentConnection(PortalEngine):
         idx_letter = col_idx("CurrentGrade")
 
         if idx_class is None or (idx_pct is None and idx_letter is None):
-            html = await self.page.content()
-            print("Missing expected headers. Headers seen:", header_texts)
-            print(html[:4000])
             return {}
 
         # Extract rows

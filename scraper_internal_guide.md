@@ -1,155 +1,137 @@
 # Student Grade Scraper Internal Developer Guide
 
-This project combines Playwright-based portal scraping, Postgres persistence, and a Flask dashboard for franchise operators.
+## Architecture invariants
 
-## Repository Layout
+CRM owns canonical students/franchises. Neon owns grade state, jobs, results,
+replay claims, and encrypted alternate credentials. Only Rust talks to either
+database. Flask, worker, scheduler, and operator tools call Rust over private
+TLS; production clients also present role-specific mTLS certificates.
+
+Flask and Axum run on separate Ubuntu instances. Flask has no database
+credentials. The API has no Flask session/signing secrets and no public route.
+The Windows EC2 instance runs scheduling and Playwright work, not the API.
+
+## Repository layout
 
 ```text
-PlaywrightScraper/
-├── db.py                         # Postgres access, Student model, encryption helpers
-├── scraper/
-│   ├── runner.py                 # grade collection entrypoint
-│   ├── agenda.py                 # agenda collection entrypoint
-│   ├── portals/                  # portal-specific login and parsing engines
-│   └── work_flows/               # sheet sync, grade insertion, verification workflows
-├── ui/
-│   ├── app.py                    # Flask app, sessions, auth helpers
-│   ├── routes.py                 # dashboard routes
-│   ├── controllers.py            # report/status computation helpers
-│   ├── ext_jobs.py               # background job execution and progress state
-│   ├── templates/                # health, franchise, student, heatmap views
-│   └── static/                   # dashboard styles and assets
-├── batches/                      # Windows batch pipeline wrappers
-├── tests/                        # unit and integration tests
-└── pyproject.toml
+api/                    Axum API, crypto, CRM/Neon queries, migrations, backfill
+deploy/                 role artifacts, PKI tools, validation and release scripts
+docs/runbooks/          manual AWS/Cloudflare/PKI/deployment/rotation procedures
+frontend/               pinned local React/Tailwind build inputs and tests
+scraper/                worker clients, lease loop, agenda collection, portals
+scripts/                verification, boundary guard, Windows pipeline/operator CLI
+ui/                     Flask BFF, safe report models, templates and built assets
+tests/                  Python contracts, security, deployment and boundary tests
 ```
 
-## High-Level Flow
+The deleted `db.py`, `db_core.py`, `ui.ext_jobs`, SQLAlchemy/ODBC helpers,
+Sheets workflows, JSONL loaders, and student-management controls must not be
+reintroduced. `scripts/check_python_boundaries.py` enforces this in CI.
 
-1. `scraper.runner` loads active students from Postgres.
-2. Portal URLs are mapped to registered portal engines.
-3. Each portal engine logs in, handles portal-specific page structure, and extracts grades.
-4. Grade results are inserted by `scraper.work_flows.insert_grades`.
-5. The dashboard reads students from Postgres, computes report fields, and shows franchise/student views.
-6. Dashboard refresh buttons start background jobs in `ui.ext_jobs`; templates poll `/status/<job_id>` until completion.
-
-Agenda collection follows the same dashboard job pattern through `scraper.agenda`.
-
-## Dashboard Architecture
-
-`ui.wsgi` imports the Flask app and registers `ui.routes`.
-
-Key routes:
-
-- `/` is the protected handoff route. Normal access requires `X-Franchise` and `X-Internal-Key`; without valid headers users are redirected to `/login`. Dev access can use `DEV_BYPASS=1`.
-- `/login` authenticates against CRM using `ui/auth.py` (`dbo.usp_login`) and starts a franchise-scoped CRM session.
-- `/logout` clears the session and ends dashboard access.
-- `/health` shows active franchises, scraper health, grouped errors, bad logins, malformed inputs, nonconfigured portals, and active jobs.
-- `/franchise/<franchise_id>` shows the franchise student list, grade snapshots, low/high grades, standing, status, search/sort, edit/delete actions, and franchise-wide grade/agenda refresh buttons.
-- `/franchise/<franchise_id>/student/<student_id>` shows one student's current snapshot, agenda, grade history table, and heatmap tab.
-- `/status/<job_id>` returns progress JSON for grade and agenda progress bars.
-
-Job IDs are derived from dashboard scope:
-
-- Franchise grades: `<franchise_id>`
-- Franchise agenda: `<franchise_id>_agenda`
-- Student grades: `<franchise_id>_<student_id>`
-- Student agenda: `<franchise_id>_<student_id>_agenda`
-
-## Configuration
-
-The app uses `.env` through `python-dotenv`.
-
-Database:
-
-- `GRADES_NEON_URL`, or these component values:
-- `GRADES_NEON_HOST`
-- `GRADES_NEON_DB`
-- `GRADES_NEON_USER`
-- `GRADES_NEON_PASSWORD`
-- `GRADES_NEON_PORT`
-
-The legacy `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGPORT` names are still supported.
+## Request flows
 
 Dashboard:
 
-- `INTERNAL_KEY` gates production-style dashboard entry.
-- `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` configure CRM authentication. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
-- `CRM_TRUST_SERVER_CERTIFICATE` controls CRM certificate trust (default `no`). Acceptable true values are `1`, `true`, and `yes` (case-insensitive). Other values default to `no`.
-- CRM SQL Server traffic is encrypted. The value of `CRM_TRUST_SERVER_CERTIFICATE` controls `TrustServerCertificate`.
-- `SESSION_SECRET` signs Flask sessions. Outside `DEV_BYPASS`, use a strong non-default value of at least 32 characters.
-- `DEV_BYPASS=1` opens local dashboard access without the internal handoff headers.
+1. Flask sends credentials only to Rust `/api/auth/login`; Rust calls CRM.
+2. Flask stores a signed secure cookie containing session type, role/franchise,
+   HMAC username fingerprint, CSRF token, and active job UUIDs—never students.
+3. Each BFF request is timestamp/user/franchise/role/nonce/body-bound HMAC.
+4. Rust validates active/previous keys and atomically claims the nonce in
+   PostgreSQL. Database failure returns 503; replay returns unauthorized.
+5. Public student/job/health DTOs omit credentials, leases, worker identities,
+   internal payloads, and raw errors.
 
-nginx forwards client IP/protocol headers and Flask applies trusted proxy handling for login rate limiting and deployment-aware secure cookies.
+Worker/scheduler:
 
-Notifications and utilities:
+1. The scheduler reconciles CRM eligibility, enqueues daily deterministic jobs,
+   and then drains work.
+2. A worker bearer token determines its identity. Claim returns a lease token;
+   every later worker mutation requires the active matching lease.
+3. The API rechecks canonical eligibility for context and result persistence.
+4. Empty agenda is a successful synchronized result. Bad login is distinct
+   from portal/network failure. Ambiguous result delivery abandons the lease.
+5. Portal stdout/stderr is discarded at the worker boundary; result bodies,
+   HTML, credentials, exception details, and tracebacks are not logged.
 
-- `PYTHON_ENV`
-- `SLACK_WEBHOOK_URL`
-- `SLACK_NOTIFY_IN_DEV`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+Alternate credentials:
 
-## Run
+1. Operator `PUT` requires a complete HTTPS URL/username/password set, re-reads
+   CRM eligibility, AES-256-GCM encrypts username+password, and writes only the
+   envelope. The URL remains non-secret.
+2. A worker decrypts the envelope in memory. Plaintext fallback is an explicit,
+   temporary flag and encrypted data always takes precedence.
+3. Operator `DELETE` clears URL, legacy plaintext, envelope, and agenda tracking.
+4. `backfill_alternate_credentials` is dry-run by default. `--apply` is the only
+   write switch; `--resume-after`, `--limit`, `--verify`, and `--rotate-key`
+   support staged manual execution. Agents never run apply against user data.
 
-Install dependencies:
+## Local verification
 
-```bash
-uv sync
-uv run playwright install
-```
-
-Run the local dashboard:
-
-```bash
-DEV_BYPASS=1 SESSION_SECRET=dev-session-secret \
-uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
-```
-
-Run grade collection:
-
-```bash
-uv run python -m scraper.runner
-uv run python -m scraper.runner --franchise-id 57
-uv run python -m scraper.runner --franchise-id 57 --student-id 123
-```
-
-Run agenda collection:
-
-```bash
-uv run python -m scraper.agenda --franchise-id 57
-```
-
-## Add a Portal
-
-1. Create or update `scraper/portals/<name>.py`.
-2. Register the portal key in `scraper/portals/__init__.py`.
-3. Confirm `scraper/portals/utils.py` maps the stored portal URL to that key.
-4. Add fixture-backed tests when parsing logic changes.
-5. Run focused tests and at least one integration path for the affected franchise when credentials are available.
-
-## Troubleshooting
-
-| Symptom | Likely fix |
-| --- | --- |
-| `ModuleNotFoundError: utils` | Run commands from the repository root so top-level packages resolve. |
-| Dashboard returns 403 | In normal mode, include `X-Franchise` and `X-Internal-Key`; for local development, set `DEV_BYPASS=1`. |
-| Dashboard has no students | Check Postgres env vars and confirm the `student` table has active rows for the franchise. |
-| Progress bar disappears | `/status/<job_id>` returned 404, usually because the job finished, was never started, or the process restarted. |
-| CAPTCHA screenshot appears | Inspect `captcha.png`; re-run the student or update the portal flow if the site changed. |
-| Portal iframe or selector never loads | The portal layout likely changed; update the portal engine wait condition or selector. |
-
-## Tests
-
-```bash
+```powershell
+uv sync --frozen
+uv run ruff check .
 uv run pytest -q
-uv run pytest -q --run-integration
-TEST_FRANCHISE_ID=19 uv run pytest -q --run-integration
+npm ci
+npm run build
+npm test
+
+cd api
+cargo fmt --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets
 ```
 
-## Pending Enhancements
+Run a local dashboard only with a separately running API and development
+secrets. Browsers call Flask; never add browser-to-Axum CORS or tokens.
 
-- More consistent logging across CLI runs, dashboard jobs, and portal engines.
-- Cleaner error propagation from retries into dashboard-visible status fields.
-- Additional portal coverage and fixture tests.
-- More robust dashboard job persistence if the web process restarts during a refresh.
+Run the Windows pipeline from the repository root:
+
+```powershell
+uv run python scripts\windows_pipeline.py
+uv run python -m scraper.runner --once
+```
+
+`python -m scraper.agenda` is a compatibility entrypoint that drains API jobs;
+it no longer loads students directly.
+
+## Configuration
+
+Do not improvise combined `.env` files for production. Use the role examples in
+`deploy/` and `validate-role-env`. Important rotation-aware values include:
+
+- Flask: `SESSION_SECRET`, optional `SESSION_SECRET_PREVIOUS`, and
+  `DASHBOARD_HMAC_SIGNING_SECRET`.
+- API: `DASHBOARD_HMAC_ACTIVE_SECRET`, optional previous secret,
+  `WORKER_API_TOKENS_JSON`, `SCHEDULER_API_TOKENS_JSON`,
+  `OPERATOR_API_TOKENS_JSON`, `ALTERNATE_CREDENTIAL_ACTIVE_KEY_ID`, and
+  `ALTERNATE_CREDENTIAL_KEYS_JSON`.
+- Temporary API overlap only: `ALLOW_PLAINTEXT_ALTERNATE_CREDENTIALS`.
+- Windows: matching API keys, distinct client cert/key profiles, `WORKER_ID`,
+  `SCHEDULER_ID`, and scheduled franchise/kind values.
+
+## Database changes
+
+Migrations `001`–`006` must be applied manually in order. CI exercises a fresh
+schema and an `001`–`003` to `004`–`006` upgrade only against disposable
+PostgreSQL. CI and developer tests never connect to CRM or production Neon.
+
+Migration 006 deliberately fails when plaintext exists without a complete
+encrypted envelope, then nulls the legacy credential columns and installs a
+constrained-null check. Do not bypass that precondition.
+
+## Portal development
+
+1. Update/register the portal under `scraper/portals/`.
+2. Add fixture-backed parsing/auth classification tests.
+3. Never print names, usernames, URLs containing identity, grade/agenda payloads,
+   raw HTML, screenshots, cookies, or exception details.
+4. Return `LoginError` only for authentication failures. Let portal/network
+   failures propagate for generic classification by the worker.
+5. Run focused tests, the full Python suite, Ruff, and the boundary guard.
+
+## Operations
+
+Deployment, PKI, Cloudflare, AWS controls, HMAC/clock rotation, rollback, and
+incident steps live under `docs/runbooks/`. Roll back frontend/API artifacts
+independently, stop Windows tasks before API rollback, preserve additive schema,
+and never perform destructive incident-time database rollback.

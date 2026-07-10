@@ -14,7 +14,7 @@
     <body>
         {% set messages = get_flashed_messages() %}
         <div id="tc-react-root"></div>
-        <script id="tc-page-data" type="application/json">
+        <script id="tc-page-data" type="application/json" nonce="{{ csp_nonce }}">
             {
                 "page": "login",
                 "csrfToken": {{ csrf_token|tojson }},

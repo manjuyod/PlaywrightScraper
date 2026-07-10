@@ -26,7 +26,7 @@
 
         {% set messages = get_flashed_messages() %}
         <div id="tc-react-root"></div>
-        <script id="tc-page-data" type="application/json">
+        <script id="tc-page-data" type="application/json" nonce="{{ csp_nonce }}">
             {
                 "page": "franchise",
                 "csrfToken": {{ csrf_token|tojson }},
@@ -38,7 +38,6 @@
                 "franchiseUrl": {{ url_for('franchise_view', franchise_id=franchise_id, grade_filter=grade_filter)|tojson }},
                 "jobId": {{ job_id|tojson }},
                 "agendaJobId": {{ agenda_job_id|tojson }},
-                "dekExists": {{ (session.get('dek') is not none)|tojson }},
                 "filters": [
                     {
                         "value": "all",

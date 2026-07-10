@@ -1,0 +1,54 @@
+[ ca ]
+default_ca = CA_default
+
+[ CA_default ]
+dir = $ENV::PKI_ROOT/intermediate
+certs = $dir/certs
+crl_dir = $dir/crl
+new_certs_dir = $dir/newcerts
+database = $dir/index.txt
+serial = $dir/serial
+crlnumber = $dir/crlnumber
+private_key = $dir/private/intermediate-ca.key.pem
+certificate = $dir/certs/intermediate-ca.crt.pem
+default_md = sha256
+default_days = 30
+default_crl_days = 7
+policy = policy_service
+unique_subject = no
+copy_extensions = none
+
+[ policy_service ]
+organizationName = match
+organizationalUnitName = supplied
+commonName = supplied
+
+[ req ]
+default_bits = 4096
+distinguished_name = req_distinguished_name
+string_mask = utf8only
+default_md = sha256
+
+[ req_distinguished_name ]
+organizationName = Organization
+organizationName_default = Tutoring Club Grade Boundary
+commonName = Common Name
+commonName_default = Tutoring Club Grade Intermediate CA
+
+[ client_cert ]
+basicConstraints = critical, CA:false
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+
+[ server_cert ]
+basicConstraints = critical, CA:false
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @server_names
+
+[ server_names ]
+DNS.1 = grades-api.tutoringclub.com

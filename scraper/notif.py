@@ -70,8 +70,11 @@ def send_notification_to_slack(
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.post(webhook_url, json=payload, timeout=timeout_seconds)
-        except RequestException as e:
-            print(f"[notif] Slack request failed (attempt {attempt}/{max_attempts}): {e}", flush=True)
+        except RequestException:
+            print(
+                f"[notif] Slack request failed (attempt {attempt}/{max_attempts})",
+                flush=True,
+            )
             if attempt < max_attempts:
                 time.sleep(retry_wait_seconds)
                 continue
@@ -89,11 +92,10 @@ def send_notification_to_slack(
             response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
         except RequestException:
             status = response.status_code
-            details = (response.text or "").strip()
-            if details:
-                details = details[:200] + ("..." if len(details) > 200 else "")
-                details = f" | {details}"
-            print(f"[notif] Slack HTTP {status} (attempt {attempt}/{max_attempts}){details}", flush=True)
+            print(
+                f"[notif] Slack HTTP {status} (attempt {attempt}/{max_attempts})",
+                flush=True,
+            )
             if 400 <= status < 500:
                 return None
             if attempt < max_attempts:

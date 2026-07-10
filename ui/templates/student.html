@@ -27,7 +27,7 @@
         {% set messages = get_flashed_messages() %}
         {% set agenda_ns = namespace(first=true) %}
         <div id="tc-react-root"></div>
-        <script id="tc-page-data" type="application/json">
+        <script id="tc-page-data" type="application/json" nonce="{{ csp_nonce }}">
             {
                 "page": "student",
                 "csrfToken": {{ csrf_token|tojson }},

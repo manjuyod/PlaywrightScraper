@@ -1,0 +1,14 @@
+[
+  {
+    "secret": "test-secret",
+    "timestamp": "1700000000",
+    "method": "post",
+    "path": "/api/jobs/manual-pull?source=verify",
+    "franchise_id": "11",
+    "role": "2",
+    "user": "user-fingerprint",
+    "nonce": "00000000-0000-0000-0000-000000000042",
+    "body": "{\"kind\":\"grade\"}",
+    "signature": "18097670f337bb5c9239f8636b18e188e3efa1b434944d624c583cd1c3d1e01e"
+  }
+]

@@ -8,14 +8,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--run-integration",
         action="store_true",
         default=False,
-        help="Run integration tests that hit live services (Google Sheets / Postgres).",
+        help="Run explicitly configured read-only external integration checks.",
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "integration: marks tests that hit live services (deselect with '-m \"not integration\"')",
+        "integration: marks opt-in read-only external checks (deselect with '-m \"not integration\"')",
     )
 
 

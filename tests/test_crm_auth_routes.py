@@ -4,19 +4,10 @@ import importlib
 import os
 import secrets
 import sys
-from dataclasses import dataclass
-from types import SimpleNamespace
 from unittest.mock import patch
 
-from db import Student
+from ui.report_models import Student
 from ui.auth import CrmLoginResult
-
-
-def _configure_crm_env() -> None:
-    os.environ["CRMSrvAddress"] = "crm-host"
-    os.environ["CRMSrvDbQA"] = "crm-db"
-    os.environ["CRMSrvUs"] = "crm-user"
-    os.environ["CRMSrvPs"] = "crm-pass"
 
 
 def _load_fresh_ui_modules() -> tuple[object, object]:
@@ -28,234 +19,6 @@ def _load_fresh_ui_modules() -> tuple[object, object]:
     app_module = importlib.import_module("ui.app")
     routes = importlib.import_module("ui.routes")
     return app_module, routes
-
-
-class _FakeCursor:
-    def __init__(
-        self,
-        row_data: dict[str, object] | None = None,
-        result_sets: list[tuple[list[str], list[tuple[object, ...]]]] | None = None,
-    ):
-        self._result_sets = result_sets
-        self._set_index = 0
-        self._row_index = 0
-        self.description = [("Role",), ("FranchiseID",), ("ID",)]
-        self._calls: list[tuple[str, tuple[object, ...]]] = []
-        self._row = self._to_row(row_data) if row_data else None
-        self._closed = False
-        if self._result_sets:
-            self.description = [(name,) for name in self._result_sets[0][0]]
-
-    def _to_row(self, row_data: dict[str, object]) -> tuple[object, object, object]:
-        return (
-            row_data.get("Role"),
-            row_data.get("FranchiseID"),
-            row_data.get("ID"),
-        )
-
-    def execute(self, query: str, *params: object) -> "_FakeCursor":
-        self._calls.append((query, params))
-        return self
-
-    def fetchone(self) -> tuple[object, object, object] | None:
-        if self._result_sets is not None:
-            rows = self._result_sets[self._set_index][1]
-            if self._row_index >= len(rows):
-                return None
-            row = rows[self._row_index]
-            self._row_index += 1
-            return row
-
-        if self._row is None:
-            return None
-        row = self._row
-        self._row = None
-        return row
-
-    def nextset(self) -> bool:
-        if self._result_sets is None:
-            return False
-        if self._set_index + 1 >= len(self._result_sets):
-            return False
-        self._set_index += 1
-        self._row_index = 0
-        self.description = [(name,) for name in self._result_sets[self._set_index][0]]
-        return True
-
-    def close(self) -> None:
-        self._closed = True
-
-
-class _FakeConnection:
-    def __init__(self, cursor: _FakeCursor):
-        self._cursor = cursor
-        self.closed = False
-
-    def cursor(self) -> _FakeCursor:
-        return self._cursor
-
-    def close(self) -> None:
-        self.closed = True
-
-
-class _FakePyodbc:
-    def __init__(self, cursor: _FakeCursor):
-        self.connect_calls: list[str] = []
-        self.cursor_for_connection = cursor
-
-    def connect(self, connection_string: str) -> _FakeConnection:
-        self.connect_calls.append(connection_string)
-        return _FakeConnection(self.cursor_for_connection)
-
-
-class _FailingPyodbc:
-    class Error(Exception):
-        pass
-
-    def connect(self, _connection_string: str) -> _FakeConnection:
-        raise self.Error("database unavailable")
-
-
-@dataclass
-class _AuthInput:
-    row_data: dict[str, object] | None
-
-
-def test_crm_login_accepts_roles_and_fid() -> None:
-    _configure_crm_env()
-    fake_cursor = _FakeCursor({"Role": 2, "FranchiseID": 33})
-    fake_pyodbc = _FakePyodbc(fake_cursor)
-
-    with patch("ui.auth.pyodbc", fake_pyodbc):
-        result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-    assert result == CrmLoginResult(authenticated=True, role=2, franchise_id=33)
-
-
-def test_crm_login_rejects_other_roles_and_empty_fid() -> None:
-    _configure_crm_env()
-    rows = (
-        _AuthInput({"Role": 1, "FranchiseID": 33}),
-        _AuthInput({"Role": 2, "FranchiseID": 0}),
-    )
-    for row in rows:
-        fake_cursor = _FakeCursor(row.row_data)
-        fake_pyodbc = _FakePyodbc(fake_cursor)
-        with patch("ui.auth.pyodbc", fake_pyodbc):
-            result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-        assert not result.authenticated
-
-
-def test_crm_login_uses_fallback_fid_column() -> None:
-    _configure_crm_env()
-    fake_cursor = _FakeCursor({"Role": 3, "ID": 88})
-    fake_pyodbc = _FakePyodbc(fake_cursor)
-
-    with patch("ui.auth.pyodbc", fake_pyodbc):
-        result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-    assert result == CrmLoginResult(authenticated=True, role=3, franchise_id=88)
-
-
-def test_crm_login_combines_role_and_franchise_from_separate_result_sets() -> None:
-    _configure_crm_env()
-    fake_cursor = _FakeCursor(
-        result_sets=[
-            (["Role"], [(2,)]),
-            (["ID", "Name"], [(74, "Franchise 74")]),
-        ]
-    )
-    fake_pyodbc = _FakePyodbc(fake_cursor)
-
-    with patch("ui.auth.pyodbc", fake_pyodbc):
-        result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-    assert result.authenticated is True
-    assert result.role == 2
-    assert result.franchise_id == 74
-    assert result.display_name == "Franchise 74"
-
-
-def test_crm_login_returns_generic_failure_for_sql_errors() -> None:
-    _configure_crm_env()
-
-    with patch("ui.auth.pyodbc", _FailingPyodbc()):
-        result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-    assert not result.authenticated
-
-
-def test_crm_login_executes_parameterized_usp_login() -> None:
-    _configure_crm_env()
-    fake_cursor = _FakeCursor({"Role": 2, "FranchiseID": 19})
-    fake_pyodbc = _FakePyodbc(fake_cursor)
-
-    with patch("ui.auth.pyodbc", fake_pyodbc):
-        importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-    query, params = fake_cursor._calls[0]
-    assert "usp_login" in query
-    assert "?" in query
-    assert params == ("alice", "secret")
-
-
-def test_crm_connection_prefers_primary_db() -> None:
-    os.environ["CRMSrvDb"] = "crm-primary-db"
-    os.environ["CRMSrvDbQA"] = "crm-qa-db"
-
-    connect_string = importlib.import_module("ui.auth")._connect_string()
-
-    assert "DATABASE=crm-primary-db;" in connect_string
-    assert "DATABASE=crm-qa-db;" not in connect_string
-
-
-def test_crm_connection_requires_validated_tls() -> None:
-    _configure_crm_env()
-    os.environ.pop("CRM_TRUST_SERVER_CERTIFICATE", None)
-
-    connect_string = importlib.import_module("ui.auth")._connect_string()
-
-    assert "Encrypt=yes" in connect_string
-    assert "TrustServerCertificate=no" in connect_string
-
-
-def test_crm_connection_falls_back_to_qa_db() -> None:
-    _configure_crm_env()
-    os.environ.pop("CRMSrvDb", None)
-
-    connect_string = importlib.import_module("ui.auth")._connect_string()
-
-    assert "DATABASE=crm-db;" in connect_string
-
-
-def test_crm_connection_does_not_use_empty_db_and_fails_closed() -> None:
-    _configure_crm_env()
-    original_db = os.environ.pop("CRMSrvDb", None)
-    original_db_qa = os.environ.pop("CRMSrvDbQA", None)
-    try:
-        with patch("ui.auth.pyodbc", _FailingPyodbc()):
-            result = importlib.import_module("ui.auth").crm_login("alice", "secret")
-
-        assert not result.authenticated
-    finally:
-        if original_db is not None:
-            os.environ["CRMSrvDb"] = original_db
-        else:
-            os.environ.pop("CRMSrvDb", None)
-        if original_db_qa is not None:
-            os.environ["CRMSrvDbQA"] = original_db_qa
-        else:
-            os.environ.pop("CRMSrvDbQA", None)
-
-
-def test_crm_connection_trust_server_certificate_toggle_allows_configured_values() -> None:
-    _configure_crm_env()
-    for value in ("1", "true", "yes"):
-        os.environ["CRM_TRUST_SERVER_CERTIFICATE"] = value
-        connect_string = importlib.import_module("ui.auth")._connect_string()
-        assert "TrustServerCertificate=yes" in connect_string
-    os.environ.pop("CRM_TRUST_SERVER_CERTIFICATE", None)
 
 
 def test_login_redirects_root_without_headers() -> None:
@@ -351,7 +114,8 @@ def test_login_franchise_one_starts_fresh_health_session() -> None:
     with client.session_transaction() as sess:
         assert sess.get("session_type") == "health_test"
         assert not sess.get("franchise_id")
-        assert sess.get("authorized") is True
+        assert sess.get("authorized") is None
+        assert len(sess.get("user_fingerprint", "")) == 64
 
 
 def test_login_get_with_unknown_session_type_shows_login() -> None:
@@ -398,7 +162,8 @@ def test_session_security_config_matches_deployment_mode() -> None:
     assert app_module.app.config["SESSION_COOKIE_HTTPONLY"] is True
     assert app_module.app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
     assert app_module.app.config["SESSION_COOKIE_SECURE"] is False
-    assert app_module.app.config["SESSION_FILE_MODE"] == 0o600
+    assert "SESSION_FILE_MODE" not in app_module.app.config
+    assert "SESSION_FILE_DIR" not in app_module.app.config
     assert app_module.app.config["PERMANENT_SESSION_LIFETIME"].total_seconds() <= 8 * 60 * 60
 
 
@@ -432,11 +197,7 @@ def _sample_student(**overrides: object) -> Student:
         "status": "synced",
         "portal": "homeaccess",
         "portal_url": "https://portal.example.test",
-        "portal_username": "ada-login",
-        "portal_password": "student-secret",
         "alt_portal_url": "https://alt.example.test",
-        "alt_portal_username": "alt-login",
-        "alt_portal_password": "alt-secret",
     }
     data.update(overrides)
     return Student(**data)
@@ -451,9 +212,102 @@ def _filter_fixture_students() -> list[Student]:
     ]
 
 
+def _api_student(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "crmstudentid": 123,
+        "franchiseid": 11,
+        "firstname": "Ada",
+        "lastname": "Lovelace",
+        "grade": 10,
+        "portal1": "https://portal.example.test",
+        "has_portal1_username": True,
+        "has_portal1_password": True,
+        "portal2": "https://alt.example.test",
+        "has_portal2_username": True,
+        "has_portal2_password": True,
+        "yearstart": 2026,
+        "yearend": 2027,
+        "weeklydata": {},
+        "portal": "homeaccess",
+        "passwordgood": True,
+        "status": "synced",
+        "error_msg": None,
+        "track_agenda": False,
+        "weekly_agenda": {},
+    }
+    data.update(overrides)
+    return data
+
+
+def test_franchise_page_fetches_students_through_api(monkeypatch) -> None:
+    app, routes = _create_auth_client()
+    calls: list[tuple[str, str]] = []
+
+    def fake_request_json(method, path, **_kwargs):
+        calls.append((method, path))
+        if path == "/api/students":
+            return {"students": [_api_student(firstname="Maya", crmstudentid=321)]}
+        if path == "/api/jobs/current":
+            return {"jobs": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(routes.grade_api, "request_json", fake_request_json)
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["role"] = 2
+            sess["csrf_token"] = "token-1"
+
+        response = client.get("/franchise/11")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Maya" in body
+    assert ("GET", "/api/students") in calls
+
+
+def test_franchise_manual_pull_uses_api_job_without_local_runner(monkeypatch) -> None:
+    app, routes = _create_auth_client()
+    calls: list[tuple[str, str, dict[str, object] | None]] = []
+    job_id = "00000000-0000-0000-0000-000000000123"
+
+    def fake_request_json(method, path, **kwargs):
+        calls.append((method, path, kwargs.get("payload")))
+        if path == "/api/students":
+            return {"students": [_api_student(crmstudentid=123)]}
+        if path == "/api/jobs/current":
+            return {"jobs": []}
+        if path == "/api/jobs/manual-pull":
+            return {"job_id": job_id, "status": "queued"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(routes.grade_api, "request_json", fake_request_json)
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["role"] = 2
+            sess["csrf_token"] = "token-1"
+
+        response = client.post(
+            "/franchise/11",
+            data={"csrf_token": "token-1", "run_scraper": "1"},
+        )
+
+    assert response.status_code == 200
+    assert ("POST", "/api/jobs/manual-pull", {"kind": "grade"}) in calls
+    with client.session_transaction() as sess:
+        assert sess["active_job_ids"] == {"grade": job_id}
+
+
 def test_franchise_page_middle_school_filter_renders_only_grades_6_to_8() -> None:
     app, routes = _create_auth_client()
-    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+    routes.get_dashboard_students = lambda _franchise_id: _filter_fixture_students()
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -474,7 +328,7 @@ def test_franchise_page_middle_school_filter_renders_only_grades_6_to_8() -> Non
 
 def test_franchise_page_high_school_filter_renders_only_grades_9_to_12() -> None:
     app, routes = _create_auth_client()
-    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+    routes.get_dashboard_students = lambda _franchise_id: _filter_fixture_students()
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -495,7 +349,7 @@ def test_franchise_page_high_school_filter_renders_only_grades_9_to_12() -> None
 
 def test_franchise_page_invalid_or_missing_grade_filter_renders_all_students() -> None:
     app, routes = _create_auth_client()
-    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
+    routes.get_dashboard_students = lambda _franchise_id: _filter_fixture_students()
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -518,7 +372,7 @@ def test_franchise_page_invalid_or_missing_grade_filter_renders_all_students() -
 
 def test_franchise_page_grade_filter_accepts_neon_grade_labels() -> None:
     app, routes = _create_auth_client()
-    routes.db.get_students = lambda _franchise_id: [
+    routes.get_dashboard_students = lambda _franchise_id: [
         _sample_student(id=301, grade_level="6th", first_name="Iris"),
         _sample_student(id=302, grade_level="8th", first_name="Omar"),
         _sample_student(id=303, grade_level="10th", first_name="Pia"),
@@ -544,10 +398,10 @@ def test_franchise_page_grade_filter_accepts_neon_grade_labels() -> None:
 
 def test_franchise_page_filtered_scraper_post_uses_full_franchise_count() -> None:
     app, routes = _create_auth_client()
-    captured_jobs: list[tuple[str, int, str]] = []
-    routes.db.get_students = lambda _franchise_id: _filter_fixture_students()
-    routes.run_job = lambda job_id, total, type="grade": captured_jobs.append(
-        (job_id, total, type)
+    captured_pulls: list[tuple[int, str]] = []
+    routes.get_dashboard_students = lambda _franchise_id: _filter_fixture_students()
+    routes.create_manual_pull = lambda franchise_id, kind="grade": captured_pulls.append(
+        (franchise_id, kind)
     )
 
     with app.test_client() as client:
@@ -560,16 +414,16 @@ def test_franchise_page_filtered_scraper_post_uses_full_franchise_count() -> Non
         response = client.post(
             "/franchise/11?grade_filter=middle_school",
             data={"csrf_token": "token-1", "run_scraper": "1"},
-        )
+    )
 
     assert response.status_code == 200
-    assert captured_jobs == [("11", 4, "grade")]
+    assert captured_pulls == [(11, "grade")]
 
 
-def test_franchise_page_does_not_render_student_portal_credentials() -> None:
+def test_franchise_page_does_not_render_student_portal_credentials(monkeypatch) -> None:
     app, routes = _create_auth_client()
     student = _sample_student()
-    routes.db.get_students = lambda _franchise_id: [student]
+    monkeypatch.setattr(routes, "get_dashboard_students", lambda _franchise_id: [student])
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -588,10 +442,10 @@ def test_franchise_page_does_not_render_student_portal_credentials() -> None:
     assert "alt-login" not in body
 
 
-def test_student_page_does_not_render_student_portal_credentials() -> None:
+def test_student_page_does_not_render_student_portal_credentials(monkeypatch) -> None:
     app, routes = _create_auth_client()
     student = _sample_student()
-    routes.get_students_from_session = lambda _franchise_id: [student]
+    monkeypatch.setattr(routes, "get_dashboard_students", lambda _franchise_id: [student])
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -610,15 +464,9 @@ def test_student_page_does_not_render_student_portal_credentials() -> None:
     assert "alt-login" not in body
 
 
-def test_edit_student_blank_credentials_keep_existing_values() -> None:
+def test_dashboard_student_edit_action_is_removed() -> None:
     app, routes = _create_auth_client()
-    existing = _sample_student()
-    captured: dict[str, object] = {}
-
-    routes.get_students_from_session = lambda _franchise_id: [existing]
-    routes.db.update_student = lambda student_id, student, master_key: captured.update(
-        {"student_id": student_id, "student": student, "master_key": master_key}
-    )
+    routes.get_dashboard_students = lambda _franchise_id: [_sample_student()]
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -626,7 +474,6 @@ def test_edit_student_blank_credentials_keep_existing_values() -> None:
             sess["session_type"] = "crm"
             sess["franchise_id"] = 11
             sess["csrf_token"] = "token-1"
-            sess["dek"] = b"0" * 32
 
         response = client.post(
             "/franchise/11?student_id=123",
@@ -645,20 +492,13 @@ def test_edit_student_blank_credentials_keep_existing_values() -> None:
             },
         )
 
-    assert response.status_code == 302
-    updated = captured["student"]
-    assert isinstance(updated, Student)
-    assert updated.portal_username == "ada-login"
-    assert updated.portal_password == "student-secret"
-    assert updated.alt_portal_username == "alt-login"
-    assert updated.alt_portal_password == "alt-secret"
+    assert response.status_code == 400
+    assert not hasattr(routes, "update_dashboard_student")
 
 
-def test_bulk_delete_rejects_student_ids_outside_loaded_franchise() -> None:
+def test_dashboard_student_delete_action_is_removed() -> None:
     app, routes = _create_auth_client()
-    deleted: list[list[int]] = []
-    routes.get_students_from_session = lambda _franchise_id: [_sample_student(id=123)]
-    routes.db.delete_students = lambda student_ids: deleted.append(student_ids)
+    routes.get_dashboard_students = lambda _franchise_id: [_sample_student(id=123)]
 
     with app.test_client() as client:
         with client.session_transaction() as sess:
@@ -676,8 +516,8 @@ def test_bulk_delete_rejects_student_ids_outside_loaded_franchise() -> None:
             },
         )
 
-    assert response.status_code == 403
-    assert deleted == []
+    assert response.status_code == 400
+    assert not hasattr(routes, "delete_dashboard_student")
 
 
 def test_student_view_requires_login() -> None:
@@ -688,7 +528,9 @@ def test_student_view_requires_login() -> None:
 
 
 def test_student_view_returns_404_when_student_not_in_session_franchise() -> None:
-    app, _ = _create_auth_client()
+    app, routes = _create_auth_client()
+    calls: list[int] = []
+    routes.get_dashboard_students = lambda franchise_id: calls.append(franchise_id) or []
     with app.test_client() as client:
         with client.session_transaction() as sess:
             sess["authorized"] = True
@@ -703,6 +545,7 @@ def test_student_view_returns_404_when_student_not_in_session_franchise() -> Non
 
 def test_student_view_does_not_fetch_global_student_on_fresh_session() -> None:
     app, routes = _create_auth_client()
+    calls: list[int] = []
     with app.test_client() as client:
         with client.session_transaction() as sess:
             sess["authorized"] = True
@@ -710,14 +553,57 @@ def test_student_view_does_not_fetch_global_student_on_fresh_session() -> None:
             sess["franchise_id"] = 11
             sess["csrf_token"] = secrets.token_urlsafe(12)
 
-        def fail_global_fetch(*_args, **_kwargs):
-            raise AssertionError("global student lookup must not be used")
-
-        routes.db.get_student = fail_global_fetch
-        routes.db.get_students = lambda franchise_id: []
+        routes.get_dashboard_students = lambda franchise_id: calls.append(franchise_id) or []
 
         response = client.get("/franchise/11/student/999")
         assert response.status_code == 404
+        assert calls == [11]
+        assert calls == [11]
+
+
+def test_student_view_loads_fresh_session_students_through_api() -> None:
+    app, routes = _create_auth_client()
+    routes.get_dashboard_students = lambda _franchise_id: [
+        _sample_student(id=123, first_name="ApiLoaded")
+    ]
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = secrets.token_urlsafe(12)
+
+        response = client.get("/franchise/11/student/123")
+
+    assert response.status_code == 200
+    assert "ApiLoaded" in response.get_data(as_text=True)
+
+
+def test_student_manual_pull_uses_api_job_without_local_runner() -> None:
+    app, routes = _create_auth_client()
+    captured_pulls: list[tuple[int, str, int | None]] = []
+    routes.get_dashboard_students = lambda _franchise_id: [_sample_student(id=123)]
+    routes.create_manual_pull = (
+        lambda franchise_id, kind="grade", student_id=None: captured_pulls.append(
+            (franchise_id, kind, student_id)
+        )
+    )
+
+    with app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess["authorized"] = True
+            sess["session_type"] = "crm"
+            sess["franchise_id"] = 11
+            sess["csrf_token"] = "token-1"
+
+        response = client.post(
+            "/franchise/11/student/123",
+            data={"csrf_token": "token-1", "run_scraper": "1"},
+        )
+
+    assert response.status_code == 302
+    assert captured_pulls == [(11, "grade", 123)]
 
 
 def test_crm_session_isolated_to_its_franchise() -> None:
@@ -755,38 +641,49 @@ def test_status_restricted_by_job_franchise() -> None:
             sess["franchise_id"] = 11
             sess["csrf_token"] = secrets.token_urlsafe(12)
 
-        response = client.get("/status/12")
+        response = client.get(
+            "/status/00000000-0000-0000-0000-000000000012"
+        )
         assert response.status_code == 403
 
 
 def test_status_can_be_reached_for_matching_job() -> None:
     app, routes = _create_auth_client()
+    job_id = "00000000-0000-0000-0000-000000000011"
     with app.test_client() as client:
         with client.session_transaction() as sess:
             sess["authorized"] = True
             sess["session_type"] = "crm"
             sess["franchise_id"] = 11
             sess["csrf_token"] = secrets.token_urlsafe(12)
+            sess["active_job_ids"] = {"grade": job_id}
 
-        routes.get_status = lambda _job_id: SimpleNamespace(
-            total=1,
-            step=1,
-            steps=1,
-            pct=1.0,
-        )
-        response = client.get("/status/11")
+        routes.get_dashboard_job = lambda _job_id: {
+            "id": job_id,
+            "kind": "grade",
+            "status": "running",
+            "scope": {"franchise_id": 11, "student_id": None},
+            "progress": {"total": 4, "attempted": 2, "success": 2, "errors": 0},
+        }
+        response = client.get(f"/status/{job_id}")
         assert response.status_code == 200
-        assert response.json["total"] == 1
+        assert response.json == {
+            "total": 4,
+            "step": 2,
+            "steps": 4,
+            "pct": 0.5,
+        }
 
 
 def test_health_test_session_is_limited_to_health_and_logout() -> None:
     app, routes = _create_auth_client()
-    routes.db.fetch = lambda _query: [{"franchiseid": 11, "status": "synced"}]
-    routes.filter_group = lambda items, key, value: [
-        item for item in items if getattr(item, key, None) == value
-    ]
-    routes.check_students_status = lambda _students: {"bad_logins": 0}
-    routes.db.get_active_franchises = lambda: []
+    routes.get_dashboard_health = lambda: {
+        "health": [{"id": 11, "synced": 1, "total": 1}],
+        "count_all": 1,
+        "count_synced": 1,
+        "count_bad_logins": 0,
+        "jobs": [],
+    }
 
     with app.test_client() as client:
         with client.session_transaction() as sess:

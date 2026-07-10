@@ -1,0 +1,67 @@
+#!/usr/bin/env sh
+set -eu
+umask 077
+
+target=${1:-/etc/nginx/conf.d/cloudflare-real-ip.conf}
+target_dir=$(dirname "$target")
+json_file=$(mktemp)
+include_file=$(mktemp)
+backup_file=$(mktemp)
+trap 'rm -f "$json_file" "$include_file" "$backup_file"' EXIT HUP INT TERM
+
+curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+    https://api.cloudflare.com/client/v4/ips \
+    --output "$json_file"
+
+python3 - "$json_file" "$include_file" <<'PY'
+import ipaddress
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+payload = json.loads(source.read_text(encoding="utf-8"))
+if payload.get("success") is not True or not isinstance(payload.get("result"), dict):
+    raise SystemExit("Cloudflare IP response was not successful")
+
+ranges = []
+for family in ("ipv4_cidrs", "ipv6_cidrs"):
+    values = payload["result"].get(family)
+    if not isinstance(values, list) or not values:
+        raise SystemExit(f"Cloudflare response omitted {family}")
+    for value in values:
+        network = ipaddress.ip_network(value, strict=True)
+        if (family == "ipv4_cidrs") != (network.version == 4):
+            raise SystemExit(f"Cloudflare returned the wrong address family: {value}")
+        ranges.append(str(network))
+
+lines = [
+    "# Generated from Cloudflare's authenticated IP-range API. Do not hand edit.",
+    *(f"set_real_ip_from {network};" for network in ranges),
+    "real_ip_header CF-Connecting-IP;",
+    "real_ip_recursive on;",
+    "",
+]
+destination.write_text("\n".join(lines), encoding="utf-8")
+PY
+
+if [ -e "$target" ]; then
+    cp -p "$target" "$backup_file"
+fi
+install -d -o root -g root -m 0755 "$target_dir"
+install -o root -g root -m 0644 "$include_file" "$target.new"
+mv -f "$target.new" "$target"
+
+if ! nginx -t; then
+    if [ -s "$backup_file" ]; then
+        install -o root -g root -m 0644 "$backup_file" "$target"
+    else
+        rm -f "$target"
+    fi
+    nginx -t || true
+    echo "Cloudflare range update rejected; previous include restored" >&2
+    exit 1
+fi
+
+systemctl reload nginx

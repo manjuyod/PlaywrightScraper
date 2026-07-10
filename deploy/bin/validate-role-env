@@ -1,0 +1,70 @@
+#!/usr/bin/env sh
+set -eu
+
+role=${1:-}
+
+require_var() {
+    name=$1
+    value=$(printenv "$name" || true)
+    if [ -z "$value" ]; then
+        echo "Missing required configuration: $name" >&2
+        exit 1
+    fi
+}
+
+forbid_var() {
+    name=$1
+    if printenv "$name" >/dev/null 2>&1; then
+        echo "Configuration is forbidden on the $role host: $name" >&2
+        exit 1
+    fi
+}
+
+require_file() {
+    name=$1
+    value=$(printenv "$name" || true)
+    if [ -z "$value" ] || [ ! -r "$value" ]; then
+        echo "Required file is unavailable: $name" >&2
+        exit 1
+    fi
+}
+
+require_var DEPLOYMENT_ENV
+if [ "$(printenv DEPLOYMENT_ENV)" != production ]; then
+    echo "Ubuntu services require DEPLOYMENT_ENV=production" >&2
+    exit 1
+fi
+
+case "$role" in
+    api)
+        for name in API_BIND_ADDR NEON_DATABASE_URL CRM_DATABASE_URL WORKER_API_TOKENS_JSON SCHEDULER_API_TOKENS_JSON OPERATOR_API_TOKENS_JSON READINESS_API_TOKEN DASHBOARD_HMAC_ACTIVE_SECRET ALTERNATE_CREDENTIAL_ACTIVE_KEY_ID ALTERNATE_CREDENTIAL_KEYS_JSON; do
+            require_var "$name"
+        done
+        if [ "$(printenv API_BIND_ADDR)" != 127.0.0.1:3000 ]; then
+            echo "API_BIND_ADDR must be 127.0.0.1:3000" >&2
+            exit 1
+        fi
+        for name in SESSION_SECRET GRADE_API_CLIENT_KEY_FILE; do
+            forbid_var "$name"
+        done
+        ;;
+    frontend)
+        for name in GRADE_API_BASE_URL SESSION_SECRET DASHBOARD_HMAC_SIGNING_SECRET; do
+            require_var "$name"
+        done
+        for name in GRADE_API_CA_FILE GRADE_API_CLIENT_CERT_FILE GRADE_API_CLIENT_KEY_FILE; do
+            require_file "$name"
+        done
+        case "$(printenv GRADE_API_BASE_URL)" in
+            https://*) ;;
+            *) echo "GRADE_API_BASE_URL must use HTTPS" >&2; exit 1 ;;
+        esac
+        for name in NEON_DATABASE_URL CRM_DATABASE_URL WORKER_API_TOKENS_JSON SCHEDULER_API_TOKENS_JSON OPERATOR_API_TOKENS_JSON READINESS_API_TOKEN ALTERNATE_CREDENTIAL_KEYS_JSON; do
+            forbid_var "$name"
+        done
+        ;;
+    *)
+        echo "Usage: validate-role-env api|frontend" >&2
+        exit 2
+        ;;
+esac

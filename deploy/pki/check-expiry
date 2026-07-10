@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+    echo "Usage: check-expiry CERTIFICATE [ALERT_DAYS=7]" >&2
+    exit 2
+fi
+
+certificate=$1
+days=${2:-7}
+case "$days" in
+    *[!0-9]*|'') echo "ALERT_DAYS must be a positive integer" >&2; exit 2 ;;
+esac
+seconds=$((days * 86400))
+openssl x509 -in "$certificate" -checkend "$seconds" -noout

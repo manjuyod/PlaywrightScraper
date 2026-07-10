@@ -37,6 +37,9 @@ tmp
 .ruff_cache/
 .pytest_cache/
 replit.nix
+api/target/
+node_modules/
+frontend/build/
 
 # IDE / Editor
 .idea/

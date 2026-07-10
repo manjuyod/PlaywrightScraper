@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+set -eu
+umask 077
+
+if [ "$#" -ne 3 ]; then
+    echo "Usage: issue-server CA_DIRECTORY grades-api.tutoringclub.com OUTPUT_DIRECTORY" >&2
+    exit 2
+fi
+
+export PKI_ROOT
+PKI_ROOT=$(realpath "$1")
+common_name=$2
+output=$3
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ "$common_name" != grades-api.tutoringclub.com ]; then
+    echo "The private API server certificate name is fixed" >&2
+    exit 2
+fi
+
+mkdir -p "$output"
+key="$output/api-server.key.pem"
+csr="$output/api-server.csr.pem"
+certificate="$output/api-server.crt.pem"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$key"
+openssl req -new -sha256 -key "$key" -subj "/O=Tutoring Club Grade Boundary/OU=api/CN=$common_name" -out "$csr"
+openssl ca -batch -config "$script_dir/openssl-intermediate.cnf" -extensions server_cert -days 30 -notext -md sha256 -in "$csr" -out "$certificate"
+cat "$certificate" "$PKI_ROOT/intermediate/certs/intermediate-ca.crt.pem" > "$output/api-server-chain.crt.pem"
+chmod 0600 "$key"
+chmod 0644 "$certificate" "$output/api-server-chain.crt.pem"
+rm -f "$csr"
+echo "Issued private API server certificate; transfer its key through the approved secret channel."

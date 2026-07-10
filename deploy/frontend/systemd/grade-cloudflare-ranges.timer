@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily trusted Cloudflare proxy-range refresh
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+Unit=grade-cloudflare-ranges.service
+
+[Install]
+WantedBy=timers.target

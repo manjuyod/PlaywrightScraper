@@ -10,7 +10,7 @@
         return;
     }
 
-    const { useEffect, useMemo, useRef, useState } = window.React;
+    const { useEffect, useMemo, useState } = window.React;
     const h = window.React.createElement;
 
     function readPageData() {
@@ -264,14 +264,6 @@
             type: "hidden",
             name: "csrf_token",
             value: token || "",
-        });
-    }
-
-    function HiddenMasterPassword({ value }) {
-        return h("input", {
-            type: "hidden",
-            name: "master_password",
-            value: value || "",
         });
     }
 
@@ -1015,93 +1007,11 @@
         return `${url}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
     }
 
-    function MasterPasswordDialog({ onCancel, onSubmit, open }) {
-        const [value, setValue] = useState("");
-
-        useEffect(() => {
-            if (open) {
-                setValue("");
-            }
-        }, [open]);
-
-        if (!open) {
-            return null;
-        }
-
-        return h(
-            "div",
-            {
-                className:
-                    "tc-modal-backdrop fixed inset-0 z-50 grid place-items-center p-4",
-                role: "dialog",
-                "aria-modal": "true",
-            },
-            h(
-                "form",
-                {
-                    className:
-                        "w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-accent",
-                    onSubmit: (event) => {
-                        event.preventDefault();
-                        onSubmit(value);
-                    },
-                },
-                h(
-                    "div",
-                    { className: "mb-4 flex items-start justify-between gap-4" },
-                    h(
-                        "div",
-                        null,
-                        h(
-                            "h2",
-                            {
-                                className:
-                                    "text-lg font-extrabold tracking-normal text-brand-blueDark",
-                            },
-                            "Master Password Required",
-                        ),
-                        h(
-                            "p",
-                            { className: "mt-1 text-sm font-medium text-slate-500" },
-                            "Enter the master password to continue.",
-                        ),
-                    ),
-                    h(Button, {
-                        variant: "outline",
-                        size: "sm",
-                        icon: "x",
-                        onClick: onCancel,
-                    }, "Close"),
-                ),
-                h(
-                    Field,
-                    { label: "Master password" },
-                    h(Input, {
-                        type: "password",
-                        value,
-                        autoFocus: true,
-                        onChange: (event) => setValue(event.target.value),
-                        required: true,
-                    }),
-                ),
-                h(
-                    "div",
-                    { className: "mt-5 flex justify-end gap-2" },
-                    h(Button, { variant: "outline", onClick: onCancel }, "Cancel"),
-                    h(Button, { type: "submit", variant: "orange", icon: "key" }, "Submit"),
-                ),
-            ),
-        );
-    }
-
     function StudentDialog({
         csrfToken,
-        dekExists,
         franchiseUrl,
-        masterPassword,
         mode,
         onClose,
-        onNeedPassword,
         open,
         student,
     }) {
@@ -1153,13 +1063,6 @@
             setValues((current) => Object.assign({}, current, { [name]: value }));
         }
 
-        function handleSubmit(event) {
-            if (!dekExists && !masterPassword) {
-                event.preventDefault();
-                onNeedPassword();
-            }
-        }
-
         return h(
             "div",
             {
@@ -1209,10 +1112,8 @@
                         method: "POST",
                         action: formAction,
                         className: "grid gap-4",
-                        onSubmit: handleSubmit,
                     },
                     h(HiddenCsrf, { token: csrfToken }),
-                    h(HiddenMasterPassword, { value: masterPassword }),
                     h(
                         "div",
                         { className: "grid gap-4 md:grid-cols-2" },
@@ -1302,15 +1203,6 @@
         const students = data.students || [];
         const [search, setSearch] = useState("");
         const [sort, setSort] = useState({ field: "name", dir: "asc" });
-        const [deleteMode, setDeleteMode] = useState(false);
-        const [selected, setSelected] = useState(() => new Set());
-        const [dialogMode, setDialogMode] = useState("add");
-        const [dialogStudent, setDialogStudent] = useState(null);
-        const [studentDialogOpen, setStudentDialogOpen] = useState(false);
-        const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-        const [dekExists, setDekExists] = useState(Boolean(data.dekExists));
-        const [masterPassword, setMasterPassword] = useState("");
-        const pendingAction = useRef(null);
 
         const filteredStudents = useMemo(() => {
             const query = search.trim().toLowerCase();
@@ -1346,74 +1238,6 @@
                 field,
                 dir: current.field === field && current.dir === "asc" ? "desc" : "asc",
             }));
-        }
-
-        function requireMaster(action) {
-            if (dekExists || masterPassword) {
-                action();
-                return;
-            }
-            pendingAction.current = action;
-            setPasswordDialogOpen(true);
-        }
-
-        function handlePasswordSubmit(value) {
-            setMasterPassword(value);
-            setDekExists(true);
-            setPasswordDialogOpen(false);
-            const action = pendingAction.current;
-            pendingAction.current = null;
-            if (action) {
-                window.setTimeout(action, 0);
-            }
-        }
-
-        function openAddDialog() {
-            requireMaster(() => {
-                setDialogMode("add");
-                setDialogStudent(null);
-                setStudentDialogOpen(true);
-            });
-        }
-
-        function openEditDialog(student) {
-            requireMaster(() => {
-                setDialogMode("edit");
-                setDialogStudent(student);
-                setStudentDialogOpen(true);
-            });
-        }
-
-        function toggleSelected(id) {
-            setSelected((current) => {
-                const next = new Set(current);
-                if (next.has(id)) {
-                    next.delete(id);
-                } else {
-                    next.add(id);
-                }
-                return next;
-            });
-        }
-
-        function startDeleteMode() {
-            requireMaster(() => setDeleteMode(true));
-        }
-
-        function cancelDeleteMode() {
-            setDeleteMode(false);
-            setSelected(new Set());
-        }
-
-        function handleDeleteSubmit(event) {
-            if (!selected.size) {
-                event.preventDefault();
-                window.alert("Select at least one student to delete.");
-                return;
-            }
-            if (!window.confirm(`Delete ${selected.size} selected student(s)?`)) {
-                event.preventDefault();
-            }
         }
 
         const syncedCount = students.filter((student) => String(student.status || "").toLowerCase() === "synced").length;
@@ -1490,33 +1314,6 @@
                         h(
                             "div",
                             { className: "flex flex-wrap items-center gap-2" },
-                            h(Button, {
-                                variant: "orange",
-                                icon: "plus",
-                                onClick: openAddDialog,
-                            }, "Add Student"),
-                            deleteMode
-                                ? [
-                                      h(Button, {
-                                          key: "confirm",
-                                          type: "submit",
-                                          form: "delete-students-form",
-                                          name: "delete_students",
-                                          value: "1",
-                                          variant: "danger",
-                                          icon: "trash",
-                                      }, `Delete ${selected.size || ""}`.trim()),
-                                      h(Button, {
-                                          key: "cancel",
-                                          variant: "outline",
-                                          onClick: cancelDeleteMode,
-                                      }, "Cancel"),
-                                  ]
-                                : h(Button, {
-                                      variant: "outline",
-                                      icon: "trash",
-                                      onClick: startDeleteMode,
-                                  }, "Delete Students"),
                             h(
                                 "form",
                                 {
@@ -1635,46 +1432,12 @@
                             `${filteredStudents.length} shown`,
                         ),
                     ),
-                    h(
-                        "form",
-                        {
-                            id: "delete-students-form",
-                            method: "POST",
-                            action: data.franchiseUrl,
-                            onSubmit: handleDeleteSubmit,
-                        },
-                        h(HiddenCsrf, { token: data.csrfToken }),
-                        h(HiddenMasterPassword, { value: masterPassword }),
-                        h(StudentTable, {
-                            deleteMode,
-                            onEdit: openEditDialog,
-                            onRowSelect: toggleSelected,
-                            onSort: toggleSort,
-                            selected,
-                            sort,
-                            students: filteredStudents,
-                        }),
-                    ),
+                    h(StudentTable, {
+                        onSort: toggleSort,
+                        sort,
+                        students: filteredStudents,
+                    }),
                 ),
-                h(StudentDialog, {
-                    csrfToken: data.csrfToken,
-                    dekExists,
-                    franchiseUrl: data.franchiseUrl,
-                    masterPassword,
-                    mode: dialogMode,
-                    onClose: () => setStudentDialogOpen(false),
-                    onNeedPassword: () => setPasswordDialogOpen(true),
-                    open: studentDialogOpen,
-                    student: dialogStudent,
-                }),
-                h(MasterPasswordDialog, {
-                    open: passwordDialogOpen,
-                    onCancel: () => {
-                        pendingAction.current = null;
-                        setPasswordDialogOpen(false);
-                    },
-                    onSubmit: handlePasswordSubmit,
-                }),
             ),
         );
     }
@@ -1707,15 +1470,7 @@
         return tab === "heatmap" ? "#heatmap" : "#history";
     }
 
-    function StudentTable({
-        deleteMode,
-        onEdit,
-        onRowSelect,
-        onSort,
-        selected,
-        sort,
-        students,
-    }) {
+    function StudentTable({ onSort, sort, students }) {
         return h(
             "div",
             { className: "tc-table-scroll" },
@@ -1728,12 +1483,6 @@
                     h(
                         "tr",
                         null,
-                        deleteMode
-                            ? h("th", {
-                                  className:
-                                      "w-12 bg-brand-blue px-4 py-3 text-left text-xs font-extrabold uppercase tracking-normal text-white",
-                              }, "Pick")
-                            : null,
                         h(SortHeader, { field: "name", label: "Student", onSort, sort }),
                         h("th", { className: "bg-brand-blue px-4 py-3 text-left text-xs font-extrabold uppercase tracking-normal text-white" }, "Portal"),
                         h("th", { className: "bg-brand-blue px-4 py-3 text-left text-xs font-extrabold uppercase tracking-normal text-white" }, "Recent Grades"),
@@ -1755,30 +1504,9 @@
                                 className:
                                     "cursor-pointer border-b border-slate-100 transition hover:bg-brand-orangeSoft/40",
                                 onClick: () => {
-                                    if (deleteMode) {
-                                        onRowSelect(student.id);
-                                    } else {
-                                        window.location.href = student.detailUrl;
-                                    }
+                                    window.location.href = student.detailUrl;
                                 },
                             },
-                            deleteMode
-                                ? h(
-                                      "td",
-                                      { className: "px-4 py-4 align-top" },
-                                      h("input", {
-                                          type: "checkbox",
-                                          name: "student_id",
-                                          value: student.id,
-                                          checked: selected.has(student.id),
-                                          "aria-label": `Select ${student.firstName || ""} ${student.lastName || ""}`.trim(),
-                                          onChange: () => onRowSelect(student.id),
-                                          onClick: (event) => event.stopPropagation(),
-                                          className:
-                                              "h-4 w-4 rounded border-slate-300 text-brand-blue",
-                                      }),
-                                  )
-                                : null,
                             h(
                                 "td",
                                 { className: "px-4 py-4 align-top" },
@@ -1834,14 +1562,6 @@
                                 h(
                                     "div",
                                     { className: "flex flex-wrap gap-2" },
-                                    h(Button, {
-                                        variant: "outline",
-                                        size: "sm",
-                                        onClick: (event) => {
-                                            event.stopPropagation();
-                                            onEdit(student);
-                                        },
-                                    }, "Edit"),
                                     h(Button, {
                                         href: `${student.detailUrl}#heatmap`,
                                         variant: "orange",

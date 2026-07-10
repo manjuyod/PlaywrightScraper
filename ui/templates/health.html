@@ -14,7 +14,7 @@
     <body>
         {% set messages = get_flashed_messages() %}
         <div id="tc-react-root"></div>
-        <script id="tc-page-data" type="application/json">
+        <script id="tc-page-data" type="application/json" nonce="{{ csp_nonce }}">
             {
                 "page": "health",
                 "csrfToken": {{ csrf_token|tojson }},
@@ -25,23 +25,23 @@
                 "countSynced": {{ count_synced|tojson }},
                 "countBadLogins": {{ count_bad_logins|tojson }},
                 "jobs": [
-                    {% for job_id, job in jobs.items() %}
+                    {% for job in jobs %}
                     {
-                        "id": {{ job_id|tojson }},
-                        "total": {{ job.total|default(0)|tojson }},
-                        "step": {{ job.step|default(0)|tojson }},
-                        "steps": {{ job.steps|default(0)|tojson }},
-                        "pct": {{ job.pct|default(0)|tojson }}
+                        "id": {{ job.id|tojson }},
+                        "total": {{ job.progress.total|default(0)|tojson }},
+                        "step": {{ job.progress.attempted|default(0)|tojson }},
+                        "steps": {{ job.progress.total|default(0)|tojson }},
+                        "pct": {{ ((100 * job.progress.attempted / job.progress.total) if job.progress and job.progress.total else 0)|tojson }}
                     }{% if not loop.last %},{% endif %}
                     {% endfor %}
                 ],
                 "health": [
                     {% for franchise in health %}
                     {
-                        "id": {{ franchise.id|tojson }},
-                        "url": {{ url_for('franchise_view', franchise_id=franchise.id)|tojson }},
-                        "synced": {{ franchise.synced|default(0)|tojson }},
-                        "total": {{ franchise.total|default(0)|tojson }},
+                        "id": {{ franchise.franchise_id|tojson }},
+                        "url": {{ url_for('franchise_view', franchise_id=franchise.franchise_id)|tojson }},
+                        "synced": {{ franchise.synced_students|default(0)|tojson }},
+                        "total": {{ franchise.total_students|default(0)|tojson }},
                         "errorCount": {{ franchise.error_count|default(0)|tojson }},
                         "errorGroups": {{ franchise.error_groups|default([])|tojson }},
                         "malformedInputs": {{ franchise.malformed_inputs|default(0)|tojson }},

@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+umask 077
+
+if [ "$#" -ne 2 ]; then
+    echo "Usage: revoke-client CA_DIRECTORY CLIENT_CERTIFICATE" >&2
+    exit 2
+fi
+
+export PKI_ROOT
+PKI_ROOT=$(realpath "$1")
+certificate=$(realpath "$2")
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+openssl ca -config "$script_dir/openssl-intermediate.cnf" -revoke "$certificate"
+openssl ca -config "$script_dir/openssl-intermediate.cnf" -gencrl -out "$PKI_ROOT/intermediate/crl/client-ca.crl.pem"
+openssl crl -in "$PKI_ROOT/intermediate/crl/client-ca.crl.pem" -noout -text

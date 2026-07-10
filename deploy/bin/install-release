@@ -1,0 +1,53 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(id -u)" -ne 0 ] || [ "$#" -ne 4 ]; then
+    echo "Usage (as root): install-release api|frontend VERSION ARCHIVE CHECKSUM_FILE" >&2
+    exit 2
+fi
+
+role=$1
+version=$2
+archive=$(realpath "$3")
+checksum=$(realpath "$4")
+
+case "$role" in
+    api) service=grade-api.service ;;
+    frontend) service=grade-frontend.service ;;
+    *) echo "Role must be api or frontend" >&2; exit 2 ;;
+esac
+
+case "$version" in
+    *[!A-Za-z0-9._-]*|'') echo "Invalid release version" >&2; exit 2 ;;
+esac
+
+archive_name=$(basename "$archive")
+if ! grep -F "  $archive_name" "$checksum" >/dev/null; then
+    echo "Checksum file does not name the release archive" >&2
+    exit 1
+fi
+(cd "$(dirname "$archive")" && sha256sum --check "$checksum")
+
+role_root=/opt/grade-$role
+release=$role_root/releases/$version
+if [ -e "$release" ]; then
+    echo "Release already exists: $release" >&2
+    exit 1
+fi
+
+install -d -m 0755 "$role_root/releases"
+install -d -m 0755 "$release"
+tar --extract --file "$archive" --directory "$release" --no-same-owner
+chown -R "grade-$role:grade-$role" "$release"
+
+if [ -L "$role_root/current" ]; then
+    current_target=$(readlink -f "$role_root/current")
+    ln -sfn "$current_target" "$role_root/previous.next"
+    mv -Tf "$role_root/previous.next" "$role_root/previous"
+fi
+ln -sfn "$release" "$role_root/current.next"
+mv -Tf "$role_root/current.next" "$role_root/current"
+
+systemctl daemon-reload
+systemctl restart "$service"
+systemctl --quiet is-active "$service"
