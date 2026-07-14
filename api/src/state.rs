@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 #[cfg(test)]
 use std::{collections::HashSet, sync::Mutex};
@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::config::ApiConfig;
 use crate::error::ApiError;
 use crate::queries;
+use crate::rate_limit::IdentityRateLimiter;
 
 #[cfg(test)]
 type DashboardReplayTestClaims = Arc<Mutex<HashSet<([u8; 32], Uuid)>>>;
@@ -33,6 +34,7 @@ pub fn dashboard_replay_identity_hash(
 pub struct AppState {
     pub config: Arc<ApiConfig>,
     pub neon_db: PgPool,
+    pub rate_limiter: IdentityRateLimiter,
     #[cfg(test)]
     dashboard_replay_test_claims: Option<DashboardReplayTestClaims>,
 }
@@ -46,6 +48,7 @@ impl AppState {
         Ok(Self {
             config: Arc::new(config),
             neon_db,
+            rate_limiter: IdentityRateLimiter::new(Duration::from_secs(60)),
             #[cfg(test)]
             dashboard_replay_test_claims: None,
         })
@@ -60,6 +63,7 @@ impl AppState {
         Ok(Self {
             config: Arc::new(config),
             neon_db,
+            rate_limiter: IdentityRateLimiter::new(Duration::from_secs(60)),
             dashboard_replay_test_claims: Some(Arc::new(Mutex::new(HashSet::new()))),
         })
     }
@@ -100,26 +104,81 @@ impl AppState {
 mod tests {
     use std::time::Duration;
 
+    use crate::api_keys::{parse_basic_keyring_json, parse_scheduler_keyring_json};
     use chrono::{Duration as ChronoDuration, Utc};
+    use sha2::{Digest, Sha256};
     use sqlx::postgres::PgPoolOptions;
     use uuid::Uuid;
 
     fn test_config() -> crate::config::ApiConfig {
+        fn digest(raw: &str) -> String {
+            hex::encode(Sha256::digest(raw.as_bytes()))
+        }
+
         crate::config::ApiConfig {
             neon_database_url: "postgres://127.0.0.1:1/postgres".into(),
             crm_database_url: "server=127.0.0.1;Database=test;Uid=u;Pwd=p;Encrypt=yes;".into(),
-            worker_api_tokens: [("worker-test".into(), "worker-secret".into())]
-                .into_iter()
-                .collect(),
-            scheduler_api_tokens: [("scheduler-test".into(), "scheduler-secret".into())]
-                .into_iter()
-                .collect(),
-            operator_api_tokens: [("operator-test".into(), "operator-secret".into())]
-                .into_iter()
-                .collect(),
+            worker_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "worker-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("worker-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }]
+                    }
+                })
+                .to_string(),
+                "worker",
+            )
+            .unwrap(),
+            scheduler_api_keyring: parse_scheduler_keyring_json(
+                &serde_json::json!({
+                    "scheduler-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("scheduler-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }],
+                        "franchise_ids": [11],
+                        "target_worker_ids": ["worker-test"],
+                        "can_reconcile": false
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap(),
+            operator_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "operator-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("operator-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }]
+                    }
+                })
+                .to_string(),
+                "operator",
+            )
+            .unwrap(),
+            readiness_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "readiness-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("readiness-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }]
+                    }
+                })
+                .to_string(),
+                "readiness",
+            )
+            .unwrap(),
             worker_lease_seconds: 300,
             dashboard_hmac_max_age_seconds: 60,
-            readiness_api_token: "readiness-secret".into(),
+            default_worker_id: "worker-test".into(),
             readiness_timeout_millis: 100,
             production_mode: false,
             api_bind_addr: "127.0.0.1:0".into(),

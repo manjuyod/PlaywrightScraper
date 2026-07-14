@@ -1,5 +1,12 @@
+use std::{collections::HashSet, sync::Arc};
+
+use crate::api_keys::{identify_basic_key, identify_scheduler_key};
 use crate::config::DashboardHmacVerificationKeys;
 use crate::error::ApiError;
+use crate::rate_limit::{
+    ApiRole, OPERATOR_REQUESTS_PER_MINUTE, SCHEDULER_REQUESTS_PER_MINUTE,
+    WORKER_REQUESTS_PER_MINUTE,
+};
 use crate::state::AppState;
 use axum::{
     body::{to_bytes, Body},
@@ -26,17 +33,23 @@ pub struct DashboardAuthClaims {
 #[derive(Debug, Clone)]
 pub struct WorkerAuthClaims {
     pub worker_id: String,
+    pub key_id: String,
     pub lease_token: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SchedulerAuthClaims {
     pub scheduler_id: String,
+    pub key_id: String,
+    pub franchise_ids: Arc<HashSet<i32>>,
+    pub target_worker_ids: Arc<HashSet<String>>,
+    pub can_reconcile: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct OperatorAuthClaims {
     pub operator_id: String,
+    pub key_id: String,
 }
 
 const HEADER_TIMESTAMP: HeaderName = HeaderName::from_static("x-api-timestamp");
@@ -208,8 +221,13 @@ pub async fn worker_auth_middleware(
 ) -> Result<Response, ApiError> {
     let token = bearer_token(req.headers());
 
-    let worker_id =
-        worker_identity_for_token(&state.config, token).ok_or(ApiError::Unauthorized)?;
+    let authenticated = identify_basic_key(&state.config.worker_api_keyring, token, Utc::now())
+        .ok_or(ApiError::Unauthorized)?;
+    state.rate_limiter.check(
+        ApiRole::Worker,
+        &authenticated.identity,
+        WORKER_REQUESTS_PER_MINUTE,
+    )?;
     let lease_token = if req.uri().path() == WORKER_CLAIM_PATH {
         None
     } else {
@@ -222,7 +240,8 @@ pub async fn worker_auth_middleware(
         )
     };
     req.extensions_mut().insert(WorkerAuthClaims {
-        worker_id,
+        worker_id: authenticated.identity,
+        key_id: authenticated.key_id,
         lease_token,
     });
 
@@ -234,13 +253,24 @@ pub async fn scheduler_auth_middleware(
     mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let scheduler_id = identity_for_token(
-        &state.config.scheduler_api_tokens,
+    let authenticated = identify_scheduler_key(
+        &state.config.scheduler_api_keyring,
         bearer_token(req.headers()),
+        Utc::now(),
     )
     .ok_or(ApiError::Unauthorized)?;
-    req.extensions_mut()
-        .insert(SchedulerAuthClaims { scheduler_id });
+    state.rate_limiter.check(
+        ApiRole::Scheduler,
+        &authenticated.identity,
+        SCHEDULER_REQUESTS_PER_MINUTE,
+    )?;
+    req.extensions_mut().insert(SchedulerAuthClaims {
+        scheduler_id: authenticated.identity,
+        key_id: authenticated.key_id,
+        franchise_ids: authenticated.franchise_ids,
+        target_worker_ids: authenticated.target_worker_ids,
+        can_reconcile: authenticated.can_reconcile,
+    });
     Ok(next.run(req).await)
 }
 
@@ -249,10 +279,21 @@ pub async fn operator_auth_middleware(
     mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let operator_id = operator_identity_for_token(&state.config, bearer_token(req.headers()))
-        .ok_or(ApiError::Unauthorized)?;
-    req.extensions_mut()
-        .insert(OperatorAuthClaims { operator_id });
+    let authenticated = identify_basic_key(
+        &state.config.operator_api_keyring,
+        bearer_token(req.headers()),
+        Utc::now(),
+    )
+    .ok_or(ApiError::Unauthorized)?;
+    state.rate_limiter.check(
+        ApiRole::Operator,
+        &authenticated.identity,
+        OPERATOR_REQUESTS_PER_MINUTE,
+    )?;
+    req.extensions_mut().insert(OperatorAuthClaims {
+        operator_id: authenticated.identity,
+        key_id: authenticated.key_id,
+    });
     Ok(next.run(req).await)
 }
 
@@ -265,44 +306,6 @@ fn bearer_token(headers: &axum::http::HeaderMap) -> &str {
     auth.strip_prefix("Bearer ")
         .or_else(|| auth.strip_prefix("bearer "))
         .unwrap_or("")
-}
-
-pub fn worker_identity_for_token(
-    config: &crate::config::ApiConfig,
-    provided_token: &str,
-) -> Option<String> {
-    identity_for_token(&config.worker_api_tokens, provided_token)
-}
-
-pub fn operator_identity_for_token(
-    config: &crate::config::ApiConfig,
-    provided_token: &str,
-) -> Option<String> {
-    identity_for_token(&config.operator_api_tokens, provided_token)
-}
-
-fn identity_for_token(
-    configured_tokens: &std::collections::HashMap<String, String>,
-    provided_token: &str,
-) -> Option<String> {
-    if provided_token.is_empty() {
-        return None;
-    }
-
-    let mut matched_worker = None;
-    let mut matches = 0_u8;
-    for (worker_id, configured_token) in configured_tokens {
-        if configured_token
-            .as_bytes()
-            .ct_eq(provided_token.as_bytes())
-            .unwrap_u8()
-            == 1
-        {
-            matches = matches.saturating_add(1);
-            matched_worker = Some(worker_id.clone());
-        }
-    }
-    (matches == 1).then_some(matched_worker).flatten()
 }
 
 fn header_value<'a>(
@@ -325,8 +328,6 @@ fn header_value<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use axum::{
         body::Body,
         extract::{Extension, State},
@@ -337,34 +338,106 @@ mod tests {
         Router,
     };
     use chrono::Utc;
+    use http_body_util::BodyExt;
+    use sha2::{Digest, Sha256};
     use tower::ServiceExt;
     use uuid::Uuid;
 
     use super::{
         compute_signature, dashboard_auth_middleware, operator_auth_middleware,
-        worker_auth_middleware, DashboardSignatureInput, OperatorAuthClaims, WorkerAuthClaims,
+        scheduler_auth_middleware, worker_auth_middleware, DashboardSignatureInput,
+        OperatorAuthClaims, SchedulerAuthClaims, WorkerAuthClaims,
     };
-    use super::{operator_identity_for_token, worker_identity_for_token};
+    use crate::api_keys::{parse_basic_keyring_json, parse_scheduler_keyring_json};
     use crate::config::ApiConfig;
     use crate::state::AppState;
 
     fn config(tokens: &[(&str, &str)]) -> ApiConfig {
+        fn digest(raw: &str) -> String {
+            hex::encode(Sha256::digest(raw.as_bytes()))
+        }
+
+        let worker_tokens = if tokens.is_empty() {
+            vec![("worker-test", "worker-token")]
+        } else {
+            tokens.to_vec()
+        };
+
+        let mut identities = serde_json::Map::with_capacity(worker_tokens.len());
+        for (identity, raw_token) in &worker_tokens {
+            identities.insert(
+                (*identity).to_string(),
+                serde_json::json!({
+                    "keys": [{
+                        "key_id": "primary",
+                        "sha256": digest(raw_token),
+                        "expires_at": "2099-01-01T00:00:00Z"
+                    }]
+                }),
+            );
+        }
+        let worker_api_keyring =
+            parse_basic_keyring_json(&serde_json::Value::Object(identities).to_string(), "worker")
+                .expect("worker keyring fixture");
+        let target_worker_ids = worker_tokens
+            .iter()
+            .map(|(identity, _)| *identity)
+            .collect::<Vec<_>>();
+
         ApiConfig {
             neon_database_url: "postgres://localhost/test".into(),
             crm_database_url: "server=localhost;Database=test".into(),
-            worker_api_tokens: tokens
-                .iter()
-                .map(|(worker_id, token)| ((*worker_id).into(), (*token).into()))
-                .collect::<HashMap<_, _>>(),
-            scheduler_api_tokens: [("scheduler-test".into(), "scheduler-secret".into())]
-                .into_iter()
-                .collect(),
-            operator_api_tokens: [("operator-test".into(), "operator-secret".into())]
-                .into_iter()
-                .collect(),
+            worker_api_keyring,
+            scheduler_api_keyring: parse_scheduler_keyring_json(
+                &serde_json::json!({
+                    "scheduler-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("scheduler-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }],
+                        "franchise_ids": [11],
+                        "target_worker_ids": target_worker_ids,
+                        "can_reconcile": false
+                    }
+                })
+                .to_string(),
+            )
+            .expect("scheduler keyring fixture"),
+            operator_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "operator-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("operator-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }]
+                    }
+                })
+                .to_string(),
+                "operator",
+            )
+            .expect("operator keyring fixture"),
+            readiness_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "readiness-test": {
+                        "keys": [{
+                            "key_id": "primary",
+                            "sha256": digest("readiness-secret"),
+                            "expires_at": "2099-01-01T00:00:00Z"
+                        }]
+                    }
+                })
+                .to_string(),
+                "readiness",
+            )
+            .expect("readiness keyring fixture"),
             worker_lease_seconds: 300,
             dashboard_hmac_max_age_seconds: 60,
-            readiness_api_token: "readiness-secret".into(),
+            default_worker_id: worker_tokens
+                .first()
+                .map(|(identity, _)| (*identity).to_string())
+                .unwrap_or_else(|| "worker-test".to_string()),
             readiness_timeout_millis: 100,
             production_mode: false,
             api_bind_addr: "127.0.0.1:0".into(),
@@ -380,26 +453,70 @@ mod tests {
 
     #[test]
     fn worker_token_identity_is_derived_only_from_a_unique_bearer_token() {
-        let api_config = config(&[("worker-a", "token-a"), ("worker-b", "token-b")]);
-        assert_eq!(
-            worker_identity_for_token(&api_config, "token-b").as_deref(),
-            Some("worker-b")
-        );
-        assert!(worker_identity_for_token(&api_config, "").is_none());
-        assert!(worker_identity_for_token(&api_config, "unknown").is_none());
+        fn digest(raw: &str) -> String {
+            hex::encode(Sha256::digest(raw.as_bytes()))
+        }
 
-        let ambiguous = config(&[("worker-a", "shared"), ("worker-b", "shared")]);
-        assert!(worker_identity_for_token(&ambiguous, "shared").is_none());
+        let api_config = config(&[("worker-a", "token-a"), ("worker-b", "token-b")]);
+        let worker_b = crate::api_keys::identify_basic_key(
+            &api_config.worker_api_keyring,
+            "token-b",
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(worker_b.identity, "worker-b");
+        assert!(crate::api_keys::identify_basic_key(
+            &api_config.worker_api_keyring,
+            "",
+            Utc::now()
+        )
+        .is_none());
+        assert!(crate::api_keys::identify_basic_key(
+            &api_config.worker_api_keyring,
+            "unknown",
+            Utc::now()
+        )
+        .is_none());
+
+        assert!(parse_basic_keyring_json(
+            &serde_json::json!({
+                "worker-a": {
+                    "keys": [{
+                        "key_id": "primary",
+                        "sha256": digest("shared"),
+                        "expires_at": "2099-01-01T00:00:00Z"
+                    }]
+                },
+                "worker-b": {
+                    "keys": [{
+                        "key_id": "primary",
+                        "sha256": digest("shared"),
+                        "expires_at": "2099-01-01T00:00:00Z"
+                    }]
+                }
+            })
+            .to_string(),
+            "worker"
+        )
+        .is_err());
     }
 
     #[test]
     fn operator_identity_is_derived_only_from_the_operator_token_map() {
         let api_config = config(&[("worker-a", "worker-token")]);
-        assert_eq!(
-            operator_identity_for_token(&api_config, "operator-secret").as_deref(),
-            Some("operator-test")
-        );
-        assert!(operator_identity_for_token(&api_config, "worker-token").is_none());
+        let operator = crate::api_keys::identify_basic_key(
+            &api_config.operator_api_keyring,
+            "operator-secret",
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(operator.identity, "operator-test");
+        assert!(crate::api_keys::identify_basic_key(
+            &api_config.operator_api_keyring,
+            "worker-token",
+            Utc::now()
+        )
+        .is_none());
     }
 
     #[test]
@@ -465,6 +582,18 @@ mod tests {
         claims.operator_id
     }
 
+    async fn scheduler_policy_probe(
+        Extension(claims): Extension<SchedulerAuthClaims>,
+    ) -> impl IntoResponse {
+        axum::Json(serde_json::json!({
+            "scheduler_id": claims.scheduler_id,
+            "key_id": claims.key_id,
+            "franchise_ids": claims.franchise_ids,
+            "target_worker_ids": claims.target_worker_ids,
+            "can_reconcile": claims.can_reconcile,
+        }))
+    }
+
     #[tokio::test]
     async fn operator_middleware_accepts_only_operator_tokens() {
         let state = AppState::new_test(config(&[("worker-a", "worker-token")])).unwrap();
@@ -525,6 +654,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn expired_key_is_unauthorized() {
+        let mut api_config = config(&[("worker-a", "expired-key")]);
+        api_config
+            .worker_api_keyring
+            .get_mut("worker-a")
+            .unwrap()
+            .keys[0]
+            .expires_at = Utc::now() - chrono::Duration::seconds(1);
+        let state = AppState::new_test(api_config).unwrap();
+        let app = Router::new()
+            .route("/probe", get(worker_identity_probe))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                worker_auth_middleware,
+            ))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/probe")
+                    .header("authorization", "Bearer expired-key")
+                    .header("x-worker-lease", "00000000-0000-0000-0000-000000000042")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn scheduler_claims_carry_policy() {
+        let state = AppState::new_test(config(&[("worker-a", "worker-key")])).unwrap();
+        let app = Router::new()
+            .route("/probe", get(scheduler_policy_probe))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                scheduler_auth_middleware,
+            ))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/probe")
+                    .header("authorization", "Bearer scheduler-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["scheduler_id"], "scheduler-test");
+        assert_eq!(payload["key_id"], "primary");
+        assert_eq!(payload["franchise_ids"], serde_json::json!([11]));
+        assert_eq!(
+            payload["target_worker_ids"],
+            serde_json::json!(["worker-a"])
+        );
+        assert_eq!(payload["can_reconcile"], false);
     }
 
     #[tokio::test]

@@ -2,6 +2,10 @@ use std::{collections::HashMap, env, net::SocketAddr};
 
 use base64::Engine;
 
+use crate::api_keys::{
+    parse_basic_keyring_json, parse_scheduler_keyring_json, validate_cross_role_digest_uniqueness,
+    BasicKeyring, SchedulerKeyring,
+};
 use crate::credentials::AlternateCredentialKeyring;
 
 #[derive(Clone)]
@@ -14,12 +18,13 @@ pub struct DashboardHmacVerificationKeys {
 pub struct ApiConfig {
     pub neon_database_url: String,
     pub crm_database_url: String,
-    pub worker_api_tokens: HashMap<String, String>,
-    pub scheduler_api_tokens: HashMap<String, String>,
-    pub operator_api_tokens: HashMap<String, String>,
+    pub worker_api_keyring: BasicKeyring,
+    pub scheduler_api_keyring: SchedulerKeyring,
+    pub operator_api_keyring: BasicKeyring,
+    pub readiness_api_keyring: BasicKeyring,
+    pub default_worker_id: String,
     pub worker_lease_seconds: i64,
     pub dashboard_hmac_max_age_seconds: i64,
-    pub readiness_api_token: String,
     pub readiness_timeout_millis: u64,
     pub production_mode: bool,
     pub api_bind_addr: String,
@@ -103,60 +108,6 @@ pub fn parse_dashboard_hmac_verification_keys(
     })
 }
 
-fn parse_api_tokens_json(
-    value: &str,
-    environment_name: &str,
-) -> Result<HashMap<String, String>, String> {
-    let tokens: HashMap<String, String> = serde_json::from_str(value)
-        .map_err(|_| format!("{environment_name} must be a JSON object of identities to tokens"))?;
-    if tokens.is_empty() {
-        return Err(format!(
-            "{environment_name} must include at least one token"
-        ));
-    }
-
-    let mut normalized = HashMap::with_capacity(tokens.len());
-    let mut seen_tokens = std::collections::HashSet::with_capacity(tokens.len());
-    let mut seen_worker_ids = std::collections::HashSet::with_capacity(tokens.len());
-    for (worker_id, token) in tokens {
-        let worker_id = worker_id.trim();
-        if worker_id.is_empty() {
-            return Err(format!(
-                "{environment_name} cannot contain an empty identity"
-            ));
-        }
-        if token.is_empty() || token.trim() != token {
-            return Err(format!(
-                "{environment_name} cannot contain an empty or padded token"
-            ));
-        }
-        if !seen_tokens.insert(token.clone()) {
-            return Err(format!(
-                "{environment_name} cannot assign one token to multiple identities"
-            ));
-        }
-        if !seen_worker_ids.insert(worker_id.to_ascii_lowercase()) {
-            return Err(format!(
-                "{environment_name} cannot contain duplicate identities"
-            ));
-        }
-        normalized.insert(worker_id.to_string(), token);
-    }
-    Ok(normalized)
-}
-
-pub fn parse_worker_api_tokens_json(value: &str) -> Result<HashMap<String, String>, String> {
-    parse_api_tokens_json(value, "WORKER_API_TOKENS_JSON")
-}
-
-pub fn parse_scheduler_api_tokens_json(value: &str) -> Result<HashMap<String, String>, String> {
-    parse_api_tokens_json(value, "SCHEDULER_API_TOKENS_JSON")
-}
-
-pub fn parse_operator_api_tokens_json(value: &str) -> Result<HashMap<String, String>, String> {
-    parse_api_tokens_json(value, "OPERATOR_API_TOKENS_JSON")
-}
-
 pub fn parse_alternate_credential_keyring(
     active_key_id: &str,
     value: &str,
@@ -197,16 +148,28 @@ fn parse_bool_flag(value: Option<&str>, environment_name: &str) -> Result<bool, 
     }
 }
 
-fn validate_global_token_uniqueness(token_maps: &[&HashMap<String, String>]) -> Result<(), String> {
-    let mut tokens = std::collections::HashSet::new();
-    for token_map in token_maps {
-        for token in token_map.values() {
-            if !tokens.insert(token) {
-                return Err("Bearer tokens must be globally unique across service roles".into());
-            }
-        }
+pub fn validate_api_keyring_configuration(
+    workers: &BasicKeyring,
+    schedulers: &SchedulerKeyring,
+    operators: &BasicKeyring,
+    readiness: &BasicKeyring,
+    default_worker_id: &str,
+) -> Result<(), String> {
+    if default_worker_id.is_empty() || default_worker_id.trim() != default_worker_id {
+        return Err("DEFAULT_WORKER_ID must be nonempty and unpadded".into());
     }
-    Ok(())
+    if !workers.contains_key(default_worker_id) {
+        return Err("DEFAULT_WORKER_ID must reference a configured worker identity".into());
+    }
+    if schedulers.values().any(|scheduler| {
+        scheduler
+            .target_worker_ids
+            .iter()
+            .any(|worker_id| !workers.contains_key(worker_id))
+    }) {
+        return Err("Scheduler targets must reference configured worker identities".into());
+    }
+    validate_cross_role_digest_uniqueness(workers, schedulers, operators, readiness)
 }
 
 pub fn parse_worker_lease_seconds(value: Option<&str>) -> Result<i64, String> {
@@ -272,17 +235,22 @@ impl ApiConfig {
             .to_ascii_lowercase();
         let dashboard_hmac_active = require_secret_env("DASHBOARD_HMAC_ACTIVE_SECRET")?;
         let dashboard_hmac_previous = env::var("DASHBOARD_HMAC_PREVIOUS_SECRET").ok();
-        let worker_api_tokens =
-            parse_worker_api_tokens_json(&require_env("WORKER_API_TOKENS_JSON")?)?;
-        let scheduler_api_tokens =
-            parse_scheduler_api_tokens_json(&require_env("SCHEDULER_API_TOKENS_JSON")?)?;
-        let operator_api_tokens =
-            parse_operator_api_tokens_json(&require_env("OPERATOR_API_TOKENS_JSON")?)?;
-        validate_global_token_uniqueness(&[
-            &worker_api_tokens,
-            &scheduler_api_tokens,
-            &operator_api_tokens,
-        ])?;
+        let worker_api_keyring =
+            parse_basic_keyring_json(&require_env("WORKER_API_KEYRING_JSON")?, "WORKER")?;
+        let scheduler_api_keyring =
+            parse_scheduler_keyring_json(&require_env("SCHEDULER_API_KEYRING_JSON")?)?;
+        let operator_api_keyring =
+            parse_basic_keyring_json(&require_env("OPERATOR_API_KEYRING_JSON")?, "OPERATOR")?;
+        let readiness_api_keyring =
+            parse_basic_keyring_json(&require_env("READINESS_API_KEYRING_JSON")?, "READINESS")?;
+        let default_worker_id = require_env("DEFAULT_WORKER_ID")?;
+        validate_api_keyring_configuration(
+            &worker_api_keyring,
+            &scheduler_api_keyring,
+            &operator_api_keyring,
+            &readiness_api_keyring,
+            &default_worker_id,
+        )?;
         let alternate_credential_keyring = parse_alternate_credential_keyring(
             &require_env("ALTERNATE_CREDENTIAL_ACTIVE_KEY_ID")?,
             &require_env("ALTERNATE_CREDENTIAL_KEYS_JSON")?,
@@ -295,14 +263,15 @@ impl ApiConfig {
         Ok(Self {
             neon_database_url: require_env("NEON_DATABASE_URL")?,
             crm_database_url: require_env("CRM_DATABASE_URL")?,
-            worker_api_tokens,
-            scheduler_api_tokens,
-            operator_api_tokens,
+            worker_api_keyring,
+            scheduler_api_keyring,
+            operator_api_keyring,
+            readiness_api_keyring,
+            default_worker_id,
             worker_lease_seconds: parse_worker_lease_seconds(lease_value.as_deref())?,
             dashboard_hmac_max_age_seconds: parse_dashboard_hmac_max_age_seconds(
                 dashboard_hmac_max_age_value.as_deref(),
             )?,
-            readiness_api_token: require_secret_env("READINESS_API_TOKEN")?,
             readiness_timeout_millis: parse_readiness_timeout_millis(
                 readiness_timeout_value.as_deref(),
             )?,
@@ -328,35 +297,110 @@ impl ApiConfig {
 mod tests {
     use super::{
         parse_alternate_credential_keyring, parse_dashboard_hmac_max_age_seconds,
-        parse_operator_api_tokens_json, parse_worker_api_tokens_json, parse_worker_lease_seconds,
+        parse_worker_lease_seconds, validate_api_keyring_configuration,
     };
+    use crate::api_keys::{parse_basic_keyring_json, parse_scheduler_keyring_json};
+    use sha2::{Digest, Sha256};
 
-    #[test]
-    fn worker_token_config_requires_unique_nonempty_worker_tokens() {
-        let tokens = parse_worker_api_tokens_json(r#"{"worker-a":"token-a","worker-b":"token-b"}"#)
-            .expect("valid token map");
-        assert_eq!(tokens.get("worker-a").map(String::as_str), Some("token-a"));
+    fn digest(raw: &str) -> String {
+        hex::encode(Sha256::digest(raw.as_bytes()))
+    }
 
-        for invalid in [
-            "not json",
-            "{}",
-            r#"{"":"token"}"#,
-            r#"{"worker":""}"#,
-            r#"{"worker-a":"same","worker-b":"same"}"#,
-            r#"{"worker-a":"token-a"," worker-a ":"token-b"}"#,
-        ] {
-            assert!(parse_worker_api_tokens_json(invalid).is_err(), "{invalid}");
-        }
+    fn basic(identity: &str, raw: &str, key_id: &str) -> crate::api_keys::BasicKeyring {
+        parse_basic_keyring_json(
+            &serde_json::json!({
+                identity: {
+                    "keys": [{
+                        "key_id": key_id,
+                        "sha256": digest(raw),
+                        "expires_at": "2099-01-01T00:00:00Z"
+                    }]
+                }
+            })
+            .to_string(),
+            "test",
+        )
+        .unwrap()
+    }
+
+    fn scheduler(targets: &[&str], raw: &str) -> crate::api_keys::SchedulerKeyring {
+        parse_scheduler_keyring_json(
+            &serde_json::json!({
+                "scheduler-a": {
+                    "keys": [{
+                        "key_id": "primary",
+                        "sha256": digest(raw),
+                        "expires_at": "2099-01-01T00:00:00Z"
+                    }],
+                    "franchise_ids": [11],
+                    "target_worker_ids": targets,
+                    "can_reconcile": false
+                }
+            })
+            .to_string(),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn operator_tokens_use_the_same_strict_identity_map_contract() {
-        let tokens = parse_operator_api_tokens_json(r#"{"operator-a":"token-a"}"#).unwrap();
-        assert_eq!(
-            tokens.get("operator-a").map(String::as_str),
-            Some("token-a")
-        );
-        assert!(parse_operator_api_tokens_json("{}").is_err());
+    fn default_worker_must_exist() {
+        let workers = basic("worker-a", "worker-key", "primary");
+        let schedulers = scheduler(&["worker-a"], "scheduler-key");
+        let operators = basic("operator-a", "operator-key", "primary");
+        let readiness = basic("probe-a", "readiness-key", "primary");
+
+        assert!(validate_api_keyring_configuration(
+            &workers,
+            &schedulers,
+            &operators,
+            &readiness,
+            "missing-worker",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn scheduler_targets_must_reference_workers() {
+        let workers = basic("worker-a", "worker-key", "primary");
+        let schedulers = scheduler(&["worker-a", "missing-worker"], "scheduler-key");
+        let operators = basic("operator-a", "operator-key", "primary");
+        let readiness = basic("probe-a", "readiness-key", "primary");
+
+        assert!(validate_api_keyring_configuration(
+            &workers,
+            &schedulers,
+            &operators,
+            &readiness,
+            "worker-a",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn digests_must_be_unique_across_roles() {
+        let workers = parse_basic_keyring_json(
+            &serde_json::json!({
+                "worker-a": {"keys": [
+                    {"key_id": "old", "sha256": digest("worker-old"), "expires_at": "2099-01-01T00:00:00Z"},
+                    {"key_id": "new", "sha256": digest("shared-key"), "expires_at": "2099-02-01T00:00:00Z"}
+                ]}
+            })
+            .to_string(),
+            "worker",
+        )
+        .unwrap();
+        let schedulers = scheduler(&["worker-a"], "scheduler-key");
+        let operators = basic("operator-a", "shared-key", "primary");
+        let readiness = basic("probe-a", "readiness-key", "primary");
+
+        assert!(validate_api_keyring_configuration(
+            &workers,
+            &schedulers,
+            &operators,
+            &readiness,
+            "worker-a",
+        )
+        .is_err());
     }
 
     #[test]

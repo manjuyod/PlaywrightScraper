@@ -7,12 +7,11 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::time::Duration;
-use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
+use crate::api_keys::identify_basic_key;
 use crate::auth::{
     dashboard_auth_middleware, operator_auth_middleware, scheduler_auth_middleware,
     worker_auth_middleware, DashboardAuthClaims, OperatorAuthClaims, SchedulerAuthClaims,
@@ -31,6 +30,7 @@ use crate::models::{
     WorkerResultStateAction,
 };
 use crate::queries;
+use crate::rate_limit::{ApiRole, READINESS_REQUESTS_PER_MINUTE};
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -187,24 +187,30 @@ pub async fn livez() -> Json<serde_json::Value> {
     Json(json!({"status": "ok"}))
 }
 
-fn readiness_token_matches(headers: &HeaderMap, expected: &str) -> bool {
-    let provided = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .unwrap_or("");
-    let provided_hash = Sha256::digest(provided.as_bytes());
-    let expected_hash = Sha256::digest(expected.as_bytes());
-    provided_hash.ct_eq(&expected_hash).unwrap_u8() == 1
-}
-
 pub async fn readyz(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
-    if !readiness_token_matches(&headers, &state.config.readiness_api_token) {
-        return Err(ApiError::Unauthorized);
-    }
+    let provided = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let token = provided
+        .strip_prefix("Bearer ")
+        .or_else(|| provided.strip_prefix("bearer "))
+        .unwrap_or("");
+
+    let authenticated = identify_basic_key(
+        &state.config.readiness_api_keyring,
+        token,
+        chrono::Utc::now(),
+    )
+    .ok_or(ApiError::Unauthorized)?;
+    state.rate_limiter.check(
+        ApiRole::Readiness,
+        &authenticated.identity,
+        READINESS_REQUESTS_PER_MINUTE,
+    )?;
 
     let timeout = Duration::from_millis(state.config.readiness_timeout_millis);
     let neon_probe = tokio::time::timeout(timeout, async {
@@ -751,27 +757,90 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
+    use crate::api_keys::{parse_basic_keyring_json, parse_scheduler_keyring_json};
     use crate::config::ApiConfig;
     use crate::state::AppState;
+    use sha2::{Digest, Sha256};
 
     fn test_state(secret: &str) -> AppState {
+        fn sha(raw: &str) -> String {
+            hex::encode(Sha256::digest(raw.as_bytes()))
+        }
+
         AppState::new_test(ApiConfig {
             neon_database_url: "postgres://localhost:5432/postgres".into(),
             crm_database_url:
                 "server=localhost;Database=test;Uid=u;Pwd=p;TrustServerCertificate=yes;Encrypt=yes;"
                     .into(),
-            worker_api_tokens: [("worker-test".into(), "worker-secret".into())]
-                .into_iter()
-                .collect(),
-            scheduler_api_tokens: [("scheduler-test".into(), "scheduler-secret".into())]
-                .into_iter()
-                .collect(),
-            operator_api_tokens: [("operator-test".into(), "operator-secret".into())]
-                .into_iter()
-                .collect(),
+            worker_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "worker-test": {
+                        "keys": [
+                            {
+                                "key_id": "primary",
+                                "sha256": sha("worker-secret"),
+                                "expires_at": "2099-01-01T00:00:00Z"
+                            }
+                        ]
+                    }
+                })
+                .to_string(),
+                "worker",
+            )
+            .unwrap(),
+            scheduler_api_keyring: parse_scheduler_keyring_json(
+                &serde_json::json!({
+                    "scheduler-test": {
+                        "keys": [
+                            {
+                                "key_id": "primary",
+                                "sha256": sha("scheduler-secret"),
+                                "expires_at": "2099-01-01T00:00:00Z"
+                            }
+                        ],
+                        "franchise_ids": [11],
+                        "target_worker_ids": ["worker-test"],
+                        "can_reconcile": false
+                    }
+                })
+                .to_string(),
+            )
+            .unwrap(),
+            operator_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "operator-test": {
+                        "keys": [
+                            {
+                                "key_id": "primary",
+                                "sha256": sha("operator-secret"),
+                                "expires_at": "2099-01-01T00:00:00Z"
+                            }
+                        ]
+                    }
+                })
+                .to_string(),
+                "operator",
+            )
+            .unwrap(),
+            readiness_api_keyring: parse_basic_keyring_json(
+                &serde_json::json!({
+                    "readiness-test": {
+                        "keys": [
+                            {
+                                "key_id": "primary",
+                                "sha256": sha("readiness-secret"),
+                                "expires_at": "2099-01-01T00:00:00Z"
+                            }
+                        ]
+                    }
+                })
+                .to_string(),
+                "readiness",
+            )
+            .unwrap(),
+            default_worker_id: "worker-test".into(),
             worker_lease_seconds: 300,
             dashboard_hmac_max_age_seconds: 60,
-            readiness_api_token: "readiness-secret".into(),
             readiness_timeout_millis: 100,
             production_mode: false,
             api_bind_addr: "127.0.0.1:0".into(),
@@ -916,6 +985,36 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn readiness_uses_keyring_identity() {
+        let app = create_router(test_state("readiness-keyring"));
+
+        let wrong_role = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .header("authorization", "Bearer worker-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrong_role.status(), StatusCode::UNAUTHORIZED);
+
+        let readiness = app
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .header("authorization", "Bearer readiness-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(readiness.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     fn assert_worker_write_handler<F>(_: F)
     where
         F: Future<Output = Result<StatusCode, crate::error::ApiError>>,
@@ -925,6 +1024,7 @@ mod tests {
     fn worker_claims() -> Extension<WorkerAuthClaims> {
         Extension(WorkerAuthClaims {
             worker_id: "worker-test".into(),
+            key_id: "primary".into(),
             lease_token: Some(Uuid::nil()),
         })
     }

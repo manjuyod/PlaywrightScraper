@@ -250,6 +250,9 @@ pub fn identify_basic_key(
     raw_key: &str,
     now: DateTime<Utc>,
 ) -> Option<AuthenticatedKey> {
+    if raw_key.is_empty() {
+        return None;
+    }
     let digest: [u8; 32] = Sha256::digest(raw_key.as_bytes()).into();
     let mut matches = Vec::new();
 
@@ -279,6 +282,9 @@ pub fn identify_scheduler_key(
     raw_key: &str,
     now: DateTime<Utc>,
 ) -> Option<AuthenticatedSchedulerKey> {
+    if raw_key.is_empty() {
+        return None;
+    }
     let digest: [u8; 32] = Sha256::digest(raw_key.as_bytes()).into();
     let mut matches = Vec::new();
 
@@ -462,6 +468,37 @@ mod tests {
             identify_basic_key(&keyring, old, now("2001-01-01T00:00:00Z")).is_none(),
             "expired key must not authenticate"
         );
+    }
+
+    #[test]
+    fn empty_presented_key_is_always_rejected() {
+        let empty_digest = hex::encode(Sha256::digest(b""));
+        let basic_json = serde_json::json!({
+            "worker-a": {
+                "keys": [{
+                    "key_id": "misconfigured-empty",
+                    "sha256": empty_digest,
+                    "expires_at": "2099-01-01T00:00:00Z"
+                }]
+            }
+        });
+        let basic = parse_basic_keyring_json(&basic_json.to_string(), "worker").unwrap();
+        assert!(identify_basic_key(&basic, "", now("2098-01-01T00:00:00Z")).is_none());
+
+        let scheduler_json = serde_json::json!({
+            "scheduler-a": {
+                "keys": [{
+                    "key_id": "misconfigured-empty",
+                    "sha256": hex::encode(Sha256::digest(b"")),
+                    "expires_at": "2099-01-01T00:00:00Z"
+                }],
+                "franchise_ids": [11],
+                "target_worker_ids": ["worker-a"],
+                "can_reconcile": false
+            }
+        });
+        let scheduler = parse_scheduler_keyring_json(&scheduler_json.to_string()).unwrap();
+        assert!(identify_scheduler_key(&scheduler, "", now("2098-01-01T00:00:00Z")).is_none());
     }
 
     #[test]
