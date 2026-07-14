@@ -51,18 +51,57 @@ def test_https_transport_builds_a_mutual_tls_context(monkeypatch):
     assert context.loaded == ("worker.crt", "worker.key")
 
 
+def test_production_https_uses_system_trust_without_client_cert(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, *, timeout):
+        captured.update(url=request.full_url, timeout=timeout)
+        return "response"
+
+    monkeypatch.setenv("DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(api_transport.urllib.request, "urlopen", fake_urlopen)
+    profile = api_transport.HttpsTransportProfile.from_env(
+        "WORKER_API", default_timeout_seconds=30
+    )
+    response = profile.open(
+        urllib.request.Request("https://grades-api-dev.tutoringclub.com/livez")
+    )
+    assert response == "response"
+    assert captured == {
+        "url": "https://grades-api-dev.tutoringclub.com/livez",
+        "timeout": 30,
+    }
+    assert profile.ssl_context() is None
+
+
+def test_custom_ca_is_optional(monkeypatch):
+    context = _FakeContext()
+    captured = {}
+
+    def fake_create_default_context(*, cafile=None):
+        captured["cafile"] = cafile
+        return context
+
+    monkeypatch.setenv("GRADE_API_CA_FILE", "private-ca.pem")
+    monkeypatch.setattr(api_transport.ssl, "create_default_context", fake_create_default_context)
+
+    profile = api_transport.HttpsTransportProfile.from_env(
+        "GRADE_API", default_timeout_seconds=20
+    )
+
+    assert profile.ssl_context() is context
+    assert captured == {"cafile": "private-ca.pem"}
+    assert context.loaded is None
+
+
 @pytest.mark.parametrize(
     "values",
     [
-        {"GRADE_API_CA_FILE": "ca.pem"},
         {"GRADE_API_CLIENT_CERT_FILE": "client.crt"},
-        {
-            "GRADE_API_CLIENT_CERT_FILE": "client.crt",
-            "GRADE_API_CLIENT_KEY_FILE": "client.key",
-        },
+        {"GRADE_API_CLIENT_KEY_FILE": "client.key"},
     ],
 )
-def test_https_transport_rejects_partial_tls_configuration(monkeypatch, values):
+def test_optional_client_cert_requires_complete_pair(monkeypatch, values):
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
@@ -72,7 +111,26 @@ def test_https_transport_rejects_partial_tls_configuration(monkeypatch, values):
         )
 
 
-def test_production_transport_requires_https_and_mutual_tls(monkeypatch):
+def test_optional_client_cert_pair_works_without_custom_ca(monkeypatch):
+    context = _FakeContext()
+
+    monkeypatch.setenv("GRADE_API_CLIENT_CERT_FILE", "client.crt")
+    monkeypatch.setenv("GRADE_API_CLIENT_KEY_FILE", "client.key")
+    monkeypatch.setattr(
+        api_transport.ssl,
+        "create_default_context",
+        lambda *, cafile=None: context,
+    )
+
+    profile = api_transport.HttpsTransportProfile.from_env(
+        "GRADE_API", default_timeout_seconds=20
+    )
+
+    assert profile.ssl_context() is context
+    assert context.loaded == ("client.crt", "client.key")
+
+
+def test_production_rejects_http(monkeypatch):
     monkeypatch.setenv("DEPLOYMENT_ENV", "production")
     profile = api_transport.HttpsTransportProfile.from_env(
         "GRADE_API", default_timeout_seconds=20
@@ -80,9 +138,6 @@ def test_production_transport_requires_https_and_mutual_tls(monkeypatch):
 
     with pytest.raises(api_transport.TransportConfigError):
         profile.open(urllib.request.Request("http://127.0.0.1:3000/livez"))
-
-    with pytest.raises(api_transport.TransportConfigError):
-        profile.open(urllib.request.Request("https://api.internal/livez"))
 
 
 @pytest.mark.parametrize("value", ["0", "0.9", "121", "not-a-number"])

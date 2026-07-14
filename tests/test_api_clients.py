@@ -108,7 +108,8 @@ def test_dashboard_signature_binds_the_user_nonce_and_body(monkeypatch):
 
 
 def test_dashboard_request_raises_safe_error(monkeypatch):
-    def fake_urlopen(_request, _timeout):
+    def fake_urlopen(_request, *, timeout):
+        assert timeout == 20
         raise HTTPError(
             url="http://api.local/api/students",
             code=503,
@@ -166,6 +167,49 @@ def test_worker_client_adds_bearer_auth_and_claims_without_a_body(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer worker-secret"
     assert captured["body"] is None
     assert captured["timeout"] == 30
+
+
+def test_api_keys_are_headers_not_query_parameters(monkeypatch):
+    captured = []
+
+    def fake_urlopen(request, timeout):
+        captured.append(
+            {
+                "url": request.full_url,
+                "headers": dict(request.header_items()),
+                "timeout": timeout,
+            }
+        )
+        if request.full_url.endswith("/api/worker/jobs/claim"):
+            return _FakeHTTPResponse(
+                {
+                    "job_id": "job-1",
+                    "lease_token": LEASE_TOKEN,
+                    "lease_expires_at": "2030-01-01T00:05:00Z",
+                }
+            )
+        return _FakeHTTPResponse({"ok": True})
+
+    monkeypatch.setenv("GRADE_API_BASE_URL", "http://api.local:3000")
+    monkeypatch.setenv("WORKER_API_KEY", "worker-secret")
+    monkeypatch.setenv("WORKER_ID", "worker-test")
+    monkeypatch.setenv("SESSION_HMAC_SECRET", "dashboard-secret")
+    monkeypatch.setattr(worker_api.urllib.request, "urlopen", fake_urlopen)
+
+    worker_api.claim_job()
+    api_client.request_json(
+        "GET",
+        "/api/students",
+        scope=api_client.ApiScope(franchise_id=11, role=2, user="alice"),
+    )
+
+    assert len(captured) == 2
+    assert captured[0]["headers"]["Authorization"] == "Bearer worker-secret"
+    assert captured[1]["headers"]["X-api-signature"]
+    for request in captured:
+        assert "worker-secret" not in request["url"]
+        assert "dashboard-secret" not in request["url"]
+        assert "?" not in request["url"]
 
 
 def test_worker_artifact_client_builds_only_canonical_payloads(monkeypatch):
