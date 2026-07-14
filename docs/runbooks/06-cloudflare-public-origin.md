@@ -1,42 +1,42 @@
-# Cloudflare public-origin runbook
+# Cloudflare frontend and API DNS runbook
 
 ## Status and prerequisites
 
-This is a manual console checklist. Codex has not changed Cloudflare, AWS,
-public DNS, a certificate, or a security group. Complete the private API and
-frontend-to-API acceptance checks first. The public frontend origin is the only
-Cloudflare record in this architecture; never add
-`grades-api.tutoringclub.com` to public DNS or Cloudflare.
+This is a manual console checklist. Codex has not changed Cloudflare, AWS, DNS,
+certificates, or security groups. Complete API-first validation in runbooks 01,
+04, and 07 before the frontend cutover.
 
-The frontend Ubuntu instance must already have its role-only release, Nginx,
-root-owned Cloudflare Origin Certificate/key, loopback Gunicorn service, and
-the generated trusted-range include. Confirm the API instance remains private
-and separate.
+Only the frontend is Cloudflare-proxied. The developer API name is public
+DNS-only so AWS sees the developer's real source IP; the EC2 API name remains
+private Route 53 only.
 
-## Cloudflare DNS and TLS
+## DNS records and TLS
 
-In the zone for `tutoringclub.com`:
+In the authoritative zones:
 
-1. Create or update the frontend hostname (for example
-   `grades.tutoringclub.com`) to the frontend origin address. Set Proxy status
-   to **Proxied**. Do not reuse the private API hostname.
-2. Under **SSL/TLS > Origin Server**, create a Cloudflare Origin Certificate
-   whose hostname exactly includes the frontend hostname. Install its chain and
-   private key at the paths in `deploy/frontend/nginx/grade-frontend.conf` with
-   the key root-owned and mode `0600`. Do not put it in the release archive.
-3. Under **SSL/TLS > Overview**, select **Full (strict)**. Do not use Flexible
-   or non-strict Full mode.
-4. Leave the API record absent. Verify public DNS answers for the API hostname
-   are `NXDOMAIN` while the VPC private resolver returns the API private
-   address.
+1. Create/update the frontend hostname, for example
+   `grades.tutoringclub.com`, to the frontend origin and set Cloudflare Proxy
+   status to **Proxied**.
+2. Install a Cloudflare Origin Certificate valid for the frontend hostname at
+   the paths in `deploy/frontend/nginx/grade-frontend.conf`; keep the key
+   root-owned mode `0600` and out of release archives.
+3. Select Cloudflare **Full (strict)**. Never use Flexible or non-strict Full.
+4. Keep `grades-api.tutoringclub.com` absent from public DNS/Cloudflare. Its
+   private Route 53 record resolves to the API private address only in the VPC.
+5. Create `grades-api-dev.tutoringclub.com` as a public A record to the API EIP
+   with Proxy status **DNS only** (gray cloud) if Cloudflare is authoritative.
+   Never proxy it. The API server certificate must validate this hostname with
+   normal system trust.
 
-Before changing AWS ingress, request the frontend through Cloudflare and verify
-certificate hostname/chain, redirect behavior, CSP/security headers, login,
-and the signed private API call.
+Confirm an EC2 caller resolves the private name/private address, an approved
+developer resolves the developer name/EIP, and an unrelated public resolver
+cannot resolve the private name. DNS resolution alone does not grant access;
+the API security group still limits TCP 443 to the two trusted security groups
+and four developer `/32`s.
 
-## Cloudflare Free rate-limit rule
+## Frontend Cloudflare rate-limit rule
 
-Create one rate-limiting rule for the login path with these exact settings:
+Create one login rule:
 
 - Expression: `(http.request.uri.path eq "/login")`
 - Counting characteristic: **IP**
@@ -45,51 +45,44 @@ Create one rate-limiting rule for the login path with these exact settings:
 - Action: **Block**
 - Mitigation timeout: **1 minute**
 
-The application accepts only `POST /login` credentials; the edge path rule may
-also count GETs because the approved Free-plan rule is path/IP scoped. Nginx
-independently limits only `POST /login` at 30 requests/minute with burst 10.
-Flask continues to block after five failed attempts for the real
-IP+normalized-username pair over five minutes.
+Nginx independently limits `POST /login` at 30 requests/minute with burst 10.
+Flask blocks five failed attempts for the restored IP plus normalized username
+over five minutes. Record rule ID, expression, threshold, operator, and date.
+In a controlled test, the 31st request must be blocked and normal use must
+recover after the window.
 
-Record the deployed rule ID, expression, characteristic, threshold, period,
-action, timeout, and operator/date. In a controlled test, the 31st request in a
-minute must be blocked at the edge. Depending on the Cloudflare response path,
-record the observed HTTP 429 and Cloudflare 1015 page/event. A normal login
-from an office/NAT address must still succeed after the one-minute window.
+## Real client IP and frontend origin restriction
 
-## Real client IP and origin restriction
+Install `deploy/frontend/bin/update-cloudflare-ranges` plus its systemd service/
+timer. It downloads Cloudflare's authenticated range response, validates each
+CIDR, writes `set_real_ip_from` directives, runs `nginx -t`, restores on
+failure, and reloads only after success.
 
-Install `deploy/frontend/bin/update-cloudflare-ranges` and its systemd service/
-timer. The script downloads Cloudflare's authenticated IP API response,
-validates every CIDR with Python's `ipaddress`, writes `set_real_ip_from`
-directives plus `real_ip_header CF-Connecting-IP`, runs `nginx -t`, restores
-the prior include on failure, and reloads Nginx only after success.
+Run once during staging, inspect output, then enable daily. Alert on failure.
+Separately reconcile frontend AWS ingress with the same ranges as one reviewed
+change. A direct client cannot forge trusted `CF-Connecting-IP`: the frontend
+security group accepts origin 443 only from Cloudflare ranges and Nginx trusts
+that header only from those sources.
 
-Run it once manually during staging, inspect the generated file, then enable
-the daily timer. Alert on service failure. The script changes Nginx trust only;
-an operator must separately reconcile the frontend AWS security-group ingress
-with the same current Cloudflare IPv4/IPv6 ranges. Review additions and
-removals, apply them as one controlled change, and rerun direct-origin tests.
-
-Nginx proxies `$remote_addr` after trusted-source restoration and Flask trusts
-exactly the one loopback Nginx hop. A direct client cannot supply a trusted
-`CF-Connecting-IP` because the security group accepts public 443 only from
-Cloudflare ranges and Nginx trusts the header only from those sources.
+Do not apply Cloudflare range rules or `CF-Connecting-IP` restoration to the
+API. The developer API record is DNS-only, Nginx sees the direct source, and the
+AWS `/32` rule remains authoritative at the network layer.
 
 ## Acceptance and rollback
 
-- Through Cloudflare: login GET/POST, secure cookie, local JS/CSS/font assets,
-  strict nonce CSP, manual refresh, and logout succeed.
-- Direct to the origin IP with an arbitrary Host header: TCP is rejected by the
-  security group. Test from an unrelated public host.
-- Repeated POSTs: Nginx returns 429 at its threshold; edge events show the
-  Cloudflare block; Flask's five-failure control still keys on the restored
-  address plus normalized username.
-- Browser developer tools show no CDN asset requests, credentials, HMACs,
-  bearer tokens, private API calls, or mixed content.
+- Frontend through Cloudflare: login GET/POST, secure cookie, local assets,
+  strict nonce CSP, refresh, and logout succeed.
+- Direct frontend origin: TCP is rejected from an unrelated host.
+- Frontend repeated POSTs: Nginx/Cloudflare limits trigger as approved; Flask
+  still keys failures on the restored client address.
+- API private hostname: works from frontend/Windows private paths and is absent
+  from public DNS.
+- API developer hostname: works from each recorded developer `/32`, is not
+  Cloudflare-proxied, and TCP is rejected from an unrelated public source.
+- Browser developer tools expose no API keys/HMACs, private API calls, database
+  credentials, leases, or mixed content.
 
-If cutover fails, revert only the frontend DNS proxy/origin setting and
-frontend release/Nginx artifact. Keep the API private. Restore the last known
-Cloudflare range include if range validation failed. Rotate the Origin
-Certificate or frontend client certificate only when its key may have been
-exposed; do not copy API/database secrets to diagnose the frontend.
+If frontend cutover fails, revert only frontend DNS proxy/origin settings and
+frontend release/Nginx. Do not broaden API ingress. If developer API DNS fails,
+restore its last DNS-only EIP record; never switch it to Proxied as a shortcut.
+Rotate a certificate only if its private key may have been exposed.

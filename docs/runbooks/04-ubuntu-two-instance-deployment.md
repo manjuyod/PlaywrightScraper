@@ -1,57 +1,58 @@
 # Ubuntu two-instance deployment runbook
 
-## Status and invariants
+## Status, prerequisites, and invariants
 
-The repository artifacts are code-complete for local review. No AWS, DNS,
-Cloudflare, certificate, Secrets Manager, service, or database action described
-here has been applied by Codex. An operator performs every command after
-substituting locally approved values.
+No AWS, DNS, Cloudflare, certificate, Secrets Manager, service, migration, or
+database action here has been applied by Codex. An operator substitutes values
+from the private inventory in runbook 01 and records approvals, release
+checksum, secret versions, validation evidence, and rollback owner.
 
-Production always uses two different Ubuntu 24.04 EC2 instances:
+Production uses two different Ubuntu 24.04 EC2 instances in one `us-west-2`
+VPC:
 
 ```text
 Cloudflare -> frontend Nginx -> Gunicorn/Flask on 127.0.0.1:8080
                                   |
-                                  +-> private DNS + mTLS
-                                      -> API Nginx -> Axum on 127.0.0.1:3000
+                                  +-> private DNS + HTTPS + HMAC
+                                      -> API Nginx -> Axum 127.0.0.1:3000
 
-Windows worker/scheduler ----------- private DNS + role mTLS ----------^
+Windows worker/scheduler ---------- private DNS + HTTPS + API keys ---^
+Allowlisted local uv worker ------- API EIP + DNS-only + API keys -----^
 ```
 
-Never install the Flask release or database credentials on the API instance.
-Never install the Axum binary, CRM/Neon credentials, readiness token, worker
-token maps, or encryption keys on the frontend instance. The validation script
-in `deploy/bin/validate-role-env` fails startup when those inventories cross.
+The API private address serves EC2 callers; its EIP exists for four allowlisted
+developer `/32`s. Nginx server TLS and Axum keyrings are required. Client
+certificates are optional compatibility only. Never install Flask, frontend
+session material, or Cloudflare origin keys on the API. Never install Axum,
+CRM/Neon credentials, API keyrings, readiness keys, or encryption keys on the
+frontend. `deploy/bin/validate-role-env` rejects crossed inventories.
 
 ## Build and release artifacts
 
-Build on a clean, trusted build host. Produce two archives and a SHA-256 file
-for each archive:
+Build on a clean trusted Linux host. Produce and review:
 
-- `api-VERSION.tar.gz`: release-mode Linux `api` and dry-run-default backfill
-  binaries plus migrations. The backfill binary is never installed on frontend.
-- `frontend-VERSION.tar.gz`: application Python, `api_transport.py`, static
-  assets, templates, `uv.lock`, and an offline-created virtual environment.
-  It must not contain `api/target`, `.env`, database utilities, test output, or
-  runtime caches.
+- `api-VERSION.tar.gz`: release Axum/backfill binaries and migrations. The
+  backfill binary is never installed on frontend.
+- `frontend-VERSION.tar.gz`: application Python, transport, static assets,
+  templates, lockfile, and approved offline environment.
+- One SHA-256 file per archive.
 
-Review each archive listing before transfer. Generate checksums with
-`sha256sum ARCHIVE > ARCHIVE.sha256` and transfer the archive/checksum through
-the approved release channel. The root-run `deploy/bin/install-release` script
-verifies the checksum, extracts into an immutable version directory, retains a
-`previous` link, atomically changes `current`, and restarts only that role.
+Neither archive may contain `.env`, private keys, database utilities, runtime
+caches, test output, or `api/target`. Use
+`deploy/bin/build-release-artifacts VERSION OUTPUT_DIRECTORY`; inspect archive
+listings before transfer. `deploy/bin/install-release` verifies the checksum,
+extracts an immutable version, preserves `previous`, switches `current`
+atomically, and restarts only the selected role.
 
 ## One-time host preparation
 
-On the API instance, create the `grade-api` system user with no login shell and
-install only Nginx, CA certificates, the Axum runtime artifact, CloudWatch/SSM
-agents, and operating-system tooling. On the frontend instance, create the
-`grade-frontend` system user and install Nginx, the pinned Python runtime, and
-the frontend virtual environment. Do not install Flask on the API host.
+On API, create non-login user `grade-api`; install only Nginx, CA certificates,
+the API runtime artifact, SSM/CloudWatch agents, and approved OS tooling. On
+frontend, create `grade-frontend`; install Nginx, pinned Python, and its virtual
+environment. SSM Session Manager is the administrative path; do not open
+standing SSH/RDP.
 
-Stage the repository files as follows:
-
-| Source | API host destination | Frontend host destination |
+| Source | API destination | Frontend destination |
 |---|---|---|
 | `deploy/api/systemd/grade-api.service` | `/etc/systemd/system/grade-api.service` | — |
 | `deploy/frontend/systemd/grade-frontend.service` | — | `/etc/systemd/system/grade-frontend.service` |
@@ -60,53 +61,76 @@ Stage the repository files as follows:
 | role logrotate file | `/etc/logrotate.d/grade-api` | `/etc/logrotate.d/grade-frontend` |
 | `deploy/bin/validate-role-env` | `/usr/local/lib/grade-boundary/validate-role-env` | same |
 
-The service units and validation script must be root-owned and not group/world
-writable. Stage `/etc/grade-api/api.env` and
-`/etc/grade-frontend/frontend.env` from the matching examples with owner
-`root:root` and mode `0600`. Retrieve only the role's values from its own
-Secrets Manager path immediately before writing the file; do not print values,
-put them in shell history, user data, AMIs, or release archives.
+Service units and validators are root-owned and not group/world writable.
+Stage `/etc/grade-api/api.env` and `/etc/grade-frontend/frontend.env` from the
+matching examples as `root:root` mode `0600`. Retrieve only that role's current
+Secrets Manager version immediately before staging. Never print values or put
+them in user data, AMIs, shell history, release archives, or logs.
 
-Stage private keys as root-owned mode `0600` and certificates/CA/CRL files as
-root-owned mode `0644`. Grant the Nginx worker group only the minimum traversal
-and read access needed for its own key. Frontend client mTLS files are readable
-by `grade-frontend` but never by other unprivileged users.
+Install an API server certificate/key valid for both API hostnames at the Nginx
+template paths. The private hostname and public developer hostname must verify
+with normal system trust. Keys are root-owned mode `0600`; public chains may be
+`0644`. Optional client certificate/key pairs are installed only under an
+approved compatibility change and never replace Axum keys.
 
-## Validation and activation
+## API-first activation
 
-Before activation, manually run the relevant validator through a root-owned
-environment staging mechanism, run `nginx -t`, and run
+Before each activation, run the role validator through a root-owned environment
+staging mechanism, `nginx -t`, and
 `systemd-analyze security grade-api.service` or
 `systemd-analyze security grade-frontend.service`. Review every relaxation.
 
-Activate the API role first. Confirm locally that `ss -lntp` shows Axum only at
-`127.0.0.1:3000`; Nginx may listen on private port 443. From an allowed client
-host, verify:
+Deploy in this exact order:
 
-1. no certificate, an unknown CA, a revoked leaf, an expired leaf, and a
-   wrong-role leaf all fail;
-2. `GET /livez` with the correct role certificate returns only `{"status":"ok"}`;
-3. `GET /readyz` additionally requires the readiness bearer token and returns
-   only `ready` or `not_ready`;
-4. the private hostname verifies as `grades-api.tutoringclub.com`;
-5. the API private address is unreachable from the internet and unrelated VPC
-   security groups.
+1. **API.** Apply migrations only after legacy active jobs are drained. Start
+   Axum and Nginx. Confirm `ss -lntp` shows Axum only on `127.0.0.1:3000` and
+   Nginx on 443. Verify both hostnames, `/livez`, key-protected `/readyz`, 401
+   for missing/wrong keys, 404 for unknown routes, 413 for bodies over 1 MiB,
+   and 429 at the Nginx limit. Run the runbook-01 network matrix.
+2. **Local `uv` proof.** From one allowlisted developer `/32`, run runbook 07
+   with a scoped scheduler/worker key pair and one authorized franchise. Prove
+   exact target claim, canonical CRM context, one production Neon result,
+   idempotent retry, cleanup, and revocation/rollback behavior.
+3. **Production Windows worker.** Stage its role-only raw keys and explicit
+   `WINDOWS_TARGET_WORKER_ID`; run one targeted enqueue/claim/result proof via
+   private DNS before enabling scheduled tasks.
+4. **Frontend.** Start Gunicorn only on `127.0.0.1:8080`. Confirm the archive
+   has no database/worker secrets and a signed request reaches private API DNS.
+   Only then perform the Cloudflare frontend cutover in runbook 06.
 
-Then activate the frontend role. Confirm Gunicorn listens only on
-`127.0.0.1:8080`, the frontend archive has no API/database secrets, and a
-signed Flask request reaches the private API through its frontend-role client
-certificate. Do not configure the public Cloudflare record until all private
-checks pass.
+At every stage, verify the frontend cannot invoke worker routes and workers do
+not possess frontend session material. CRM/Neon must accept API-host traffic
+and reject direct worker/developer paths.
 
-## Release rollback
+## Quiesced API rollback
 
-Stop Windows scheduled tasks before an API rollback and allow active leases to
-expire. Run `rollback-release api` on the API host or
-`rollback-release frontend` on the frontend host; each changes only that
-role's `current`/`previous` links. Re-run the private synthetic checks after a
-rollback. Keep additive database schema in place and never perform destructive
-incident-time migration rollback.
+Rollback is not a live binary swap when target-worker contracts or migration
+007 may differ.
 
-If a release changes a cross-role contract, retain compatible API and frontend
-artifacts until both roles are verified. Restore the API before resuming the
-Windows tasks.
+1. Disable Windows/local schedulers and frontend manual enqueue.
+2. Stop new claims. Drain safely finishable jobs; cancel remaining queued jobs
+   through the operator API. Wait for or deliberately fail running leases.
+3. Prove zero `queued`/`running` rows. Capture database backup/recovery point,
+   release/checksum, Nginx config, API secret version IDs, and operator/time.
+4. Restore previous API binary and Nginx configuration. Restore an isolated
+   legacy secret version only if the previous binary requires it and the
+   incident owner approves.
+5. If the previous binary cannot read migration 007, run the reviewed
+   `deploy/api/rollback/007_target_worker_jobs.sql` only after the zero-active
+   proof. It refuses rollback while active rows exist.
+6. Repeat positive/negative network, TLS, auth, unknown-route, and database-path
+   matrices before resuming traffic.
+7. Resume in API -> local proof -> Windows -> frontend order. Delete the legacy
+   raw-token secret version after the approved rollback window.
+
+Frontend-only rollback may switch its own `current`/`previous` link without an
+API schema change, but still reruns signed-request and direct-origin checks.
+Never perform unreviewed destructive incident-time SQL.
+
+## Required alarms
+
+Before enabling schedules, alarms must cover security-group ingress mutation,
+old targeted queued jobs, expired/repeated leases, worker abandonment, service
+restart loops, Nginx TLS/429 spikes, API 401/403/409/503 rates, readiness,
+certificate/key expiry, clock drift, disk, CPU, and memory. Keep API/frontend
+release and rollback alarms independent.
