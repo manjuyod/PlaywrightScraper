@@ -40,3 +40,18 @@ def test_release_builder_creates_separate_api_and_frontend_archives():
     assert 'stage/api' in builder
     assert 'stage/frontend' in builder
     assert "sha256sum" in builder
+
+
+def test_rust_ci_runs_targeted_postgres_lifecycle_tests():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    rust_job = workflow.split("  rust:", 1)[1].split("\n  frontend:", 1)[0]
+
+    assert "services:" in rust_job
+    assert "image: postgres:16-alpine" in rust_job
+    assert (
+        "DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres"
+        in rust_job
+    )
+    assert "cargo test --test targeted_jobs_postgres --locked" in rust_job

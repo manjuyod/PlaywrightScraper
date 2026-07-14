@@ -473,6 +473,7 @@ pub async fn manual_pull(
         franchise_id,
         scoped_role(&claims),
         claims.user.as_deref(),
+        &state.config.default_worker_id,
     )
     .await?;
     Ok(Json(created))

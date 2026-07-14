@@ -195,12 +195,13 @@ INSERT INTO grade_scrape_jobs (
     kind,
     franchise_id,
     student_id,
+    target_worker_id,
     status,
     created_by_user,
     created_by_role,
     created_by_franchise_id,
     payload
-) VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7::jsonb)
+) VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7, $8::jsonb)
 RETURNING id
 "#;
 
@@ -216,6 +217,7 @@ INSERT INTO grade_scrape_jobs (
     kind,
     franchise_id,
     student_id,
+    target_worker_id,
     status,
     created_by_user,
     created_by_franchise_id,
@@ -223,7 +225,7 @@ INSERT INTO grade_scrape_jobs (
     scheduler_idempotency_key,
     scheduler_request_hash,
     payload
-) VALUES ($1, $2, $3, 'queued', $4, $2, $4, $5, $6, '{}'::jsonb)
+) VALUES ($1, $2, $3, $4, 'queued', $5, $2, $5, $6, $7, '{}'::jsonb)
 ON CONFLICT (scheduler_identity, scheduler_idempotency_key)
     WHERE scheduler_identity IS NOT NULL
       AND scheduler_idempotency_key IS NOT NULL
@@ -235,7 +237,8 @@ const QUERY_CLAIM_NEXT_JOB: &str = r#"
 WITH cleanup_candidate AS (
     SELECT id
     FROM grade_scrape_jobs
-    WHERE status = 'running'
+    WHERE target_worker_id = $1
+      AND status = 'running'
       AND COALESCE(attempt_count, 0) >= 3
       AND (lease_expires_at IS NULL OR lease_expires_at <= NOW())
     ORDER BY created_at
@@ -256,14 +259,15 @@ expired_exhausted AS (
 candidate AS (
     SELECT jobs.id
     FROM grade_scrape_jobs AS jobs
-    WHERE (
-        jobs.status = 'queued'
-        OR (
-            jobs.status = 'running'
-            AND (jobs.lease_expires_at IS NULL OR jobs.lease_expires_at <= NOW())
-            AND COALESCE(jobs.attempt_count, 0) < 3
-        )
-    )
+    WHERE jobs.target_worker_id = $1
+      AND (
+          jobs.status = 'queued'
+          OR (
+              jobs.status = 'running'
+              AND (jobs.lease_expires_at IS NULL OR jobs.lease_expires_at <= NOW())
+              AND COALESCE(jobs.attempt_count, 0) < 3
+          )
+      )
       AND NOT EXISTS (
           SELECT 1
           FROM expired_exhausted
@@ -301,6 +305,7 @@ SELECT
     status,
     franchise_id,
     student_id,
+    target_worker_id,
     worker_id,
     heartbeat,
     completed_payload,
@@ -321,6 +326,7 @@ SELECT
     status,
     franchise_id,
     student_id,
+    target_worker_id,
     worker_id,
     heartbeat,
     completed_payload,
@@ -340,6 +346,7 @@ SELECT
     status,
     franchise_id,
     student_id,
+    target_worker_id,
     worker_id,
     heartbeat,
     completed_payload,
@@ -437,7 +444,7 @@ FOR UPDATE
 "#;
 
 const QUERY_EXISTING_RESULT_PAYLOAD: &str = r#"
-SELECT payload
+SELECT crmstudentid, payload
 FROM grade_scrape_results
 WHERE job_id = $1 AND idempotency_key = $2
 "#;
@@ -553,6 +560,7 @@ pub async fn create_manual_pull_job(
     franchise_id: i32,
     role: Option<i32>,
     user: Option<&str>,
+    target_worker_id: &str,
 ) -> Result<ManualPullResponse, ApiError> {
     let kind = payload.kind.as_deref().unwrap_or("grade").trim();
     if kind.is_empty() || !matches!(kind, "grade" | "agenda") {
@@ -588,6 +596,7 @@ pub async fn create_manual_pull_job(
         .bind(kind)
         .bind(franchise_id)
         .bind(payload.student_id)
+        .bind(target_worker_id)
         .bind(created_by)
         .bind(role)
         .bind(franchise_id)
@@ -595,6 +604,7 @@ pub async fn create_manual_pull_job(
             "kind": kind,
             "student_id": payload.student_id,
             "franchise_id": franchise_id,
+            "target_worker_id": target_worker_id,
         }))
         .fetch_one(&mut *tx)
         .await?;
@@ -640,6 +650,7 @@ pub async fn create_scheduler_job(
                 .bind(payload.kind.as_str())
                 .bind(payload.franchise_id)
                 .bind(payload.student_id)
+                .bind(&payload.target_worker_id)
                 .bind(scheduler_id)
                 .bind(payload.idempotency_key)
                 .bind(request_hash.as_slice())
@@ -805,14 +816,24 @@ pub async fn record_worker_result(
         .await?;
 
     if inserted.is_none() {
-        let existing_payload: Option<serde_json::Value> =
-            query_scalar(QUERY_EXISTING_RESULT_PAYLOAD)
+        let existing: Option<(Option<i64>, serde_json::Value)> =
+            query_as(QUERY_EXISTING_RESULT_PAYLOAD)
                 .bind(job_id)
                 .bind(payload.idempotency_key)
                 .fetch_optional(&mut *tx)
                 .await?;
-        let existing_payload = existing_payload.ok_or(ApiError::NotFound)?;
-        duplicate_result_payload_decision(&existing_payload, &canonical_payload)?;
+        let (existing_student_id, existing_payload) = existing.ok_or(ApiError::NotFound)?;
+        let existing_student_id = existing_student_id.ok_or_else(|| {
+            ApiError::Conflict(
+                "Idempotency key was already used for a result without a student identity".into(),
+            )
+        })?;
+        duplicate_result_identity_decision(
+            existing_student_id,
+            &existing_payload,
+            payload.crmstudentid(),
+            &canonical_payload,
+        )?;
         tx.commit().await?;
         return Ok(());
     }
@@ -905,11 +926,13 @@ fn require_job_mutation(rows_affected: u64) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn duplicate_result_payload_decision(
+fn duplicate_result_identity_decision(
+    existing_student_id: i64,
     existing_payload: &serde_json::Value,
+    requested_student_id: i64,
     incoming_payload: &serde_json::Value,
 ) -> Result<(), ApiError> {
-    if existing_payload == incoming_payload {
+    if existing_student_id == requested_student_id && existing_payload == incoming_payload {
         Ok(())
     } else {
         Err(ApiError::Conflict(
@@ -939,12 +962,17 @@ pub async fn latest_results(
 #[cfg(test)]
 mod tests {
     use super::{
-        attempt_is_exhausted, duplicate_result_payload_decision, require_job_mutation,
+        attempt_is_exhausted, duplicate_result_identity_decision, require_job_mutation,
         require_state_row_updated, QUERY_CLAIM_DASHBOARD_NONCE, QUERY_CLAIM_NEXT_JOB,
-        QUERY_CLEANUP_DASHBOARD_NONCES, QUERY_COMPLETE, QUERY_CREATE_SCHEDULER_JOB, QUERY_FAIL,
-        QUERY_FIND_SCHEDULER_JOB, QUERY_HEARTBEAT, QUERY_INSERT_EVENT, QUERY_LOCK_ACTIVE_LEASE,
-        QUERY_RECONCILE_CREATE_STATE, QUERY_RECONCILE_DELETE_STATE,
+        QUERY_CLEANUP_DASHBOARD_NONCES, QUERY_COMPLETE, QUERY_CREATE_JOB,
+        QUERY_CREATE_SCHEDULER_JOB, QUERY_FAIL, QUERY_FIND_SCHEDULER_JOB, QUERY_HEARTBEAT,
+        QUERY_INSERT_EVENT, QUERY_LOCK_ACTIVE_LEASE, QUERY_RECONCILE_CREATE_STATE,
+        QUERY_RECONCILE_DELETE_STATE,
     };
+
+    fn normalized_sql(value: &str) -> String {
+        value.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
 
     #[test]
     fn applying_result_state_requires_an_existing_state_row() {
@@ -993,6 +1021,8 @@ mod tests {
         }
         assert!(QUERY_INSERT_EVENT.contains("WITH active_worker_lease AS"));
         assert!(QUERY_INSERT_EVENT.contains("FOR UPDATE"));
+        assert!(QUERY_CLAIM_NEXT_JOB.contains("target_worker_id = $1"));
+        assert!(QUERY_CREATE_SCHEDULER_JOB.contains("target_worker_id"));
     }
 
     #[test]
@@ -1018,14 +1048,66 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_lookup_stays_identity_and_idempotency_only() {
+        let sql = normalized_sql(QUERY_FIND_SCHEDULER_JOB);
+        assert!(sql.contains("WHERE scheduler_identity = $1 AND scheduler_idempotency_key = $2"));
+        assert!(!sql.contains("target_worker_id"));
+    }
+
+    #[test]
+    fn scheduler_insert_persists_target_worker() {
+        let sql = normalized_sql(QUERY_CREATE_SCHEDULER_JOB);
+        assert!(sql.contains("kind, franchise_id, student_id, target_worker_id, status"));
+        assert!(sql.contains("VALUES ($1, $2, $3, $4, 'queued'"));
+    }
+
+    #[test]
+    fn manual_insert_persists_default_target() {
+        let sql = normalized_sql(QUERY_CREATE_JOB);
+        assert!(sql.contains("kind, franchise_id, student_id, target_worker_id, status"));
+        assert!(sql.contains("VALUES ($1, $2, $3, $4, 'queued'"));
+    }
+
+    #[test]
+    fn claim_filters_authenticated_target_before_locking() {
+        let sql = normalized_sql(QUERY_CLAIM_NEXT_JOB);
+        assert!(sql.contains(
+            "candidate AS ( SELECT jobs.id FROM grade_scrape_jobs AS jobs WHERE jobs.target_worker_id = $1 AND ("
+        ));
+        let target = sql.rfind("jobs.target_worker_id = $1").unwrap();
+        let lock = sql.rfind("FOR UPDATE SKIP LOCKED").unwrap();
+        assert!(target < lock);
+    }
+
+    #[test]
+    fn claim_cleanup_cannot_mutate_another_target() {
+        let sql = normalized_sql(QUERY_CLAIM_NEXT_JOB);
+        assert!(sql.contains(
+            "cleanup_candidate AS ( SELECT id FROM grade_scrape_jobs WHERE target_worker_id = $1 AND status = 'running'"
+        ));
+        assert_eq!(sql.matches("target_worker_id = $1").count(), 2);
+    }
+
+    #[test]
     fn duplicate_result_payloads_are_idempotent_only_when_canonical_payloads_match() {
         let payload = serde_json::json!({"status": "synced", "parsed_grades": {"math": 95}});
-        assert!(duplicate_result_payload_decision(&payload, &payload).is_ok());
-        assert!(duplicate_result_payload_decision(
+        assert!(duplicate_result_identity_decision(42, &payload, 42, &payload).is_ok());
+        assert!(duplicate_result_identity_decision(
+            42,
             &payload,
+            42,
             &serde_json::json!({"status": "failed"}),
         )
         .is_err());
+    }
+
+    #[test]
+    fn result_uuid_is_bound_to_student_and_payload() {
+        let payload = serde_json::json!({"status": "synced"});
+        assert!(matches!(
+            duplicate_result_identity_decision(41, &payload, 42, &payload),
+            Err(crate::error::ApiError::Conflict(_))
+        ));
     }
 
     #[test]
