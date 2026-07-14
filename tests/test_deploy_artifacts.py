@@ -51,26 +51,120 @@ def test_role_environment_inventories_do_not_cross_the_host_boundary():
     assert "DEPLOYMENT_ENV" in validator
 
 
-def test_private_api_nginx_enforces_mtls_roles_limits_and_safe_logging():
+def test_nginx_uses_server_tls_without_client_auth():
     nginx = _text("api/nginx/grades-api.conf")
 
-    for required in (
-        "ssl_protocols TLSv1.2 TLSv1.3",
-        "ssl_verify_client on",
+    assert "listen 443 ssl;" in nginx
+    assert "listen [::]:443 ssl;" in nginx
+    assert (
+        "server_name grades-api.tutoringclub.com grades-api-dev.tutoringclub.com;"
+        in nginx
+    )
+    assert "ssl_protocols TLSv1.2 TLSv1.3;" in nginx
+    for forbidden in (
+        "ssl_verify_client",
         "ssl_client_certificate",
         "ssl_crl",
-        "client_max_body_size 1m",
-        "proxy_pass http://127.0.0.1:3000",
         "$ssl_client_s_dn",
         "$ssl_client_serial",
-        "$uri",
+        "$mtls_role",
+        "$mtls_route_allowed",
+        "OU=frontend",
+        "OU=worker",
+        "OU=scheduler",
+        "OU=operator",
     ):
-        assert required in nginx
-    for role in ("frontend", "worker", "scheduler", "operator"):
-        assert f"OU={role}" in nginx
-        assert f"{role}:" in nginx
-    assert "$http_authorization" not in nginx.split("log_format", 1)[1].split(";", 1)[0]
-    assert "$request_body" not in nginx
+        assert forbidden not in nginx
+
+
+def test_nginx_forwards_but_never_logs_authorization():
+    nginx = _text("api/nginx/grades-api.conf")
+    log_format = nginx.split("log_format", 1)[1].split(";", 1)[0]
+
+    assert "proxy_set_header Authorization $http_authorization;" in nginx
+    for forbidden in (
+        "$http_authorization",
+        "$request_body",
+        "$args",
+        "$query_string",
+        "$ssl_client",
+        "portal_url",
+        "p2username",
+        "p2password",
+    ):
+        assert forbidden not in log_format
+
+
+def test_nginx_applies_source_ip_limit():
+    nginx = _text("api/nginx/grades-api.conf")
+
+    assert (
+        "limit_req_zone $binary_remote_addr zone=grade_api_per_ip:10m rate=600r/m;"
+        in nginx
+    )
+    assert "limit_req zone=grade_api_per_ip burst=100 nodelay;" in nginx
+    assert "limit_req_status 429;" in nginx
+
+
+def test_nginx_rejects_bodies_over_one_megabyte():
+    assert "client_max_body_size 1m;" in _text("api/nginx/grades-api.conf")
+
+
+def test_nginx_has_no_unknown_path_static_fallback():
+    nginx = _text("api/nginx/grades-api.conf")
+
+    assert "proxy_pass http://127.0.0.1:3000;" in nginx
+    assert "try_files" not in nginx
+    assert "root " not in nginx
+    assert "alias " not in nginx
+    assert "error_page 404" not in nginx
+
+
+def test_nginx_body_limit_and_unknown_paths_are_fail_closed():
+    nginx = _text("api/nginx/grades-api.conf")
+    assert "client_max_body_size 1m;" in nginx
+    assert "proxy_pass http://127.0.0.1:3000;" in nginx
+    assert "try_files" not in nginx
+    assert "root " not in nginx
+    assert "alias " not in nginx
+    assert "error_page 404" not in nginx
+
+
+def test_role_env_requires_keyrings_not_client_certificates():
+    api_env = _text("api/api.env.example")
+    frontend_env = _text("frontend/frontend.env.example")
+    windows_env = _text("windows/windows.env.example")
+    validator = _text("bin/validate-role-env")
+
+    keyrings = (
+        "WORKER_API_KEYRING_JSON",
+        "SCHEDULER_API_KEYRING_JSON",
+        "OPERATOR_API_KEYRING_JSON",
+        "READINESS_API_KEYRING_JSON",
+        "DEFAULT_WORKER_ID",
+    )
+    for name in keyrings:
+        assert name in api_env
+        assert name in validator
+    for obsolete in (
+        "WORKER_API_TOKENS_JSON",
+        "SCHEDULER_API_TOKENS_JSON",
+        "OPERATOR_API_TOKENS_JSON",
+        "READINESS_API_TOKEN",
+    ):
+        assert obsolete not in api_env
+        assert obsolete not in validator
+    assert "require_file" not in validator
+    for role_env in (frontend_env, windows_env):
+        active_lines = [
+            line.strip()
+            for line in role_env.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert all("CLIENT_CERT_FILE" not in line for line in active_lines)
+        assert all("CLIENT_KEY_FILE" not in line for line in active_lines)
+    assert "SCHEDULER_ID=" not in windows_env
+    assert "WINDOWS_TARGET_WORKER_ID=" in windows_env
 
 
 def test_release_installation_verifies_checksums_and_supports_independent_rollback():
