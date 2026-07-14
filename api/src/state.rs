@@ -10,6 +10,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::config::ApiConfig;
+use crate::crm::{CrmGateway, SqlServerCrmGateway};
 use crate::error::ApiError;
 use crate::queries;
 use crate::rate_limit::IdentityRateLimiter;
@@ -34,6 +35,7 @@ pub fn dashboard_replay_identity_hash(
 pub struct AppState {
     pub config: Arc<ApiConfig>,
     pub neon_db: PgPool,
+    pub crm: Arc<dyn CrmGateway>,
     pub rate_limiter: IdentityRateLimiter,
     #[cfg(test)]
     dashboard_replay_test_claims: Option<DashboardReplayTestClaims>,
@@ -44,14 +46,19 @@ impl AppState {
         let neon_db = PgPoolOptions::new()
             .max_connections(4)
             .connect_lazy(&config.neon_database_url)?;
+        let crm = Arc::new(SqlServerCrmGateway::new(config.crm_database_url.clone()));
+        Ok(Self::with_dependencies(config, neon_db, crm))
+    }
 
-        Ok(Self {
+    pub fn with_dependencies(config: ApiConfig, neon_db: PgPool, crm: Arc<dyn CrmGateway>) -> Self {
+        Self {
             config: Arc::new(config),
             neon_db,
+            crm,
             rate_limiter: IdentityRateLimiter::new(Duration::from_secs(60)),
             #[cfg(test)]
             dashboard_replay_test_claims: None,
-        })
+        }
     }
 
     #[cfg(test)]
@@ -59,10 +66,12 @@ impl AppState {
         let neon_db = PgPoolOptions::new()
             .max_connections(1)
             .connect_lazy(&config.neon_database_url)?;
+        let crm = Arc::new(SqlServerCrmGateway::new(config.crm_database_url.clone()));
 
         Ok(Self {
             config: Arc::new(config),
             neon_db,
+            crm,
             rate_limiter: IdentityRateLimiter::new(Duration::from_secs(60)),
             dashboard_replay_test_claims: Some(Arc::new(Mutex::new(HashSet::new()))),
         })

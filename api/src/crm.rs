@@ -7,6 +7,46 @@ use crate::models::CrmStudent;
 
 type SqlClient = Client<Compat<TcpStream>>;
 
+#[async_trait::async_trait]
+pub trait CrmGateway: Send + Sync {
+    async fn ping(&self) -> Result<(), ApiError>;
+    async fn login(&self, username: &str, password: &str) -> Result<CrmLogin, ApiError>;
+    async fn list_students(
+        &self,
+        franchise_id: Option<i32>,
+        student_id: Option<i64>,
+    ) -> Result<Vec<CrmStudent>, ApiError>;
+}
+
+pub struct SqlServerCrmGateway {
+    database_url: String,
+}
+
+impl SqlServerCrmGateway {
+    pub fn new(database_url: String) -> Self {
+        Self { database_url }
+    }
+}
+
+#[async_trait::async_trait]
+impl CrmGateway for SqlServerCrmGateway {
+    async fn ping(&self) -> Result<(), ApiError> {
+        ping(&self.database_url).await
+    }
+
+    async fn login(&self, username: &str, password: &str) -> Result<CrmLogin, ApiError> {
+        login(&self.database_url, username, password).await
+    }
+
+    async fn list_students(
+        &self,
+        franchise_id: Option<i32>,
+        student_id: Option<i64>,
+    ) -> Result<Vec<CrmStudent>, ApiError> {
+        list_students(&self.database_url, franchise_id, student_id).await
+    }
+}
+
 pub mod crm_queries {
     pub const LOGIN: &str = "EXEC dbo.usp_login @P1, @P2";
 

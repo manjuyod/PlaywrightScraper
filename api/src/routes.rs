@@ -17,7 +17,6 @@ use crate::auth::{
     worker_auth_middleware, DashboardAuthClaims, OperatorAuthClaims, SchedulerAuthClaims,
     WorkerAuthClaims,
 };
-use crate::crm;
 use crate::error::ApiError;
 use crate::models::{
     worker_owns_running_job, worker_result_state_action, AdminHealthErrorCategory,
@@ -171,12 +170,10 @@ async fn merged_students(
     franchise_id: i32,
     student_id: Option<i64>,
 ) -> Result<Vec<PublicStudent>, ApiError> {
-    let crm_students = crm::list_students(
-        &state.config.crm_database_url,
-        Some(franchise_id),
-        student_id,
-    )
-    .await?;
+    let crm_students = state
+        .crm
+        .list_students(Some(franchise_id), student_id)
+        .await?;
     let eligible_ids: Vec<i64> = crm_students
         .iter()
         .filter(|student| student.is_grade_portal_eligible())
@@ -265,7 +262,7 @@ pub async fn readyz(
     let neon_probe = tokio::time::timeout(timeout, async {
         sqlx::query("SELECT 1").execute(&state.neon_db).await
     });
-    let crm_probe = tokio::time::timeout(timeout, crm::ping(&state.config.crm_database_url));
+    let crm_probe = tokio::time::timeout(timeout, state.crm.ping());
     let (neon_result, crm_result) = tokio::join!(neon_probe, crm_probe);
     let ready = matches!(neon_result, Ok(Ok(_))) && matches!(crm_result, Ok(Ok(())));
 
@@ -305,7 +302,7 @@ pub async fn dashboard_health(
     }
 
     let mut errors = Vec::new();
-    let crm_students = match crm::list_students(&state.config.crm_database_url, None, None).await {
+    let crm_students = match state.crm.list_students(None, None).await {
         Ok(students) => Some(students),
         Err(_) => {
             errors.push(AdminHealthErrorCategory::CrmUnavailable);
@@ -394,7 +391,7 @@ pub async fn scheduler_reconcile_students(
     Extension(claims): Extension<SchedulerAuthClaims>,
 ) -> Result<Json<ReconciliationSummary>, ApiError> {
     authorize_scheduler_reconcile(&claims)?;
-    let students = crm::list_students(&state.config.crm_database_url, None, None).await?;
+    let students = state.crm.list_students(None, None).await?;
     let eligible_ids: Vec<i64> = students
         .iter()
         .filter(|student| student.is_grade_portal_eligible())
@@ -424,8 +421,7 @@ pub async fn operator_put_alternate_credentials(
         ));
     }
     payload.validate()?;
-    let canonical_students =
-        crm::list_students(&state.config.crm_database_url, None, Some(student_id)).await?;
+    let canonical_students = state.crm.list_students(None, Some(student_id)).await?;
     let canonical_student = canonical_students
         .iter()
         .find(|student| student.crmstudentid == student_id)
@@ -534,12 +530,10 @@ pub async fn auth_login(
     State(state): State<AppState>,
     Json(payload): Json<AuthLoginRequest>,
 ) -> Result<Json<AuthLoginResponse>, ApiError> {
-    let result = crm::login(
-        &state.config.crm_database_url,
-        &payload.username,
-        &payload.password,
-    )
-    .await?;
+    let result = state
+        .crm
+        .login(&payload.username, &payload.password)
+        .await?;
     Ok(Json(AuthLoginResponse {
         authenticated: result.authenticated,
         role: result.role,
@@ -653,12 +647,10 @@ pub async fn job_context(
     if !worker_owns_running_job(&job, &claims.worker_id) {
         return Err(ApiError::NotFound);
     }
-    let crm_students = crm::list_students(
-        &state.config.crm_database_url,
-        Some(job.franchise_id),
-        job.student_id,
-    )
-    .await?;
+    let crm_students = state
+        .crm
+        .list_students(Some(job.franchise_id), job.student_id)
+        .await?;
     let eligible_students: Vec<_> = crm_students
         .iter()
         .filter(|student| student.is_grade_portal_eligible())
@@ -750,16 +742,12 @@ pub async fn results_job(
     }
     let result_student_id = payload.crmstudentid();
     let canonical_student = match Some(result_student_id) {
-        Some(student_id) if job.student_id.is_none() || job.student_id == Some(student_id) => {
-            crm::list_students(
-                &state.config.crm_database_url,
-                Some(job.franchise_id),
-                Some(student_id),
-            )
+        Some(student_id) if job.student_id.is_none() || job.student_id == Some(student_id) => state
+            .crm
+            .list_students(Some(job.franchise_id), Some(student_id))
             .await?
             .into_iter()
-            .find(|student| student.crmstudentid == student_id)
-        }
+            .find(|student| student.crmstudentid == student_id),
         _ => None,
     };
     if let WorkerResultStateAction::ApplyStudentState(student_id) = worker_result_state_action(
