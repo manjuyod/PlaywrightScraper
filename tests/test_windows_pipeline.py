@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from scripts import windows_pipeline
+
+
+def test_direct_script_help_runs_from_repository_root():
+    repository_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "scripts/windows_pipeline.py", "--help"],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--target-worker" in result.stdout
 
 
 def test_cli_target_overrides_environment(monkeypatch):

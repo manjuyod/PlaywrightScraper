@@ -3,11 +3,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 import uuid
 from datetime import date
+from pathlib import Path
 from typing import Literal
 
-from scraper import scheduler_client
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scraper import scheduler_client  # noqa: E402
 
 
 JobKind = Literal["grade", "agenda"]
