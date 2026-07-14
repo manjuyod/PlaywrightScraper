@@ -179,6 +179,14 @@ def test_release_installation_verifies_checksums_and_supports_independent_rollba
     assert "systemctl restart" in rollback
 
 
+def test_role_install_wrappers_delegate_to_the_hardened_installer():
+    api_installer = _text("bin/install-api")
+    frontend_installer = _text("bin/install-frontend")
+
+    assert 'exec "$script_dir/install-release" api "$@"' in api_installer
+    assert 'exec "$script_dir/install-release" frontend "$@"' in frontend_installer
+
+
 def test_private_ca_tooling_uses_encrypted_keys_short_leaves_and_crls():
     initialize = _text("pki/init-offline-ca")
     issue = _text("pki/issue-client")

@@ -40,7 +40,9 @@ Build on a clean trusted Linux host. Produce and review:
 Neither archive may contain `.env`, private keys, database utilities, runtime
 caches, test output, or `api/target`. Use
 `deploy/bin/build-release-artifacts VERSION OUTPUT_DIRECTORY`; inspect archive
-listings before transfer. `deploy/bin/install-release` verifies the checksum,
+listings before transfer. Use `deploy/bin/install-api` or
+`deploy/bin/install-frontend` with `VERSION ARCHIVE CHECKSUM_FILE`; both delegate
+to the hardened `install-release` implementation, which verifies the checksum,
 extracts an immutable version, preserves `previous`, switches `current`
 atomically, and restarts only the selected role.
 
