@@ -65,12 +65,6 @@ class HomeAccess(PortalEngine):
         except Exception as e:
             print(e)
             raise
-        finally:
-            try:
-                await self.page.context.tracing.stop()
-            except Exception:
-                pass
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

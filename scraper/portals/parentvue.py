@@ -38,11 +38,6 @@ class ParentVUE(PortalEngine):
         except Exception as e:
             print(f"{type(e)}: {e}")
             raise
-        finally:
-            await self.page.context.tracing.stop()
-
-
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),

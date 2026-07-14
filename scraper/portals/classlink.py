@@ -40,9 +40,6 @@ class Classlink(PortalEngine):
         except Exception as e:
             print(e)
             raise self.LoginError(e)
-        finally:
-            # await self.page.wait_for_load_state("networkidle")
-            await self.page.context.tracing.stop()
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),

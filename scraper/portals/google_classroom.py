@@ -39,9 +39,6 @@ class GoogleClassroom(PortalEngine):
         except Exception as e:
             print(f"{type(e)}: {e}")
             raise
-        finally:
-            await self.page.context.tracing.stop()
-
     async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming") -> dict[str, list[tuple]]:
         agenda: dict[str, list[tuple]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
         try:

@@ -28,7 +28,6 @@ class Blackbaud(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            await self.page.context.tracing.start(screenshots=True, snapshots=True)
             print("[BBG] starting login()")
             # Entry page (Blackbaud SSO landing)
             username_selector = '#Username'
@@ -54,7 +53,6 @@ class Blackbaud(PortalEngine):
             raise e
         finally:
             print(f"URL post-login: {self.page.url}")
-            await self.page.context.tracing.stop()
     async def nav_to_grades(self):
         try:
             await self.page.wait_for_selector("#coursesContainer", timeout=6000)

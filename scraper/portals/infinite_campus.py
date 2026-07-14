@@ -49,8 +49,6 @@ class InfiniteCampus(PortalEngine):
         except self.LoginError as e:
             print(e)
             raise
-        finally:
-            await self.page.context.tracing.stop()
     # helper
     @staticmethod
     async def select_student(first_name: str, page: Page):

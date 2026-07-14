@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import threading
 
+import pytest
+
 from scraper import agenda
 from scraper import runner
 
@@ -21,9 +23,6 @@ def test_students_from_worker_context_maps_api_context_to_existing_scraper_shape
                 "p2password": "alt-secret",
                 "portal": "homeaccess",
                 "track_agenda": True,
-                "status": "queued",
-                "passwordgood": True,
-                "auth_images": ["cat", "dog"],
             }
         ]
     }
@@ -45,14 +44,112 @@ def test_students_from_worker_context_maps_api_context_to_existing_scraper_shape
             "alt_id": "alt-login",
             "alt_password": "alt-secret",
             "portal": "homeaccess",
-            "auth_images": ["cat", "dog"],
             "track_agenda": True,
-            "status": "queued",
-            "passwordgood": True,
             "job_id": "job-42",
             "lease_token": "00000000-0000-0000-0000-000000000042",
         }
     ]
+
+
+def test_context_mapping_ignores_noncontract_student_fields():
+    context = {
+        "students": [
+            {
+                "crmstudentid": 42,
+                "firstname": "Ada",
+                "lastname": "Lovelace",
+                "franchiseid": 19,
+                "grade": 12,
+                "portal1": "https://portal.example.test",
+                "p1username": "ada-login",
+                "p1password": "secret",
+                "portal": "homeaccess",
+                "track_agenda": False,
+                "yearstart": 2026,
+                "yearend": 2027,
+                "weeklydata": {"historical": True},
+                "status": "failed",
+                "error_msg": "sensitive diagnostic",
+                "passwordgood": False,
+                "weekly_agenda": {"historical": True},
+                "auth_images": ["cat", "dog"],
+            }
+        ]
+    }
+
+    mapped = runner.students_from_worker_context(context)[0]
+
+    assert set(mapped) == {
+        "db_id",
+        "student_name",
+        "login_url",
+        "id",
+        "password",
+        "alt_login_url",
+        "alt_id",
+        "alt_password",
+        "portal",
+        "track_agenda",
+    }
+
+
+@pytest.mark.parametrize("raise_during_scrape", [False, True])
+def test_run_worker_once_clears_portal_secrets_in_finally(
+    monkeypatch, raise_during_scrape
+):
+    lease_token = "00000000-0000-0000-0000-000000000042"
+    raw_row = {
+        "crmstudentid": 42,
+        "firstname": "Ada",
+        "portal1": "https://portal.example.test",
+        "p1username": "ada-login",
+        "p1password": "secret",
+        "portal2": "https://alternate.example.test",
+        "p2username": "alternate-login",
+        "p2password": "alternate-secret",
+        "portal": "homeaccess",
+        "track_agenda": True,
+    }
+    context = {"students": [raw_row]}
+    retained = {}
+
+    monkeypatch.setattr(
+        runner.worker_api,
+        "claim_job",
+        lambda: {
+            "job_id": "job-42",
+            "kind": "agenda",
+            "lease_token": lease_token,
+            "lease_expires_at": "2030-01-01T00:05:00Z",
+        },
+    )
+    monkeypatch.setattr(runner.worker_api, "event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        runner.worker_api, "job_context", lambda *_args, **_kwargs: context
+    )
+    monkeypatch.setattr(runner.worker_api, "heartbeat", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.worker_api, "complete", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.worker_api, "fail", lambda *_args, **_kwargs: None)
+
+    async def collect(students, **_kwargs):
+        retained["students"] = students
+        retained["student"] = students[0]
+        if raise_during_scrape:
+            raise RuntimeError("portal failed")
+        return {"attempted": 1, "success": 1, "errors": 0}
+
+    monkeypatch.setattr(agenda, "collect_agendas", collect)
+
+    if raise_during_scrape:
+        with pytest.raises(RuntimeError):
+            asyncio.run(runner.run_worker_once())
+    else:
+        assert asyncio.run(runner.run_worker_once()) is True
+
+    assert context == {}
+    assert raw_row == {}
+    assert retained["students"] == []
+    assert retained["student"] == {}
 
 
 def test_mark_bad_login_reports_to_worker_api_when_job_context_exists(monkeypatch):
@@ -173,7 +270,7 @@ def test_worker_agenda_job_uses_agenda_collector(monkeypatch):
         lambda job_id, lease_token, code: calls.append(("fail", job_id, lease_token, code)),
     )
     async def fake_collect_agendas(students, job_id=None, lease_token=None):
-        calls.append(("agenda", job_id, lease_token, students))
+        calls.append(("agenda", job_id, lease_token, [dict(student) for student in students]))
         return {"attempted": 1, "success": 1, "errors": 0}
 
     monkeypatch.setattr(agenda, "collect_agendas", fake_collect_agendas)

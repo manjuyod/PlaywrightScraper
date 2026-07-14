@@ -80,18 +80,21 @@ pub fn worker_result_state_action(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use chrono::{Duration, Utc};
     use uuid::Uuid;
 
     use super::{
-        canonical_crm_state_action, lease_is_active, sanitize_public_json, worker_owns_running_job,
-        worker_result_state_action, CanonicalCrmStateAction, CrmStudent, JobEvent,
-        JobEventsResponse, JobResult, LatestResultsResponse, OperatorAlternateCredentialsRequest,
-        PublicJob, PublicJobEvent, PublicJobResult, SchedulerJobKind, SchedulerJobRequest,
-        WorkerClaimResponse, WorkerCompletionRequest, WorkerEventCode, WorkerEventRequest,
-        WorkerFailRequest, WorkerHeartbeatRequest, WorkerJob, WorkerResultRequest,
-        WorkerResultStateAction,
+        canonical_crm_state_action, lease_is_active, merge_worker_student, sanitize_public_json,
+        worker_owns_running_job, worker_result_state_action, CanonicalCrmStateAction, CrmStudent,
+        JobEvent, JobEventsResponse, JobResult, LatestResultsResponse,
+        OperatorAlternateCredentialsRequest, PublicJob, PublicJobEvent, PublicJobResult,
+        SchedulerJobKind, SchedulerJobRequest, StudentGradeState, WorkerClaimResponse,
+        WorkerCompletionRequest, WorkerEventCode, WorkerEventRequest, WorkerFailRequest,
+        WorkerHeartbeatRequest, WorkerJob, WorkerResultRequest, WorkerResultStateAction,
     };
+    use crate::credentials::AlternateCredentials;
 
     fn student_with_portal_credentials(
         portal1: Option<&str>,
@@ -148,6 +151,92 @@ mod tests {
             let student = student_with_portal_credentials(portal1, p1username, p1password);
 
             assert!(!student.is_grade_portal_eligible());
+        }
+    }
+
+    #[test]
+    fn worker_student_serialization_contains_only_adapter_fields() {
+        let crm = student_with_portal_credentials(
+            Some("https://portal.example"),
+            Some("ada"),
+            Some("secret"),
+        );
+        let serialized = serde_json::to_value(merge_worker_student(&crm, None, None)).unwrap();
+        let keys: BTreeSet<_> = serialized.as_object().unwrap().keys().cloned().collect();
+        let expected: BTreeSet<_> = [
+            "crmstudentid",
+            "firstname",
+            "portal1",
+            "p1username",
+            "p1password",
+            "portal2",
+            "p2username",
+            "p2password",
+            "portal",
+            "track_agenda",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn merge_worker_student_drops_dashboard_and_historical_state() {
+        let crm = student_with_portal_credentials(
+            Some("https://portal.example"),
+            Some("ada"),
+            Some("secret"),
+        );
+        let now = Utc::now();
+        let state = StudentGradeState {
+            uuid: Uuid::nil(),
+            crmstudentid: crm.crmstudentid,
+            portal2: Some("https://alternate.example".into()),
+            p2username: Some("legacy-user".into()),
+            p2password: Some("legacy-password".into()),
+            alternate_credentials_version: None,
+            alternate_credentials_key_id: None,
+            alternate_credentials_nonce: None,
+            alternate_credentials_ciphertext: None,
+            yearstart: Some(2026),
+            yearend: Some(2027),
+            weeklydata: Some(serde_json::json!({"historical": true})),
+            portal: Some("homeaccess".into()),
+            passwordgood: Some(false),
+            status: Some("failed".into()),
+            error_msg: Some("sensitive diagnostic".into()),
+            track_agenda: Some(true),
+            weekly_agenda: Some(serde_json::json!({"historical": true})),
+            created_at: now,
+            updated_at: now,
+        };
+        let alternate = AlternateCredentials {
+            username: "alternate-user".into(),
+            password: "alternate-password".into(),
+        };
+
+        let serialized =
+            serde_json::to_value(merge_worker_student(&crm, Some(&state), Some(&alternate)))
+                .unwrap();
+
+        assert_eq!(serialized["portal"], "homeaccess");
+        assert_eq!(serialized["track_agenda"], true);
+        assert_eq!(serialized["p2username"], "alternate-user");
+        for excluded in [
+            "franchiseid",
+            "lastname",
+            "grade",
+            "yearstart",
+            "yearend",
+            "weeklydata",
+            "passwordgood",
+            "status",
+            "error_msg",
+            "weekly_agenda",
+        ] {
+            assert!(serialized.get(excluded).is_none(), "{excluded}");
         }
     }
 
@@ -846,25 +935,15 @@ pub struct PublicStudent {
 #[derive(Clone, Serialize)]
 pub struct WorkerStudent {
     pub crmstudentid: i64,
-    pub franchiseid: i32,
     pub firstname: String,
-    pub lastname: String,
-    pub grade: Option<i32>,
     pub portal1: Option<String>,
     pub p1username: Option<String>,
     pub p1password: Option<String>,
     pub portal2: Option<String>,
     pub p2username: Option<String>,
     pub p2password: Option<String>,
-    pub yearstart: Option<i32>,
-    pub yearend: Option<i32>,
-    pub weeklydata: Value,
     pub portal: Option<String>,
-    pub passwordgood: Option<bool>,
-    pub status: Option<String>,
-    pub error_msg: Option<String>,
     pub track_agenda: bool,
-    pub weekly_agenda: Value,
 }
 
 fn empty_json_object() -> Value {
@@ -965,29 +1044,15 @@ pub fn merge_worker_student(
 ) -> WorkerStudent {
     WorkerStudent {
         crmstudentid: crm.crmstudentid,
-        franchiseid: crm.franchiseid,
         firstname: crm.firstname.clone(),
-        lastname: crm.lastname.clone(),
-        grade: crm.grade,
         portal1: crm.portal1.clone(),
         p1username: crm.p1username.clone(),
         p1password: crm.p1password.clone(),
         portal2: state.and_then(|row| row.portal2.clone()),
         p2username: alternate_credentials.map(|credentials| credentials.username.clone()),
         p2password: alternate_credentials.map(|credentials| credentials.password.clone()),
-        yearstart: state.and_then(|row| row.yearstart),
-        yearend: state.and_then(|row| row.yearend),
-        weeklydata: state
-            .and_then(|row| row.weeklydata.clone())
-            .unwrap_or_else(empty_json_object),
         portal: state.and_then(|row| row.portal.clone()),
-        passwordgood: state.and_then(|row| row.passwordgood),
-        status: state.and_then(|row| row.status.clone()),
-        error_msg: state.and_then(|row| row.error_msg.clone()),
         track_agenda: state.and_then(|row| row.track_agenda).unwrap_or(false),
-        weekly_agenda: state
-            .and_then(|row| row.weekly_agenda.clone())
-            .unwrap_or_else(empty_json_object),
     }
 }
 

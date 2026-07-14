@@ -13,6 +13,7 @@ PRODUCTION_ROOTS = (
     REPO_ROOT / "utils",
 )
 ROOT_MODULES = (REPO_ROOT / "api_transport.py",)
+DIAGNOSTICS_PATH = (REPO_ROOT / "scraper" / "diagnostics.py").resolve()
 FORBIDDEN_IMPORT_ROOTS = {
     "db",
     "db_core",
@@ -71,6 +72,17 @@ def boundary_violations(path: Path) -> list[str]:
                         f"line {node.lineno}: forbidden connection-string fragment"
                     )
                     break
+        if (
+            path.resolve() != DIAGNOSTICS_PATH
+            and isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"start", "stop"}
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "tracing"
+        ):
+            violations.append(
+                f"line {node.lineno}: direct browser tracing must use scraper.diagnostics"
+            )
     return violations
 
 

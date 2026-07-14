@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
 from urllib.parse import unquote_plus
 from typing import Callable, Dict, List, Literal, Optional, Pattern, Tuple
@@ -56,27 +55,6 @@ standard_fetch_retry = retry(
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type(PlaywrightTimeout),
 )
-
-# ============================================================================
-# CONTEXT MANAGERS
-# ============================================================================
-
-
-@asynccontextmanager
-async def tracing_context(page: Page):
-    """
-    Context manager for Playwright tracing.
-
-    Usage:
-        async with tracing_context(self.page):
-            # login/fetch logic
-    """
-    await page.context.tracing.start(screenshots=True, snapshots=True)
-    try:
-        yield
-    finally:
-        await page.context.tracing.stop()
-
 
 async def exists(elem: Locator, timeout: int = 1000):
     try:

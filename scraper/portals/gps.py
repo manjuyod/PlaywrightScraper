@@ -31,7 +31,6 @@ class GPS(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the GPS parent portal."""
-        await self.page.context.tracing.start(screenshots=True, snapshots=True)
         username_selector = "input#identification"
         password_selector = "input#ember535"
         await universal_login_flow(
@@ -47,8 +46,6 @@ class GPS(PortalEngine):
         # Pictograph auth (three picks)
         print("waiting on pictograph\n")
         await self.do_gps_auth()
-
-        await self.page.context.tracing.stop()
 
     # Login Helper
     async def do_gps_auth(self):

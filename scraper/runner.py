@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from playwright.async_api import Browser, async_playwright
 
 from scraper import api_client as worker_api
+from scraper.diagnostics import sensitive_tracing_context
 from scraper.portals import LoginError, get_portal
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.safe_logging import suppress_portal_output
@@ -91,8 +92,8 @@ def students_from_worker_context(
         if not portal_key:
             portal_key = get_portal_key_from_url(login_url or "") or ""
         mapped = {
-            "db_id": row.get("crmstudentid") or row.get("id"),
-            "student_name": row.get("firstname") or row.get("first_name") or "",
+            "db_id": row.get("crmstudentid"),
+            "student_name": row.get("firstname") or "",
             "login_url": login_url,
             "id": row.get("p1username"),
             "password": row.get("p1password"),
@@ -100,10 +101,7 @@ def students_from_worker_context(
             "alt_id": row.get("p2username"),
             "alt_password": row.get("p2password"),
             "portal": portal_key,
-            "auth_images": row.get("auth_images"),
             "track_agenda": row.get("track_agenda"),
-            "status": row.get("status"),
-            "passwordgood": row.get("passwordgood"),
         }
         if job_id is not None:
             mapped["job_id"] = job_id
@@ -111,6 +109,30 @@ def students_from_worker_context(
             mapped["lease_token"] = lease_token
         students_list.append(mapped)
     return students_list
+
+
+def clear_worker_context_secrets(context: dict | None, students: list[dict]) -> None:
+    sensitive = {
+        "p1username",
+        "p1password",
+        "p2username",
+        "p2password",
+        "id",
+        "password",
+        "alt_id",
+        "alt_password",
+    }
+    candidate_rows = context.get("students", []) if isinstance(context, dict) else []
+    raw_rows = candidate_rows if isinstance(candidate_rows, list) else []
+    for row in [*raw_rows, *students]:
+        if isinstance(row, dict):
+            for key in sensitive:
+                row.pop(key, None)
+            row.clear()
+    raw_rows.clear()
+    if isinstance(context, dict):
+        context.clear()
+    students.clear()
 
 
 def mark_bad_login(student: dict) -> None:
@@ -157,12 +179,13 @@ async def scrape_one(browser: Browser, student: dict) -> dict:
             mark_bad_login(student)
             raise ReportedBadLogin()
         with suppress_portal_output():
-            try:
-                await scraper.login(first_name=student.get("student_name"))
-            except LoginError as exc:
-                mark_bad_login(student)
-                raise ReportedBadLogin() from exc
-            grades = await scraper.fetch_grades()
+            async with sensitive_tracing_context(page):
+                try:
+                    await scraper.login(first_name=student.get("student_name"))
+                except LoginError as exc:
+                    mark_bad_login(student)
+                    raise ReportedBadLogin() from exc
+                grades = await scraper.fetch_grades()
         parsed = grades.get("parsed_grades") if isinstance(grades, dict) else grades
         return {"db_id": student["db_id"], "parsed_grades": parsed}
     finally:
@@ -185,6 +208,8 @@ async def run_worker_once() -> bool:
         return False
     kind = "agenda" if job.get("kind") == "agenda" else "grade"
     renewal: WorkerLeaseRenewal | None = None
+    context: dict | None = None
+    student_list: list[dict] = []
 
     async def stop_renewal_before_terminal() -> bool:
         nonlocal renewal
@@ -201,7 +226,12 @@ async def run_worker_once() -> bool:
             context, job_id=job_id, lease_token=lease_token
         )
         if kind == "agenda":
-            student_list = [student for student in student_list if student.get("track_agenda")]
+            for student in student_list:
+                if not student.get("track_agenda"):
+                    student.clear()
+            student_list[:] = [
+                student for student in student_list if student.get("track_agenda")
+            ]
         progress = {
             "total": len(student_list),
             "attempted": 0,
@@ -290,8 +320,11 @@ async def run_worker_once() -> bool:
         finally:
             raise
     finally:
-        if renewal is not None:
-            await stop_worker_lease_renewal(renewal)
+        try:
+            if renewal is not None:
+                await stop_worker_lease_renewal(renewal)
+        finally:
+            clear_worker_context_secrets(context, student_list)
 
 
 async def drain_worker() -> int:
