@@ -30,15 +30,7 @@ def scheduler_api_key() -> str:
     return value
 
 
-def scheduler_id() -> str:
-    value = os.getenv("SCHEDULER_ID", "").strip()
-    if not value:
-        raise SchedulerApiError(500, "SCHEDULER_ID is not configured")
-    return value
-
-
 def request_json(method: str, path: str, payload: Any | None = None) -> Any:
-    scheduler_id()
     body = (
         b""
         if payload is None
@@ -90,17 +82,21 @@ def enqueue_job(
     franchise_id: int,
     kind: Literal["grade", "agenda"],
     idempotency_key: str,
+    target_worker_id: str,
     student_id: int | None = None,
 ) -> dict[str, Any]:
     if type(franchise_id) is not int or franchise_id <= 0:
         raise ValueError("franchise_id must be positive")
     if kind not in {"grade", "agenda"}:
         raise ValueError("kind must be grade or agenda")
+    if not target_worker_id or target_worker_id.strip() != target_worker_id:
+        raise ValueError("target_worker_id must be nonblank and unpadded")
     key = str(uuid.UUID(idempotency_key))
     payload: dict[str, Any] = {
         "franchise_id": franchise_id,
         "kind": kind,
         "idempotency_key": key,
+        "target_worker_id": target_worker_id,
     }
     if student_id is not None:
         if type(student_id) is not int or student_id <= 0:

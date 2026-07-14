@@ -61,11 +61,14 @@ async def run_pipeline(
     reconcile: bool,
     enqueue: bool,
     drain: bool,
+    target_worker_id: str | None,
 ) -> None:
     if reconcile:
         scheduler_client.reconcile_students()
         print("[pipeline] canonical student reconciliation complete", flush=True)
     if enqueue:
+        if not target_worker_id or target_worker_id.strip() != target_worker_id:
+            raise ValueError("target_worker_id must be nonblank and unpadded when enqueueing")
         today = date.today()
         for franchise_id in franchises:
             for kind in kinds:
@@ -73,6 +76,7 @@ async def run_pipeline(
                     franchise_id=franchise_id,
                     kind=kind,
                     idempotency_key=daily_job_key(today, franchise_id, kind),
+                    target_worker_id=target_worker_id,
                 )
                 print(
                     f"[pipeline] queued {kind} job for franchise {franchise_id}",
@@ -89,6 +93,7 @@ def main() -> int:
     parser.add_argument("--reconcile", action="store_true")
     parser.add_argument("--enqueue", action="store_true")
     parser.add_argument("--drain", action="store_true")
+    parser.add_argument("--target-worker", default=os.getenv("WINDOWS_TARGET_WORKER_ID"))
     args = parser.parse_args()
 
     franchises = args.franchise_id or parse_franchises(
@@ -98,13 +103,21 @@ def main() -> int:
         raise ValueError("--franchise-id values must be unique and positive")
     kinds = parse_kinds(os.getenv("WINDOWS_SCHEDULED_JOB_KINDS", "grade,agenda"))
     selected = args.reconcile or args.enqueue or args.drain
+    enqueue = args.enqueue or not selected
+    if enqueue and not args.target_worker:
+        parser.error(
+            "--target-worker or WINDOWS_TARGET_WORKER_ID is required when enqueueing"
+        )
+    if enqueue and args.target_worker.strip() != args.target_worker:
+        parser.error("--target-worker must be nonblank and unpadded")
     asyncio.run(
         run_pipeline(
             franchises,
             kinds,
             reconcile=args.reconcile or not selected,
-            enqueue=args.enqueue or not selected,
+            enqueue=enqueue,
             drain=args.drain or not selected,
+            target_worker_id=args.target_worker,
         )
     )
     return 0

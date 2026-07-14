@@ -22,7 +22,54 @@ class _Response:
         return json.dumps({"id": "00000000-0000-0000-0000-000000000042"}).encode()
 
 
-def test_scheduler_client_uses_its_own_bearer_identity(monkeypatch):
+def test_enqueue_sends_target_without_scheduler_id(monkeypatch):
+    captured = {}
+
+    def fake_request(method, path, payload=None):
+        captured.update(method=method, path=path, payload=payload)
+        return {"id": "00000000-0000-0000-0000-000000000042"}
+
+    monkeypatch.delenv("SCHEDULER_ID", raising=False)
+    monkeypatch.setattr(scheduler_client, "request_json", fake_request)
+    scheduler_client.enqueue_job(
+        franchise_id=19,
+        kind="grade",
+        idempotency_key="00000000-0000-0000-0000-000000000042",
+        target_worker_id="dev-alice-laptop",
+    )
+    assert captured == {
+        "method": "POST",
+        "path": "/api/scheduler/jobs",
+        "payload": {
+            "franchise_id": 19,
+            "kind": "grade",
+            "idempotency_key": "00000000-0000-0000-0000-000000000042",
+            "target_worker_id": "dev-alice-laptop",
+        },
+    }
+
+
+def test_enqueue_sends_target_worker_id(monkeypatch):
+    captured = {}
+
+    def fake_request(method, path, payload=None):
+        captured.update(method=method, path=path, payload=payload)
+        return {"id": "00000000-0000-0000-0000-000000000042"}
+
+    monkeypatch.setattr(scheduler_client, "request_json", fake_request)
+    scheduler_client.enqueue_job(
+        franchise_id=19,
+        kind="agenda",
+        idempotency_key="00000000-0000-0000-0000-000000000042",
+        target_worker_id="worker-test",
+        student_id=42,
+    )
+
+    assert captured["payload"]["target_worker_id"] == "worker-test"
+    assert captured["payload"]["student_id"] == 42
+
+
+def test_scheduler_request_does_not_require_scheduler_id(monkeypatch):
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -33,19 +80,44 @@ def test_scheduler_client_uses_its_own_bearer_identity(monkeypatch):
 
     monkeypatch.setenv("GRADE_API_BASE_URL", "http://api.local:3000")
     monkeypatch.setenv("SCHEDULER_API_KEY", "scheduler-secret")
-    monkeypatch.setenv("SCHEDULER_ID", "windows-prod-01")
+    monkeypatch.delenv("SCHEDULER_ID", raising=False)
     monkeypatch.setattr(scheduler_client.urllib.request, "urlopen", fake_urlopen)
 
     scheduler_client.enqueue_job(
         franchise_id=19,
         kind="grade",
         idempotency_key="00000000-0000-0000-0000-000000000042",
+        target_worker_id="worker-test",
     )
 
     assert captured["headers"]["Authorization"] == "Bearer scheduler-secret"
+    assert "Scheduler-Id" not in captured["headers"]
     assert captured["body"]["franchise_id"] == 19
     assert captured["body"]["kind"] == "grade"
+    assert "scheduler_id" not in captured["body"]
     assert captured["timeout"] == 30
+
+
+def test_enqueue_rejects_blank_or_padded_target(monkeypatch):
+    monkeypatch.setattr(
+        scheduler_client,
+        "request_json",
+        lambda *_args, **_kwargs: {
+            "id": "00000000-0000-0000-0000-000000000042"
+        },
+    )
+    for target in ["", " worker-test", "worker-test "]:
+        try:
+            scheduler_client.enqueue_job(
+                franchise_id=19,
+                kind="grade",
+                idempotency_key="00000000-0000-0000-0000-000000000042",
+                target_worker_id=target,
+            )
+        except ValueError as exc:
+            assert "target_worker_id" in str(exc)
+        else:
+            raise AssertionError(target)
 
 
 def test_daily_scheduler_keys_are_deterministic_and_semantic():
