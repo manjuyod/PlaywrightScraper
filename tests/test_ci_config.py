@@ -18,8 +18,8 @@ def test_ci_covers_frozen_dependencies_audits_migrations_and_role_artifacts():
         "pip-audit",
         "rustsec/audit-check",
         "gitleaks",
-        "001-006",
-        "001-003 to 004-006",
+        "001-007",
+        "001-003 to 004-007",
         "build-release-artifacts",
         "sha256sum --check",
     ):

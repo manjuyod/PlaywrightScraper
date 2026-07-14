@@ -44,3 +44,42 @@ def test_plaintext_enforcement_migration_keeps_legacy_columns_constrained_null()
     assert "set p2username = null" in sql
     assert "p2password = null" in sql
     assert "check (p2username is null and p2password is null)" in sql
+
+
+def test_007_requires_target_for_active_jobs():
+    sql = (MIGRATIONS / "007_target_worker_jobs.sql").read_text(encoding="utf-8")
+    lower = sql.lower()
+    assert "target_worker_id text" in lower
+    assert "status in ('queued', 'running')" in lower
+    assert "raise exception" in lower
+    assert "check (" in lower
+    assert "status not in ('queued', 'running')" in lower
+    assert "target_worker_id is not null" in lower
+    assert "btrim(target_worker_id) <> ''" in lower
+
+
+def test_007_refuses_legacy_active_jobs_before_schema_change():
+    sql = (MIGRATIONS / "007_target_worker_jobs.sql").read_text(encoding="utf-8").lower()
+    assert sql.index("raise exception") < sql.index("add column target_worker_id text")
+
+
+def test_007_preserves_global_active_unique_index():
+    sql = (MIGRATIONS / "007_target_worker_jobs.sql").read_text(encoding="utf-8")
+    assert "drop index" not in sql.lower()
+    assert "uq_grade_scrape_jobs_active" not in sql.lower()
+    assert "alter table grade_scrape_jobs drop constraint" not in sql.lower()
+
+
+def test_007_rollback_requires_quiescence():
+    rollback = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "api"
+        / "rollback"
+        / "007_target_worker_jobs.sql"
+    ).read_text(encoding="utf-8")
+    lower = rollback.lower()
+    assert "where status in ('queued', 'running')" in lower
+    assert "raise exception" in lower
+    assert "drop constraint if exists ck_grade_scrape_jobs_active_target_worker_id" in lower
+    assert "drop column if exists target_worker_id" in lower

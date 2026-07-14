@@ -87,9 +87,10 @@ mod tests {
         canonical_crm_state_action, lease_is_active, sanitize_public_json, worker_owns_running_job,
         worker_result_state_action, CanonicalCrmStateAction, CrmStudent, JobEvent,
         JobEventsResponse, JobResult, LatestResultsResponse, OperatorAlternateCredentialsRequest,
-        PublicJob, PublicJobEvent, PublicJobResult, WorkerClaimResponse, WorkerCompletionRequest,
-        WorkerEventCode, WorkerEventRequest, WorkerFailRequest, WorkerHeartbeatRequest, WorkerJob,
-        WorkerResultRequest, WorkerResultStateAction,
+        PublicJob, PublicJobEvent, PublicJobResult, SchedulerJobKind, SchedulerJobRequest,
+        WorkerClaimResponse, WorkerCompletionRequest, WorkerEventCode, WorkerEventRequest,
+        WorkerFailRequest, WorkerHeartbeatRequest, WorkerJob, WorkerResultRequest,
+        WorkerResultStateAction,
     };
 
     fn student_with_portal_credentials(
@@ -519,6 +520,7 @@ mod tests {
             status: "running".into(),
             franchise_id: 1,
             student_id: None,
+            target_worker_id: Some("worker-a".into()),
             worker_id: Some("worker-a".into()),
             heartbeat: None,
             completed_payload: None,
@@ -557,6 +559,7 @@ mod tests {
             status: "running".into(),
             franchise_id: 1,
             student_id: None,
+            target_worker_id: Some("worker-a".into()),
             worker_id: Some("worker-a".into()),
             heartbeat: None,
             completed_payload: None,
@@ -580,6 +583,7 @@ mod tests {
             status: "running".into(),
             franchise_id: 19,
             student_id: Some(42),
+            target_worker_id: Some("worker-a".into()),
             worker_id: Some("secret-worker-identity".into()),
             heartbeat: Some(serde_json::json!({
                 "kind": "grade",
@@ -618,24 +622,103 @@ mod tests {
             "idempotency_key": "00000000-0000-0000-0000-000000000042",
             "kind": "agenda",
             "franchise_id": 19,
-            "student_id": 42
+            "student_id": 42,
+            "target_worker_id": "worker-a"
         }))
         .unwrap();
         assert!(request.validate().is_ok());
+        assert!(SchedulerJobRequest::target_worker_id_is_valid("worker-a"));
         assert_ne!(request.request_hash(), [0; 32]);
 
         for invalid in [
             serde_json::json!({
-                "idempotency_key": Uuid::nil(), "kind": "grade", "franchise_id": 0
+                "idempotency_key": Uuid::nil(),
+                "kind": "grade",
+                "franchise_id": 0,
+                "target_worker_id": "worker-a"
             }),
             serde_json::json!({
-                "idempotency_key": Uuid::nil(), "kind": "grade", "franchise_id": 1,
-                "student_id": -1
+                "idempotency_key": Uuid::nil(),
+                "kind": "grade",
+                "franchise_id": 1,
+                "student_id": -1,
+                "target_worker_id": "worker-a"
+            }),
+            serde_json::json!({
+                "idempotency_key": Uuid::nil(),
+                "kind": "grade",
+                "franchise_id": 1,
+                "student_id": 42,
+                "target_worker_id": ""
+            }),
+            serde_json::json!({
+                "idempotency_key": Uuid::nil(),
+                "kind": "grade",
+                "franchise_id": 1,
+                "student_id": 42,
+                "target_worker_id": " bad-target "
             }),
         ] {
             let request: super::SchedulerJobRequest = serde_json::from_value(invalid).unwrap();
             assert!(request.validate().is_err());
         }
+    }
+
+    #[test]
+    fn scheduler_job_requires_target_worker() {
+        let request: serde_json::Value = serde_json::json!({
+            "idempotency_key": Uuid::nil(),
+            "kind": "grade",
+            "franchise_id": 11,
+            "student_id": 42
+        });
+        assert!(serde_json::from_value::<SchedulerJobRequest>(request).is_err());
+    }
+
+    #[test]
+    fn scheduler_job_accepts_configured_identity_syntax() {
+        let request = SchedulerJobRequest {
+            idempotency_key: Uuid::nil(),
+            kind: SchedulerJobKind::Grade,
+            franchise_id: 11,
+            student_id: Some(42),
+            target_worker_id: "Developer.Alice@Laptop".into(),
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn scheduler_hash_covers_target_worker() {
+        let first = SchedulerJobRequest {
+            idempotency_key: Uuid::nil(),
+            kind: SchedulerJobKind::Grade,
+            franchise_id: 11,
+            student_id: Some(42),
+            target_worker_id: "dev-alice-laptop".into(),
+        };
+        let second = SchedulerJobRequest {
+            idempotency_key: Uuid::nil(),
+            kind: SchedulerJobKind::Grade,
+            franchise_id: 11,
+            student_id: Some(42),
+            target_worker_id: "prod-windows-01".into(),
+        };
+        assert_ne!(first.request_hash(), second.request_hash());
+    }
+
+    #[test]
+    fn worker_job_deserializes_target_worker() {
+        let job: WorkerJob = serde_json::from_value(serde_json::json!({
+            "id": Uuid::nil(),
+            "kind": "grade",
+            "status": "queued",
+            "franchise_id": 11,
+            "student_id": 42,
+            "target_worker_id": "worker-a"
+        }))
+        .unwrap();
+        assert_eq!(job.target_worker_id.as_deref(), Some("worker-a"));
     }
 
     #[test]
@@ -1005,13 +1088,24 @@ pub struct SchedulerJobRequest {
     pub kind: SchedulerJobKind,
     pub franchise_id: i32,
     pub student_id: Option<i64>,
+    #[serde(rename = "target_worker_id", alias = "targetWorkerId")]
+    pub target_worker_id: String,
 }
 
 impl SchedulerJobRequest {
+    fn target_worker_id_is_valid(value: &str) -> bool {
+        !value.is_empty() && value.trim() == value
+    }
+
     pub fn validate(&self) -> Result<(), ApiError> {
         if self.franchise_id <= 0 || self.student_id.is_some_and(|value| value <= 0) {
             return Err(ApiError::BadRequest(
                 "Scheduler job scope must use positive identifiers".into(),
+            ));
+        }
+        if !Self::target_worker_id_is_valid(&self.target_worker_id) {
+            return Err(ApiError::BadRequest(
+                "Scheduler job target worker must be a valid identifier".into(),
             ));
         }
         Ok(())
@@ -1019,12 +1113,13 @@ impl SchedulerJobRequest {
 
     pub fn request_hash(&self) -> [u8; 32] {
         let canonical = format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             self.kind.as_str(),
             self.franchise_id,
             self.student_id
                 .map(|value| value.to_string())
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            self.target_worker_id
         );
         Sha256::digest(canonical.as_bytes()).into()
     }
@@ -1091,6 +1186,7 @@ pub struct WorkerJob {
     pub status: String,
     pub franchise_id: i32,
     pub student_id: Option<i64>,
+    pub target_worker_id: Option<String>,
     pub worker_id: Option<String>,
     pub heartbeat: Option<Value>,
     pub completed_payload: Option<Value>,
