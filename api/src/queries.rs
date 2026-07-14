@@ -7,9 +7,9 @@ use uuid::Uuid;
 use crate::credentials::EncryptedCredentialEnvelope;
 use crate::error::ApiError;
 use crate::models::{
-    JobEvent, JobResult, ManualPullRequest, ManualPullResponse, SchedulerJobRequest,
-    StudentGradeState, WorkerClaimResponse, WorkerCompletionRequest, WorkerEventRequest,
-    WorkerFailRequest, WorkerHeartbeatRequest, WorkerJob, WorkerResultRequest,
+    validated_operator_reason, JobEvent, JobResult, ManualPullRequest, ManualPullResponse,
+    SchedulerJobRequest, StudentGradeState, WorkerClaimResponse, WorkerCompletionRequest,
+    WorkerEventRequest, WorkerFailRequest, WorkerHeartbeatRequest, WorkerJob, WorkerResultRequest,
     WorkerResultStateAction,
 };
 
@@ -337,6 +337,58 @@ SELECT
 FROM grade_scrape_jobs
 WHERE id = $1
   AND ($2::int IS NULL OR franchise_id = $2)
+"#;
+
+const QUERY_LOCK_JOB_STATUS: &str = r#"
+SELECT status, target_worker_id
+FROM grade_scrape_jobs
+WHERE id = $1
+FOR UPDATE
+"#;
+
+const QUERY_RETARGET_QUEUED_JOB: &str = r#"
+UPDATE grade_scrape_jobs
+SET target_worker_id = $2, updated_at = NOW()
+WHERE id = $1 AND status = 'queued'
+RETURNING
+    id,
+    kind,
+    status,
+    franchise_id,
+    student_id,
+    target_worker_id,
+    worker_id,
+    heartbeat,
+    completed_payload,
+    created_at,
+    updated_at,
+    started_at,
+    completed_at
+"#;
+
+const QUERY_CANCEL_QUEUED_JOB: &str = r#"
+UPDATE grade_scrape_jobs
+SET status = 'cancelled', completed_at = NOW(), updated_at = NOW()
+WHERE id = $1 AND status = 'queued'
+RETURNING
+    id,
+    kind,
+    status,
+    franchise_id,
+    student_id,
+    target_worker_id,
+    worker_id,
+    heartbeat,
+    completed_payload,
+    created_at,
+    updated_at,
+    started_at,
+    completed_at
+"#;
+
+const QUERY_INSERT_OPERATOR_AUDIT: &str = r#"
+INSERT INTO grade_scrape_job_events (job_id, level, message, payload)
+VALUES ($1, 'info', $2, $3::jsonb)
 "#;
 
 const QUERY_RUNNING_JOB_FOR_WORKER: &str = r#"
@@ -723,6 +775,88 @@ pub async fn get_job(
         .bind(franchise_id)
         .fetch_optional(neon_db)
         .await?)
+}
+
+async fn require_queued_job(
+    tx: &mut Transaction<'_, Postgres>,
+    job_id: Uuid,
+) -> Result<String, ApiError> {
+    match query_as::<_, (String, Option<String>)>(QUERY_LOCK_JOB_STATUS)
+        .bind(job_id)
+        .fetch_optional(&mut **tx)
+        .await?
+    {
+        None => Err(ApiError::NotFound),
+        Some((status, target_worker_id)) if status == "queued" => {
+            target_worker_id.ok_or(ApiError::Unavailable)
+        }
+        Some(_) => Err(ApiError::Conflict(
+            "Only queued jobs may be changed by an operator".into(),
+        )),
+    }
+}
+
+pub async fn retarget_queued_job(
+    neon_db: &PgPool,
+    job_id: Uuid,
+    target_worker_id: &str,
+    operator_id: &str,
+    reason: &str,
+) -> Result<WorkerJob, ApiError> {
+    if target_worker_id.is_empty() || target_worker_id.trim() != target_worker_id {
+        return Err(ApiError::BadRequest(
+            "Target worker must be a valid identifier".into(),
+        ));
+    }
+    let reason = validated_operator_reason(reason)?;
+    let mut tx = neon_db.begin().await?;
+    let old_target_worker_id = require_queued_job(&mut tx, job_id).await?;
+    let job = query_as::<_, WorkerJob>(QUERY_RETARGET_QUEUED_JOB)
+        .bind(job_id)
+        .bind(target_worker_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ApiError::Unavailable)?;
+    query(QUERY_INSERT_OPERATOR_AUDIT)
+        .bind(job_id)
+        .bind("Operator retargeted queued job")
+        .bind(serde_json::json!({
+            "operator_id": operator_id,
+            "old_target_worker_id": old_target_worker_id,
+            "new_target_worker_id": target_worker_id,
+            "reason": reason,
+        }))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(job)
+}
+
+pub async fn cancel_queued_job(
+    neon_db: &PgPool,
+    job_id: Uuid,
+    operator_id: &str,
+    reason: &str,
+) -> Result<WorkerJob, ApiError> {
+    let reason = validated_operator_reason(reason)?;
+    let mut tx = neon_db.begin().await?;
+    require_queued_job(&mut tx, job_id).await?;
+    let job = query_as::<_, WorkerJob>(QUERY_CANCEL_QUEUED_JOB)
+        .bind(job_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(ApiError::Unavailable)?;
+    query(QUERY_INSERT_OPERATOR_AUDIT)
+        .bind(job_id)
+        .bind("Operator cancelled queued job")
+        .bind(serde_json::json!({
+            "operator_id": operator_id,
+            "reason": reason,
+        }))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(job)
 }
 
 pub async fn get_running_job_for_worker(

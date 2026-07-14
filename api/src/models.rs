@@ -1125,6 +1125,57 @@ impl SchedulerJobRequest {
     }
 }
 
+pub(crate) fn validated_operator_reason(reason: &str) -> Result<&str, ApiError> {
+    let reason = reason.trim();
+    if reason.is_empty() || reason.chars().count() > 256 {
+        return Err(ApiError::BadRequest(
+            "Operator reason must contain between 1 and 256 characters".into(),
+        ));
+    }
+    Ok(reason)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorRetargetJobRequest {
+    pub target_worker_id: String,
+    pub reason: String,
+}
+
+impl OperatorRetargetJobRequest {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        if self.target_worker_id.is_empty() || self.target_worker_id.trim() != self.target_worker_id
+        {
+            return Err(ApiError::BadRequest(
+                "Target worker must be a valid identifier".into(),
+            ));
+        }
+        validated_operator_reason(&self.reason)?;
+        Ok(())
+    }
+
+    pub fn reason(&self) -> Result<&str, ApiError> {
+        validated_operator_reason(&self.reason)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorCancelJobRequest {
+    pub reason: String,
+}
+
+impl OperatorCancelJobRequest {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        validated_operator_reason(&self.reason)?;
+        Ok(())
+    }
+
+    pub fn reason(&self) -> Result<&str, ApiError> {
+        validated_operator_reason(&self.reason)
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ReconciliationSummary {
     pub canonical_students: usize,

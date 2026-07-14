@@ -11,6 +11,8 @@ use thiserror::Error;
 pub enum ApiError {
     #[error("unauthorized")]
     Unauthorized,
+    #[error("forbidden")]
+    Forbidden,
     #[error("rate limited")]
     RateLimited,
     #[error("not found")]
@@ -35,6 +37,7 @@ impl ApiError {
     fn status_code(&self) -> StatusCode {
         match self {
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ApiError::Forbidden => StatusCode::FORBIDDEN,
             ApiError::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -50,6 +53,7 @@ impl ApiError {
     fn code(&self) -> &'static str {
         match self {
             ApiError::Unauthorized => "unauthorized",
+            ApiError::Forbidden => "forbidden",
             ApiError::RateLimited => "rate_limited",
             ApiError::NotFound => "not_found",
             ApiError::BadRequest(_) => "bad_request",
@@ -68,6 +72,7 @@ impl ApiError {
                 msg.clone()
             }
             ApiError::Unauthorized => "Unauthorized".to_string(),
+            ApiError::Forbidden => "Forbidden".to_string(),
             ApiError::RateLimited => "Too many requests".to_string(),
             ApiError::NotFound => "Resource not found".to_string(),
             ApiError::Unavailable => "Service unavailable".to_string(),

@@ -23,11 +23,11 @@ use crate::models::{
     worker_owns_running_job, worker_result_state_action, AdminHealthErrorCategory,
     AuthLoginRequest, AuthLoginResponse, DashboardHealthResponse, DashboardResponse,
     FranchiseHealthCounts, JobEventsResponse, LatestResultsResponse, ManualPullRequest,
-    ManualPullResponse, OperatorAlternateCredentialsRequest, PublicJob, PublicJobEvent,
-    PublicJobResult, PublicStudent, ReconciliationSummary, SchedulerJobRequest, StudentQuery,
-    StudentsResponse, WorkerCompletionRequest, WorkerEventRequest, WorkerFailRequest,
-    WorkerHeartbeatRequest, WorkerJobContext, WorkerJobsResponse, WorkerResultRequest,
-    WorkerResultStateAction,
+    ManualPullResponse, OperatorAlternateCredentialsRequest, OperatorCancelJobRequest,
+    OperatorRetargetJobRequest, PublicJob, PublicJobEvent, PublicJobResult, PublicStudent,
+    ReconciliationSummary, SchedulerJobRequest, StudentQuery, StudentsResponse,
+    WorkerCompletionRequest, WorkerEventRequest, WorkerFailRequest, WorkerHeartbeatRequest,
+    WorkerJobContext, WorkerJobsResponse, WorkerResultRequest, WorkerResultStateAction,
 };
 use crate::queries;
 use crate::rate_limit::{ApiRole, READINESS_REQUESTS_PER_MINUTE};
@@ -80,6 +80,14 @@ pub fn create_router(state: AppState) -> Router {
 
     let operator = Router::new()
         .route(
+            "/api/operator/jobs/:job_id/retarget",
+            post(operator_retarget_job),
+        )
+        .route(
+            "/api/operator/jobs/:job_id/cancel",
+            post(operator_cancel_job),
+        )
+        .route(
             "/api/operator/students/:student_id/alternate-credentials",
             put(operator_put_alternate_credentials).delete(operator_delete_alternate_credentials),
         )
@@ -111,6 +119,47 @@ fn scoped_role(claims: &DashboardAuthClaims) -> Option<i32> {
         .role
         .as_deref()
         .and_then(|value| value.parse::<i32>().ok())
+}
+
+fn authorize_scheduler_job(
+    claims: &SchedulerAuthClaims,
+    request: &SchedulerJobRequest,
+) -> Result<(), ApiError> {
+    request.validate()?;
+    if !claims.franchise_ids.contains(&request.franchise_id)
+        || !claims.target_worker_ids.contains(&request.target_worker_id)
+    {
+        return Err(ApiError::Forbidden);
+    }
+    Ok(())
+}
+
+fn authorize_scheduler_reconcile(claims: &SchedulerAuthClaims) -> Result<(), ApiError> {
+    if !claims.can_reconcile {
+        return Err(ApiError::Forbidden);
+    }
+    Ok(())
+}
+
+fn manual_pull_target(state: &AppState) -> &str {
+    &state.config.default_worker_id
+}
+
+fn authorize_operator_retarget(
+    state: &AppState,
+    request: &OperatorRetargetJobRequest,
+) -> Result<(), ApiError> {
+    request.validate()?;
+    if !state
+        .config
+        .worker_api_keyring
+        .contains_key(&request.target_worker_id)
+    {
+        return Err(ApiError::BadRequest(
+            "Target worker is not configured".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn active_worker_lease(claims: &WorkerAuthClaims) -> Result<Uuid, ApiError> {
@@ -335,14 +384,16 @@ pub async fn scheduler_job(
     Extension(claims): Extension<SchedulerAuthClaims>,
     Json(payload): Json<SchedulerJobRequest>,
 ) -> Result<Json<PublicJob>, ApiError> {
+    authorize_scheduler_job(&claims, &payload)?;
     let job = queries::create_scheduler_job(&state.neon_db, &claims.scheduler_id, &payload).await?;
     Ok(Json(PublicJob::from(job)))
 }
 
 pub async fn scheduler_reconcile_students(
     State(state): State<AppState>,
-    Extension(_claims): Extension<SchedulerAuthClaims>,
+    Extension(claims): Extension<SchedulerAuthClaims>,
 ) -> Result<Json<ReconciliationSummary>, ApiError> {
+    authorize_scheduler_reconcile(&claims)?;
     let students = crm::list_students(&state.config.crm_database_url, None, None).await?;
     let eligible_ids: Vec<i64> = students
         .iter()
@@ -422,6 +473,42 @@ pub async fn operator_delete_alternate_credentials(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn operator_retarget_job(
+    State(state): State<AppState>,
+    Extension(claims): Extension<OperatorAuthClaims>,
+    Path(job_id): Path<Uuid>,
+    Json(payload): Json<OperatorRetargetJobRequest>,
+) -> Result<Json<PublicJob>, ApiError> {
+    authorize_operator_retarget(&state, &payload)?;
+    let reason = payload.reason()?;
+    let job = queries::retarget_queued_job(
+        &state.neon_db,
+        job_id,
+        &payload.target_worker_id,
+        &claims.operator_id,
+        reason,
+    )
+    .await?;
+    Ok(Json(PublicJob::from(job)))
+}
+
+pub async fn operator_cancel_job(
+    State(state): State<AppState>,
+    Extension(claims): Extension<OperatorAuthClaims>,
+    Path(job_id): Path<Uuid>,
+    Json(payload): Json<OperatorCancelJobRequest>,
+) -> Result<Json<PublicJob>, ApiError> {
+    payload.validate()?;
+    let job = queries::cancel_queued_job(
+        &state.neon_db,
+        job_id,
+        &claims.operator_id,
+        payload.reason()?,
+    )
+    .await?;
+    Ok(Json(PublicJob::from(job)))
+}
+
 pub async fn list_students(
     State(state): State<AppState>,
     Extension(claims): Extension<DashboardAuthClaims>,
@@ -473,7 +560,7 @@ pub async fn manual_pull(
         franchise_id,
         scoped_role(&claims),
         claims.user.as_deref(),
-        &state.config.default_worker_id,
+        manual_pull_target(&state),
     )
     .await?;
     Ok(Json(created))
@@ -748,7 +835,7 @@ pub async fn fail_job(
 
 #[cfg(test)]
 mod tests {
-    use std::future::Future;
+    use std::{future::Future, sync::Arc};
 
     use super::*;
     use axum::body::Body;
@@ -879,6 +966,128 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
+    }
+
+    fn scheduler_claims(
+        franchise_ids: impl IntoIterator<Item = i32>,
+        target_worker_ids: impl IntoIterator<Item = &'static str>,
+        can_reconcile: bool,
+    ) -> SchedulerAuthClaims {
+        SchedulerAuthClaims {
+            scheduler_id: "dev-alice".into(),
+            key_id: "2026-07".into(),
+            franchise_ids: Arc::new(franchise_ids.into_iter().collect()),
+            target_worker_ids: Arc::new(
+                target_worker_ids.into_iter().map(str::to_string).collect(),
+            ),
+            can_reconcile,
+        }
+    }
+
+    fn scheduler_request(franchise_id: i32, target_worker_id: &str) -> SchedulerJobRequest {
+        serde_json::from_value(serde_json::json!({
+            "idempotency_key": Uuid::nil(),
+            "kind": "grade",
+            "franchise_id": franchise_id,
+            "target_worker_id": target_worker_id,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn scheduler_allows_scoped_franchise_and_target() {
+        let claims = scheduler_claims([11], ["worker-test"], false);
+        let request = scheduler_request(11, "worker-test");
+
+        assert!(authorize_scheduler_job(&claims, &request).is_ok());
+    }
+
+    #[test]
+    fn scheduler_rejects_unscoped_franchise() {
+        let claims = scheduler_claims([11], ["worker-test"], false);
+        let request = scheduler_request(12, "worker-test");
+
+        assert!(matches!(
+            authorize_scheduler_job(&claims, &request),
+            Err(ApiError::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn scheduler_rejects_unscoped_target() {
+        let claims = SchedulerAuthClaims {
+            scheduler_id: "dev-alice".into(),
+            key_id: "2026-07".into(),
+            franchise_ids: Arc::new([11].into_iter().collect()),
+            target_worker_ids: Arc::new(["dev-alice-laptop".into()].into_iter().collect()),
+            can_reconcile: false,
+        };
+        let request: SchedulerJobRequest = serde_json::from_value(serde_json::json!({
+            "idempotency_key": Uuid::nil(),
+            "kind": "grade",
+            "franchise_id": 11,
+            "target_worker_id": "prod-windows-01"
+        }))
+        .unwrap();
+        assert!(matches!(
+            authorize_scheduler_job(&claims, &request),
+            Err(ApiError::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn scheduler_reconcile_requires_capability() {
+        let denied = scheduler_claims([11], ["worker-test"], false);
+        let allowed = scheduler_claims([11], ["worker-test"], true);
+
+        assert!(matches!(
+            authorize_scheduler_reconcile(&denied),
+            Err(ApiError::Forbidden)
+        ));
+        assert!(authorize_scheduler_reconcile(&allowed).is_ok());
+    }
+
+    #[tokio::test]
+    async fn manual_pull_uses_default_worker() {
+        let state = test_state("manual-target-test");
+        assert_eq!(manual_pull_target(&state), "worker-test");
+    }
+
+    #[tokio::test]
+    async fn operator_retarget_requires_configured_worker() {
+        let state = test_state("operator-retarget-test");
+        let allowed = OperatorRetargetJobRequest {
+            target_worker_id: "worker-test".into(),
+            reason: "Move queued job to the local development worker".into(),
+        };
+        let denied = OperatorRetargetJobRequest {
+            target_worker_id: "unknown-worker".into(),
+            reason: "Move queued job to an unregistered worker".into(),
+        };
+
+        assert!(authorize_operator_retarget(&state, &allowed).is_ok());
+        assert!(matches!(
+            authorize_operator_retarget(&state, &denied),
+            Err(ApiError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn operator_actions_require_nonblank_bounded_reason() {
+        let blank = OperatorCancelJobRequest {
+            reason: "   ".into(),
+        };
+        let oversized = OperatorRetargetJobRequest {
+            target_worker_id: "worker-test".into(),
+            reason: "x".repeat(257),
+        };
+        let valid = OperatorCancelJobRequest {
+            reason: "No longer required".into(),
+        };
+
+        assert!(matches!(blank.validate(), Err(ApiError::BadRequest(_))));
+        assert!(matches!(oversized.validate(), Err(ApiError::BadRequest(_))));
+        assert!(valid.validate().is_ok());
     }
 
     #[tokio::test]
@@ -1177,6 +1386,40 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         }
+    }
+
+    #[tokio::test]
+    async fn operator_job_controls_require_an_operator_bearer_token() {
+        let app = create_router(test_state("operator-job-auth"));
+        for uri in [
+            "/api/operator/jobs/00000000-0000-0000-0000-000000000000/retarget",
+            "/api/operator/jobs/00000000-0000-0000-0000-000000000000/cancel",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+    }
+
+    #[tokio::test]
+    async fn forbidden_error_has_fixed_http_contract() {
+        let response = ApiError::Forbidden.into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({"error": {"code": "forbidden", "message": "Forbidden"}})
+        );
     }
 
     #[tokio::test]
