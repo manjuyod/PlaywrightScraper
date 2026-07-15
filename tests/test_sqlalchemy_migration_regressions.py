@@ -17,23 +17,25 @@ class FakeResult:
         return self._rows[0] if self._rows else None
 
 
-def test_runner_student_query_uses_tuple_params(monkeypatch):
-    class FakeConnection:
-        def exec_driver_sql(self, query, params=None):
-            if "FROM student_auth" in query:
-                return FakeResult([])
-            assert isinstance(params, tuple)
-            return FakeResult([])
+def test_runner_student_loading_uses_grade_db_cli(monkeypatch):
+    calls = []
 
-        def __enter__(self):
-            return self
+    class FakeClient:
+        def start_job(self, **kwargs):
+            calls.append(("start", kwargs))
+            return {"job_id": "job", "lease_token": "lease", "students": []}
 
-        def __exit__(self, *_args):
-            return None
+        def fail_job(self, **kwargs):
+            calls.append(("fail", kwargs))
 
-    monkeypatch.setattr(runner, "db_conn", lambda: FakeConnection())
+    monkeypatch.setattr(runner, "GradeDbClient", FakeClient)
 
     assert runner.get_students_from_db(status="synced") == []
+    assert calls[0] == (
+        "start",
+        {"kind": "grade", "franchise_id": None, "student_id": None},
+    )
+    assert calls[1][0] == "fail"
 
 
 def test_add_student_fetches_returning_id_before_commit(monkeypatch):

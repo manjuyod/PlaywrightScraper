@@ -14,16 +14,13 @@ def _executable_script_blocks(template: str) -> list[str]:
         flags=re.IGNORECASE | re.DOTALL,
     )
     return [
-        body
-        for attrs, body in script_blocks
-        if "application/json" not in attrs.lower()
+        body for attrs, body in script_blocks if "application/json" not in attrs.lower()
     ]
 
 
 def test_templates_do_not_assign_raw_jinja_inside_javascript() -> None:
     template_paths = [
-        PROJECT_ROOT / "ui" / "templates" / "franchise.html",
-        PROJECT_ROOT / "ui" / "templates" / "student_heatmap.html",
+        PROJECT_ROOT / "ui" / "templates" / "dashboard.html",
     ]
 
     offenders: list[str] = []

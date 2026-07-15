@@ -31,7 +31,6 @@ class GPS(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Authenticate the user on the GPS parent portal."""
-        await self.page.context.tracing.start(screenshots=True, snapshots=True)
         username_selector = "input#identification"
         password_selector = "input#ember535"
         await universal_login_flow(
@@ -45,14 +44,10 @@ class GPS(PortalEngine):
         )
 
         # Pictograph auth (three picks)
-        print("waiting on pictograph\n")
         await self.do_gps_auth()
-
-        await self.page.context.tracing.stop()
 
     # Login Helper
     async def do_gps_auth(self):
-        print(self.auth_images)
         assert self.auth_images is not None  # must be provided by caller/DB
 
         await self.page.locator(".pictograph-list img.tile-icon").first.wait_for(
@@ -67,14 +62,11 @@ class GPS(PortalEngine):
             
             user_match = None
             for alt in images_alts:
-                print(f"Checking if {alt} in {self.auth_images}")
                 if alt in self.auth_images:
                     user_match = alt
                     break
             if not user_match:
-                raise RuntimeError(
-                    f"No pictograph match found in {images_alts} for {self.auth_images}"
-                )
+                raise RuntimeError("pictograph authentication failed")
             await self.page.locator(
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()

@@ -40,7 +40,7 @@ class PortalEngine(ABC):
     async def raise_login_error_if(self, error_condition: bool, message: str = ""):
         """Recieves a condition on which the login has failed, raises LoginError if true"""
         if error_condition:
-            raise self.LoginError(f'@{self.login_url}\nFailed to login {self.sid}\n{message}')
+            raise self.LoginError("portal login rejected")
 
     @staticmethod
 

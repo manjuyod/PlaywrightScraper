@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>CRM Login</title>
+        <title>{{ page_title }}</title>
         <link
             rel="icon"
             type="image/webp"
@@ -12,15 +12,7 @@
         {% include "_react_assets.html" %}
     </head>
     <body>
-        {% set messages = get_flashed_messages() %}
         <div id="tc-react-root"></div>
-        <script id="tc-page-data" type="application/json">
-            {
-                "page": "login",
-                "csrfToken": {{ csrf_token|tojson }},
-                "logoUrl": {{ url_for('static', filename='imgs/tc_logo.webp')|tojson }},
-                "messages": {{ messages|tojson }}
-            }
-        </script>
+        <script id="tc-page-data" type="application/json">{{ page_data|tojson }}</script>
     </body>
 </html>

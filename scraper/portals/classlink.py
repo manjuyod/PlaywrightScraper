@@ -37,12 +37,8 @@ class Classlink(PortalEngine):
                 async with self.page.expect_navigation(url='**/nav-wrapper/student/portal/student/**', wait_until="domcontentloaded", timeout=0) as _:
                     await self.page.locator('#samlLoginLink').click()
 
-        except Exception as e:
-            print(e)
-            raise self.LoginError(e)
-        finally:
-            # await self.page.wait_for_load_state("networkidle")
-            await self.page.context.tracing.stop()
+        except Exception:
+            raise self.LoginError("portal login rejected") from None
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(
         stop=stop_after_attempt(3),

@@ -332,9 +332,8 @@ class CanvasEngine(PortalEngine):
             )
 
             await self.post_login()
-        except Exception as e:
-            print(e)
-            raise LoginError(f"Canvas login failed: {e}") from e
+        except Exception:
+            raise LoginError("portal login rejected") from None
 
     async def post_login(self):
         """
@@ -656,17 +655,16 @@ class CanvasEngine(PortalEngine):
 
     async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
         await self.page.wait_for_load_state("domcontentloaded")
-        soup = await self.get_soup()
 
         agenda: dict[str, list[tuple]] = {}
         await self.page.locator('[data-testid="dashboard-options-button"]').click()
         await self.page.locator('[data-testid="list-view-menu-item"]').click()
         await self.page.wait_for_timeout(1500)
+        soup = await self.get_soup()
 
         try:
             all_days = soup.find_all("div", attrs={"data-testid": "day"})
 
-            print(f"Found {len(all_days)} days")
             today_passed = False
 
             for i, day_block in enumerate(all_days):
@@ -696,18 +694,15 @@ class CanvasEngine(PortalEngine):
 
                 assignments: list[tuple] = []
                 class_groups = day_block.select("div.planner-grouping")
-                print(f"Found {len(class_groups)} classes with assignments due on {due_date}")
 
                 for course in class_groups:
                     title_elem = course.select_one("span.Grouping-styles__title")
                     class_title = title_elem.get_text(strip=True) if title_elem else None
-                    print("-", class_title)
 
                     if class_title is None:
                         continue
 
                     assignment_items = course.select('div[data-testid="planner-item-raw"]')
-                    print(f"\t{len(assignment_items)} due")
 
                     for assignment in assignment_items:
                         a = assignment.select_one("a")
@@ -720,13 +715,12 @@ class CanvasEngine(PortalEngine):
                         due_time_elem = assignment.select_one(".PlannerItem-styles__due span[aria-hidden='true']")
                         due_time = due_time_elem.get_text(strip=True) if due_time_elem else None
 
-                        print("\t-", assignment_title)
                         assignments.append((class_title, assignment_title, due_time))
 
                 if len(assignments) > 0:
                     agenda[due_date] = assignments
 
-        except Exception as e:
-            print(f"Error while gathering the agenda {type(e)}: {e}")
+        except Exception:
+            pass
         finally:
             return agenda

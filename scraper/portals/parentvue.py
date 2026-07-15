@@ -35,11 +35,8 @@ class ParentVUE(PortalEngine):
             print(f"[PARENTVUE] Reached Home Page; Navigating to Gradebook for {first_name}")
             await self.page.get_by_role("listitem").filter(has_text="Grade Book").click()
             await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
-        except Exception as e:
-            print(f"{type(e)}: {e}")
+        except Exception:
             raise
-        finally:
-            await self.page.context.tracing.stop()
 
 
 

@@ -112,12 +112,8 @@ class Aeries(PortalEngine):
             #     Try again with Valid Credentials.
             # """, exact=False)):
             #     raise self.LoginError("Invalid credentials")
-        except Exception as e:
-            print(e)
+        except Exception:
             raise
-        finally:
-            await self.page.context.tracing.stop()
-            print("stopped tracing")
 
     async def iusd_login(self):
         username_selector = "#input28"
@@ -207,11 +203,8 @@ class Aeries(PortalEngine):
                 pprint.pprint(courses_dict)
                 return courses_dict
 
-        except Exception as e:
-            print(e)
+        except Exception:
             raise
-        finally:
-            await self.page.context.tracing.stop()
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(500)

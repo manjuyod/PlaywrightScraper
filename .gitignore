@@ -23,9 +23,6 @@ config/*.db
 logs/
 *.log
 
-# Local configs
-sheet_mod_grades.json
-
 # Other
 output/
 captcha.png
@@ -36,6 +33,7 @@ tmp
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+grade_db/target/
 replit.nix
 
 # IDE / Editor

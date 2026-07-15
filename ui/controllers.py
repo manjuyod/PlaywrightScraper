@@ -152,7 +152,7 @@ def create_grade_line_graph(student: Student):
     
     df = df.sort_index().ffill() # fills NaN values with the previous value   
     # Note: this graph looks bad due to courses that are the same but are semantically different
-    # TODO: FIX THIS ^ course name similarity? (in scraper/insert_grades.py)
+    # TODO: normalize equivalent course titles before comparison.
     
     y_max = max(df['grade']) + 10
     # create graph
