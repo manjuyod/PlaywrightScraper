@@ -169,9 +169,3 @@ To add or update a portal:
 2. Register the portal key in `scraper/portals/__init__.py`.
 3. Make sure `scraper/portals/utils.py` can infer the portal key from the stored portal URL.
 4. Add or update fixtures/tests when the parsing behavior changes.
-
-## Current TODOs
-
-- Make logging consistent across dashboard jobs and scraper runs.
-- Continue adding portal engines.
-- Consider a dedicated least-privilege Neon role for the public dashboard deployment.
