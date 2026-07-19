@@ -13,7 +13,6 @@ from threading import Event, Lock
 import asyncio
 from scraper.runner import main as grade_checker
 from scraper.agenda import main as agenda_checker
-from scraper.work_flows.insert_grades import insert_grades
 from queue import Queue
 
 from flask import flash
@@ -54,7 +53,7 @@ def run_coro(coro):
 def start_grade_fetch_job(job_id: str, total: int) -> str:
     print(f"Starting scraper for job {job_id}")
     # franchise_id
-    NONGOAL_STEPS = 3 # login, scrape, insert (these steps are not tracked by the scraper but we want to account for them in progress)
+    NONGOAL_STEPS = 2 # job startup and completion surround per-student progress
     total_steps = total + NONGOAL_STEPS
     print(total_steps, "steps total", total, "students")
     jobs[job_id] = JobState(total=total, steps=total_steps)
@@ -69,9 +68,8 @@ def start_grade_fetch_job(job_id: str, total: int) -> str:
         job = runners.get(job_id, None)
         assert job is not None
         print("Runner cancelled?", job.cancelled())
-        print("Runner errored?", job.exception())
+        print("Runner errored?", job.exception() is not None)
         runners.pop(job_id, None)
-        insert_grades()
         jobs[job_id].next_step()
         print(f"Scraper for job {job_id} done. {jobs[job_id].step} / {jobs[job_id].steps} steps completed.")
 
@@ -106,7 +104,7 @@ def start_agenda_fetch_job(job_id: str, total: int) -> str:
         job = runners.get(job_id, None)
         assert job is not None
         print("Runner cancelled?", job.cancelled())
-        print("Runner errored?", job.exception())
+        print("Runner errored?", job.exception() is not None)
         runners.pop(job_id, None)
         jobs[job_id].next_step()
         print(

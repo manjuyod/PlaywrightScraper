@@ -284,7 +284,7 @@ def delete_students(student_ids: list[int], master_key: bytes | None = None):
 
 
 def get_active_franchises() -> list[DictRow]:
-    query = "SELECT franchiseid FROM spreadsheets"
+    query = "SELECT DISTINCT franchiseid FROM student WHERE franchiseid IS NOT NULL"
     franchises = fetch(query)
     return franchises if franchises is not None else []
 

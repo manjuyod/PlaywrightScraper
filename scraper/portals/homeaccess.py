@@ -62,14 +62,8 @@ class HomeAccess(PortalEngine):
                 frame is None,
                 "HomeAccess classwork iframe was not available after login",
             )
-        except Exception as e:
-            print(e)
+        except Exception:
             raise
-        finally:
-            try:
-                await self.page.context.tracing.stop()
-            except Exception:
-                pass
 
     @retry(
         stop=stop_after_attempt(3),

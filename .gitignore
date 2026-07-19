@@ -23,19 +23,19 @@ config/*.db
 logs/
 *.log
 
-# Local configs
-sheet_mod_grades.json
-
 # Other
 output/
 captcha.png
 gilbert_parent_portal.html
 *.jsonl
 tmp
+*.json
 .playwright-cli/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+grade_db/target/
+replit.nix
 
 # IDE / Editor
 .idea/
@@ -53,5 +53,6 @@ Thumbs.db
 
 # agentic items as a result of gitnexus
 .claude
+.codex/
 CLAUDE.md
 AGENTS.md

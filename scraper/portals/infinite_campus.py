@@ -46,11 +46,8 @@ class InfiniteCampus(PortalEngine):
             print("Successfully reached the home page")
             await self.select_student(first_name, self.page) # select for student if necessary
             print("[IC] Logged in and on student/home.")
-        except self.LoginError as e:
-            print(e)
+        except self.LoginError:
             raise
-        finally:
-            await self.page.context.tracing.stop()
     # helper
     @staticmethod
     async def select_student(first_name: str, page: Page):

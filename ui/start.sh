@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export ODBCSYSINI="${ODBCSYSINI:-$HOME/.odbc}"
+if [[ "$(uname -s)" == "Linux" ]]; then
+    export ODBCSYSINI="${ODBCSYSINI:-$HOME/.odbc}"
+    bash setup_odbc.sh
+fi
 
-bash setup_odbc.sh
 mkdir -p ui/tmp
 
 # stop old nginx if needed

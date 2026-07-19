@@ -62,18 +62,8 @@ standard_fetch_retry = retry(
 
 @asynccontextmanager
 async def tracing_context(page: Page):
-    """
-    Context manager for Playwright tracing.
-
-    Usage:
-        async with tracing_context(self.page):
-            # login/fetch logic
-    """
-    await page.context.tracing.start(screenshots=True, snapshots=True)
-    try:
-        yield
-    finally:
-        await page.context.tracing.stop()
+    """Compatibility context that intentionally records no login artifacts."""
+    yield
 
 
 async def exists(elem: Locator, timeout: int = 1000):

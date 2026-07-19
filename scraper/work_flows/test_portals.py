@@ -15,14 +15,14 @@ async def test_portal(browser, portal, student: dict | None = None) -> bool:
     if student is None:
         _students = filter_group(students, 'portal', portal)
         student = random.choice(_students) if len(_students) > 0 else None
-        print(student)
+        print(f"Selected CRM student {student.get('db_id') if student else 'none'}")
         if student is None:
             return True
     try:
         await scrape_one(browser, student)
         return True
     except Exception as e:
-        print(type(e), e, flush=True)
+        print(type(e).__name__, flush=True)
         return False
 
 

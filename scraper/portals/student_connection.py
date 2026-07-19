@@ -50,11 +50,8 @@ class StudentConnection(PortalEngine):
 
 
 
-        except Exception as e:
-            print(e)
+        except Exception:
             raise
-        finally:
-            await self.page.context.tracing.stop()
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),

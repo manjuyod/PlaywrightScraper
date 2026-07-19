@@ -1,0 +1,28 @@
+name: grade-db Windows
+
+on:
+  push:
+    paths:
+      - "grade_db/**"
+      - ".github/workflows/grade-db-windows.yml"
+  pull_request:
+    paths:
+      - "grade_db/**"
+      - ".github/workflows/grade-db-windows.yml"
+
+jobs:
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: grade_db
+      - run: cargo fmt --manifest-path grade_db/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path grade_db/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+      - run: cargo test --manifest-path grade_db/Cargo.toml --target x86_64-pc-windows-msvc
+      - run: cargo build --manifest-path grade_db/Cargo.toml --target x86_64-pc-windows-msvc --release

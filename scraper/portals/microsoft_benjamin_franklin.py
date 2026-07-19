@@ -31,7 +31,6 @@ class Microsoft(PortalEngine):
                 so this argument is ignored, but it is accepted for
                 compatibility with the ``PortalEngine`` interface.
         """
-        await self.page.context.tracing.start(screenshots=True, snapshots=True)
         await self.page.goto(self.login_url, wait_until="domcontentloaded")
         await self.microsoft_login()
         # Wait until the URL contains "home" indicating successful login

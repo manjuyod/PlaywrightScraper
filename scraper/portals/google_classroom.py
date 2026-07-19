@@ -36,11 +36,8 @@ class GoogleClassroom(PortalEngine):
                         auth_images=self.auth_images
                     )
                     await scraper.login()
-        except Exception as e:
-            print(f"{type(e)}: {e}")
+        except Exception:
             raise
-        finally:
-            await self.page.context.tracing.stop()
 
     async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming") -> dict[str, list[tuple]]:
         agenda: dict[str, list[tuple]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
@@ -78,7 +75,6 @@ class GoogleClassroom(PortalEngine):
             soup = await self.get_soup()
 
             items = soup.select('li:has(a[href*="/details"]) div[data-course-id][data-stream-item-id]')
-            print(f"found {len(items)} items")
 
             for card in items:
                 # title/course live in the first ".y9bEQb" area
@@ -114,10 +110,8 @@ class GoogleClassroom(PortalEngine):
                 else:
                     agenda[due_date].append((course, title, due_time))
             # return agenda
-        except Exception as e:
-            import traceback
-            print(e)
-            traceback.print_exc()
+        except Exception:
+            pass
         return agenda
 
     async def fetch_grades(self) -> Dict[str, Any]:
