@@ -23,6 +23,7 @@ dependencies = [
     "rapidfuzz>=3.14.3",
     "greenlet>=3.2.3",
     "gunicorn>=25.2.0",
+    "argon2>=0.1.10",
 ]
 
 [dependency-groups]
