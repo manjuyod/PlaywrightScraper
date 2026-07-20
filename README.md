@@ -10,13 +10,13 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 
 Routes:
 
-- `/` shows runnable-student summaries for every CRM franchise plus active and recent canonical jobs.
-- `/health` and `/login` are compatibility redirects to `/`.
+- `/` shows runnable-student summaries for every CRM franchise plus active and recent canonical jobs only when `PYTHON_ENV=dev`; other environments receive a 403 unauthorized page.
+- `/health` and `/login` are compatibility redirects to `/` and therefore reach the same environment gate.
 - `/franchise/<franchise_id>` shows runnable CRM students, grade-level filters, current grade snapshots, standing, status, and CRM primary-portal links.
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
-- `/api/jobs` returns shaped, read-only job progress and is polled by the overview every 15 seconds.
+- `/api/jobs` returns shaped, read-only job progress only in dev mode and is polled by the overview every 15 seconds.
 
-The web surface has no login, session, forms, scraper launch controls, or database mutations. Anyone who can reach the deployment URL can view student names and grades. `ui/ext_jobs.py` remains only for legacy runner callback compatibility and is not imported by Flask.
+The web surface has no login, session, forms, scraper launch controls, or database mutations. Outside dev mode, franchise and student pages remain available only through their direct URLs; the overview does not enumerate them. Anyone with a direct franchise or student URL can still view the corresponding student names and grades. `ui/ext_jobs.py` remains only for legacy runner callback compatibility and is not imported by Flask.
 
 ## Local Dashboard Run
 
@@ -108,7 +108,7 @@ The bundled nginx config forwards `X-Forwarded-For` and `X-Forwarded-Proto`; Fla
 
 Optional:
 
-- `PYTHON_ENV=dev` affects runner notification behavior.
+- `PYTHON_ENV=dev` enables the dashboard overview and jobs API and affects runner notification behavior. When unset or set to any other value, `/` and `/api/jobs` return 403 while direct franchise and student URLs remain available.
 - `SLACK_WEBHOOK_URL` enables Slack notifications.
 - `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
 - `OPENAI_API_KEY` and `OPENAI_MODEL` are used by GPT-assisted portal utilities.

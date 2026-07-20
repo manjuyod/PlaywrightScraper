@@ -18,6 +18,7 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
     assert 'data.page === "home"' in javascript
     assert 'data.page === "franchise"' in javascript
     assert 'data.page === "student"' in javascript
+    assert "if (data.homeUrl)" in javascript
     for retired in (
         "LoginPage",
         "LogoutForm",
@@ -77,6 +78,18 @@ def test_retired_auth_templates_and_dependency_are_removed() -> None:
         "student_heatmap.html",
     ):
         assert not (ROOT / "ui" / "templates" / template).exists()
+
+
+def test_unauthorized_overview_template_is_static_and_actionless() -> None:
+    template = (ROOT / "ui" / "templates" / "unauthorized.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Unauthorized" in template
+    assert "development environment" in template
+    assert "direct franchise URL" in template
+    assert "<form" not in template
+    assert "tc-page-data" not in template
 
 
 def test_replit_proxy_does_not_forward_retired_auth_headers() -> None:

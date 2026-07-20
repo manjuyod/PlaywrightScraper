@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Iterable
 
 from flask import abort, jsonify, redirect, render_template, request, url_for
@@ -109,8 +110,18 @@ def _render_dashboard(page_data: dict[str, Any]):
     )
 
 
+def _is_dev_mode() -> bool:
+    return os.getenv("PYTHON_ENV", "").strip().lower() == "dev"
+
+
+def _unauthorized():
+    return render_template("unauthorized.html"), 403
+
+
 @app.get("/")
 def index():
+    if not _is_dev_mode():
+        return _unauthorized()
     students = dashboard.load_students()
     jobs = dashboard.load_jobs(limit=20)
     franchises = dashboard.summarize_franchises(students)
@@ -164,18 +175,18 @@ def franchise_view(franchise_id: int):
             ("high_school", "High School"),
         )
     ]
-    return _render_dashboard(
-        {
-            "page": "franchise",
-            "title": f"Franchise {franchise_id}",
-            "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
-            "homeUrl": url_for("index"),
-            "franchiseId": franchise_id,
-            "gradeFilter": grade_filter,
-            "filters": filters,
-            "students": [_student_card(student) for student in visible_students],
-        }
-    )
+    page_data = {
+        "page": "franchise",
+        "title": f"Franchise {franchise_id}",
+        "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
+        "franchiseId": franchise_id,
+        "gradeFilter": grade_filter,
+        "filters": filters,
+        "students": [_student_card(student) for student in visible_students],
+    }
+    if _is_dev_mode():
+        page_data["homeUrl"] = url_for("index")
+    return _render_dashboard(page_data)
 
 
 @app.get("/franchise/<int:franchise_id>/student/<int:crmstudentid>")
@@ -183,18 +194,20 @@ def student_view(franchise_id: int, crmstudentid: int):
     student = dashboard.load_student(franchise_id, crmstudentid)
     if student is None:
         abort(404)
-    return _render_dashboard(
-        {
-            "page": "student",
-            "title": f"{student.first_name} {student.last_name}",
-            "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
-            "homeUrl": url_for("index"),
-            "backUrl": url_for("franchise_view", franchise_id=franchise_id),
-            "student": _student_detail(student),
-        }
-    )
+    page_data = {
+        "page": "student",
+        "title": f"{student.first_name} {student.last_name}",
+        "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
+        "backUrl": url_for("franchise_view", franchise_id=franchise_id),
+        "student": _student_detail(student),
+    }
+    if _is_dev_mode():
+        page_data["homeUrl"] = url_for("index")
+    return _render_dashboard(page_data)
 
 
 @app.get("/api/jobs")
 def jobs_api():
+    if not _is_dev_mode():
+        return _unauthorized()
     return jsonify({"jobs": dashboard.load_jobs(limit=20)})

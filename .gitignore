@@ -36,6 +36,7 @@ tmp
 .pytest_cache/
 grade_db/target/
 replit.nix
+notes.md
 
 # IDE / Editor
 .idea/

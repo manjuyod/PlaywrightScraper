@@ -32,7 +32,7 @@ PlaywrightScraper/
 3. Python uses Playwright to collect one student at a time and posts each result immediately.
 4. Rust rechecks CRM eligibility and atomically records the audit result and canonical `students_grades_20262027` update in Neon.
 5. The dashboard independently selects the runnable CRM roster, batch-reads canonical Neon state, and merges strictly by `crmstudentid`.
-6. The overview reads `grade_scrape_jobs` and polls `/api/jobs` every 15 seconds. It cannot start, heartbeat, complete, or fail jobs.
+6. In dev mode, the overview reads `grade_scrape_jobs` and polls `/api/jobs` every 15 seconds. It cannot start, heartbeat, complete, or fail jobs.
 
 ## Dashboard Architecture
 
@@ -40,11 +40,13 @@ PlaywrightScraper/
 
 Routes:
 
-- `GET /` shows all runnable franchises plus active and 20 recent jobs.
-- `GET /health` and `GET /login` redirect to `/` for old bookmarks.
+- `GET /` shows all runnable franchises plus active and 20 recent jobs only when `PYTHON_ENV=dev`; otherwise it returns a 403 unauthorized page without querying either database.
+- `GET /health` and `GET /login` redirect to `/` for old bookmarks and inherit its environment gate.
 - `GET /franchise/<franchise_id>` shows CRM-runnable students with grade filters.
 - `GET /franchise/<franchise_id>/student/<crmstudentid>` shows grade, agenda, history, and heatmap data. Ineligible or missing students return 404.
-- `GET /api/jobs` returns a fixed public job shape.
+- `GET /api/jobs` returns a fixed job shape only in dev mode; otherwise it returns 403 without querying Neon.
+
+Outside dev mode, exact franchise and student URLs remain read-only and accessible. Their headers omit the overview link so the root page does not provide franchise discovery.
 
 POST requests to dashboard pages return 405; retired logout and status paths return 404. Responses use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`.
 
@@ -66,7 +68,8 @@ Runner-only settings:
 - `GRADE_DB_CLI_PATH`
 - `GRADE_RUNNER_ID`
 - `GRADE_JOB_LEASE_SECONDS`
-- `PYTHON_ENV`, `SLACK_WEBHOOK_URL`, and `SLACK_NOTIFY_IN_DEV`
+- `PYTHON_ENV=dev` enables the web overview and jobs endpoint and controls development notification behavior
+- `SLACK_WEBHOOK_URL` and `SLACK_NOTIFY_IN_DEV`
 - `OPENAI_API_KEY` and `OPENAI_MODEL` for GPT-assisted portal utilities
 
 `SESSION_SECRET`, `INTERNAL_KEY`, `DEV_BYPASS`, login headers, and CRM user-login credentials are not dashboard settings.

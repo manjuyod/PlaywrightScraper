@@ -327,6 +327,48 @@ summary:focus-visible {
     color: var(--tc-muted);
 }
 
+.tc-unauthorized-card {
+    box-sizing: border-box;
+    padding: 36px;
+    text-align: center;
+}
+
+.tc-unauthorized-logo {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 22px;
+    object-fit: contain;
+}
+
+.tc-unauthorized-code {
+    margin: 0 0 8px;
+    color: var(--tc-orange-dark) !important;
+    font-family: "Fira Code", Consolas, monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.tc-unauthorized-card h1 {
+    margin: 0;
+    font-size: clamp(2rem, 8vw, 3rem);
+}
+
+.tc-unauthorized-message {
+    margin: 16px auto 0;
+    max-width: 34rem;
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.tc-unauthorized-hint {
+    margin: 10px auto 0;
+    max-width: 34rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 .tc-login-card form,
 .tc-flash-stack {
     display: grid;

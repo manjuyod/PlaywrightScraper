@@ -60,8 +60,9 @@ def _job() -> dict[str, Any]:
     }
 
 
-def _create_client(monkeypatch):
+def _create_client(monkeypatch, *, environment: str = "dev"):
     monkeypatch.delenv("SESSION_SECRET", raising=False)
+    monkeypatch.setenv("PYTHON_ENV", environment)
     for module_name in ("ui.routes", "ui.app"):
         sys.modules.pop(module_name, None)
 
@@ -99,7 +100,7 @@ def _page_data(response) -> dict[str, Any]:
     return json.loads(match.group(1))
 
 
-def test_home_is_public_overview_without_session_cookie(monkeypatch) -> None:
+def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
     client, _routes = _create_client(monkeypatch)
 
     response = client.get("/")
@@ -112,6 +113,26 @@ def test_home_is_public_overview_without_session_cookie(monkeypatch) -> None:
     assert page_data["franchises"][0]["id"] == 57
     assert page_data["jobs"] == [_job()]
     assert "Set-Cookie" not in response.headers
+
+
+def test_non_dev_home_is_unauthorized_without_loading_dashboard_data(
+    monkeypatch,
+) -> None:
+    client, routes = _create_client(monkeypatch, environment="production")
+
+    def unexpected_call(**_kwargs):
+        raise AssertionError("non-dev overview must not query dashboard data")
+
+    monkeypatch.setattr(routes.dashboard, "load_students", unexpected_call)
+    monkeypatch.setattr(routes.dashboard, "load_jobs", unexpected_call)
+
+    response = client.get("/")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 403
+    assert "Unauthorized" in body
+    assert "development environment" in body
+    assert 'id="tc-page-data"' not in body
 
 
 def test_login_and_health_are_compatibility_redirects(monkeypatch) -> None:
@@ -172,6 +193,25 @@ def test_student_page_contains_canonical_grades_and_agenda(monkeypatch) -> None:
     ]
 
 
+def test_non_dev_direct_franchise_and_student_urls_remain_available(
+    monkeypatch,
+) -> None:
+    client, _routes = _create_client(monkeypatch, environment="production")
+
+    franchise_response = client.get("/franchise/57")
+    student_response = client.get("/franchise/57/student/101")
+    franchise_data = _page_data(franchise_response)
+    student_data = _page_data(student_response)
+
+    assert franchise_response.status_code == 200
+    assert franchise_data["page"] == "franchise"
+    assert "homeUrl" not in franchise_data
+    assert student_response.status_code == 200
+    assert student_data["page"] == "student"
+    assert "homeUrl" not in student_data
+    assert student_data["backUrl"] == "/franchise/57"
+
+
 def test_jobs_api_returns_only_shaped_public_fields(monkeypatch) -> None:
     client, _routes = _create_client(monkeypatch)
 
@@ -182,6 +222,20 @@ def test_jobs_api_returns_only_shaped_public_fields(monkeypatch) -> None:
     body = response.get_data(as_text=True).lower()
     for forbidden in ("runner_id", "lease_token", "payload", "summary"):
         assert forbidden not in body
+
+
+def test_non_dev_jobs_api_is_unauthorized_without_loading_jobs(monkeypatch) -> None:
+    client, routes = _create_client(monkeypatch, environment="production")
+
+    def unexpected_call(**_kwargs):
+        raise AssertionError("non-dev jobs endpoint must not query Neon")
+
+    monkeypatch.setattr(routes.dashboard, "load_jobs", unexpected_call)
+
+    response = client.get("/api/jobs")
+
+    assert response.status_code == 403
+    assert "Unauthorized" in response.get_data(as_text=True)
 
 
 def test_dependency_failure_is_sanitized(monkeypatch) -> None:

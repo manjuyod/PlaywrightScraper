@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Unauthorized</title>
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='react-dashboard.css') }}"
+        />
+    </head>
+    <body>
+        <main class="tc-login-page">
+            <div class="tc-login-ambient" aria-hidden="true">
+                <span class="tc-login-aurora tc-login-aurora--one"></span>
+                <span class="tc-login-aurora tc-login-aurora--two"></span>
+                <span class="tc-login-aurora tc-login-aurora--three"></span>
+                <span class="tc-login-sheen"></span>
+            </div>
+            <section class="tc-login-card tc-unauthorized-card" aria-labelledby="unauthorized-title">
+                <img
+                    class="tc-unauthorized-logo"
+                    src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                    alt="Tutoring Club"
+                />
+                <p class="tc-unauthorized-code">403 · Restricted overview</p>
+                <h1 id="unauthorized-title">Unauthorized</h1>
+                <p class="tc-unauthorized-message">
+                    The operations overview is available only in the development environment.
+                </p>
+                <p class="tc-unauthorized-hint">
+                    Use an authorized direct franchise URL to view its read-only dashboard.
+                </p>
+            </section>
+        </main>
+    </body>
+</html>
