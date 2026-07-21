@@ -92,6 +92,7 @@
                 href,
                 className: cn(
                     "tc-button tc-focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold shadow-sm transition",
+                    "tc-button--" + variant,
                     variants[variant],
                     className,
                 ),

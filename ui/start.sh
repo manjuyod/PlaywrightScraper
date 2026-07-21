@@ -17,4 +17,4 @@ uv run gunicorn --workers "${WEB_CONCURRENCY:-1}" --bind 127.0.0.1:3000 ui.wsgi:
 sleep 2
 
 # start nginx in foreground using config
-exec nginx -p "$PWD" -c ui/nginx.conf -g 'daemon off;'
+exec nginx -p "$PWD" -e /tmp/nginx_error.log -c ui/nginx.conf -g 'daemon off;'
