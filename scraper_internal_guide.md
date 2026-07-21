@@ -6,7 +6,6 @@ This project combines Playwright-based portal scraping, a local Windows Rust CRM
 
 ```text
 PlaywrightScraper/
-├── db.py                         # retained legacy helpers; not used by dashboard routes
 ├── scraper/
 │   ├── runner.py                 # grade collection entrypoint
 │   ├── agenda.py                 # agenda collection entrypoint
@@ -17,7 +16,6 @@ PlaywrightScraper/
 │   ├── app.py                    # Flask app and response/error policy
 │   ├── dashboard_data.py         # fixed read-only CRM/Neon queries and display models
 │   ├── routes.py                 # GET-only dashboard routes
-│   ├── ext_jobs.py               # legacy runner callback compatibility; not imported by Flask
 │   ├── templates/                # generic React shell and sanitized 503 page
 │   └── static/                   # read-only React UMD dashboard, styles, and assets
 ├── batches/                      # Windows batch pipeline wrappers

@@ -5,7 +5,6 @@ import argparse
 import asyncio
 import os
 import pathlib
-import queue
 import random
 import sys
 import textwrap
@@ -34,13 +33,17 @@ def _debug_env() -> None:
     print("[runner] CWD:", os.getcwd(), flush=True)
     print("[runner] Python:", sys.executable, sys.version, flush=True)
     print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
-    print("[runner] GRADE_DB_CLI_PATH set:", bool(os.getenv("GRADE_DB_CLI_PATH")), flush=True)
+    print(
+        "[runner] GRADE_DB_CLI_PATH set:",
+        bool(os.getenv("GRADE_DB_CLI_PATH")),
+        flush=True,
+    )
 
 
 def _student_from_context(context: Mapping[str, Any]) -> dict[str, Any]:
     portal = str(context.get("portal") or "").strip().lower()
     if not portal:
-        portal = get_portal_key_from_url(context.get("portal1")) or ""
+        portal = get_portal_key_from_url(context.get("portal1") or "")
     return {
         "db_id": int(context["crmstudentid"]),
         "student_name": str(context.get("firstname") or ""),
@@ -78,58 +81,7 @@ def _filter_contexts(
             or str(context.get("status") or "").strip().lower() == wanted_status
         )
     ]
-
-
-def get_students_from_db(
-    franchise_id: int | None = None,
-    student_id: int | None = None,
-    portal: str | None = None,
-    status: str | None = None,
-):
-    """Compatibility context loader backed by a short, audited grade-db job.
-
-    Production grade and agenda orchestration call ``job start`` directly so the
-    lease remains active through result submission.
-    """
-    client = GradeDbClient()
-    session = client.start_job(
-        kind="grade", franchise_id=franchise_id, student_id=student_id
-    )
-    try:
-        contexts = [_student_from_context(row) for row in session.get("students", [])]
-        return _filter_contexts(contexts, portal=portal, status=status)
-    finally:
-        client.fail_job(
-            job_id=session["job_id"],
-            lease_token=session["lease_token"],
-            code="context_only",
-        )
-
-
-def filter_students(
-    _students: list[dict[str, Any]], key: str, value: Any
-) -> list[dict[str, Any]]:
-    return [student for student in _students if student.get(key) == value]
-
-
-def students(
-    franchise_id: int | None = None,
-    student_id: int | None = None,
-    portal: str | None = None,
-    status: str | None = None,
-):
-    return get_students_from_db(
-        franchise_id=franchise_id,
-        student_id=student_id,
-        portal=portal,
-        status=status,
-    )
-
-
-def bad_login(_student_id: int) -> None:
-    raise RuntimeError("bad-login state requires an active grade-db job")
-
-
+    
 async def scrape_one(browser: Browser, student: dict[str, Any]):
     """Collect one student's grades without reading or writing a database."""
     await asyncio.sleep(random.uniform(0, 1.0))
@@ -201,7 +153,6 @@ async def _process_grade_students(
     student_list: list[dict[str, Any]],
     progress: dict[str, int],
     lease_failed: asyncio.Event,
-    on_progress=None,
 ) -> str | None:
     for student in student_list:
         if lease_failed.is_set():
@@ -253,8 +204,6 @@ async def _process_grade_students(
 
         applied_success = scrape_succeeded and bool(response.get("applied"))
         _advance_progress(progress, success=applied_success)
-        if on_progress is not None:
-            on_progress()
     return None
 
 
@@ -283,28 +232,11 @@ async def _heartbeat_loop(
             return
 
 
-def _ui_state(
-    job_id: str | None,
-    state_q: queue.Queue | None,
-    total: int,
-):
-    if not job_id or state_q is None:
-        return None
-    from ui.ext_jobs import JobState
-
-    state = JobState(total=total, steps=total + 2)
-    state.next_step()
-    state_q.put((job_id, state))
-    return state
-
-
 async def main(
     franchise_id: int | None = None,
     student_id: int | None = None,
     portal: str | None = None,
     status: str | None = None,
-    job_id: str | None = None,
-    state_q: queue.Queue | None = None,
 ):
     client = GradeDbClient()
     session = await asyncio.to_thread(
@@ -316,12 +248,6 @@ async def main(
     contexts = [_student_from_context(row) for row in session.get("students", [])]
     student_list = _filter_contexts(contexts, portal=portal, status=status)
     progress = _new_progress(len(student_list))
-    state = _ui_state(job_id, state_q, len(student_list))
-
-    def report_ui_progress() -> None:
-        if state is not None and state_q is not None:
-            state.next_step()
-            state_q.put((job_id, state))
 
     if not student_list:
         await asyncio.to_thread(
@@ -330,7 +256,6 @@ async def main(
             lease_token=session["lease_token"],
             progress=progress,
         )
-        report_ui_progress()
         return progress
 
     stop_heartbeat = asyncio.Event()
@@ -354,7 +279,6 @@ async def main(
                     student_list,
                     progress,
                     lease_failed,
-                    report_ui_progress,
                 )
             finally:
                 await browser.close()
@@ -384,15 +308,14 @@ async def main(
         lease_token=session["lease_token"],
         progress=progress,
     )
-    report_ui_progress()
 
     elapsed = int(time() - begin_time)
     summary = textwrap.dedent(
         f"""
         Grade scraping complete.
-        Successfully processed {progress['success']} / {progress['attempted']} students
+        Successfully processed {progress["success"]} / {progress["attempted"]} students
         in {elapsed // 60} minutes {elapsed % 60} seconds.
-        Errors encountered: {progress['errors']}
+        Errors encountered: {progress["errors"]}
         """
     ).strip()
     if os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":

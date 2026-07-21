@@ -21,7 +21,6 @@ from scraper.runner import (
     _heartbeat_loop,
     _new_progress,
     _student_from_context,
-    _ui_state,
 )
 
 load_dotenv()
@@ -171,12 +170,6 @@ async def main(
     )
     students = [_student_from_context(row) for row in session.get("students", [])]
     progress = _new_progress(len(students))
-    state = _ui_state(job_id, state_q, len(students))
-
-    def report_ui_progress() -> None:
-        if state is not None and state_q is not None:
-            state.next_step()
-            state_q.put((job_id, state))
 
     if not students:
         await asyncio.to_thread(
@@ -185,7 +178,6 @@ async def main(
             lease_token=session["lease_token"],
             progress=progress,
         )
-        report_ui_progress()
         return progress
 
     stop_heartbeat = asyncio.Event()
@@ -212,7 +204,6 @@ async def main(
                     target,
                     progress,
                     lease_failed,
-                    report_ui_progress,
                 )
             finally:
                 await context.close()
@@ -243,7 +234,6 @@ async def main(
         lease_token=session["lease_token"],
         progress=progress,
     )
-    report_ui_progress()
     return progress
 
 

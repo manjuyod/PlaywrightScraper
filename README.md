@@ -2,7 +2,7 @@
 
 PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, and primary portal credentials. The local Windows `grade-db.exe` boundary reads CRM, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
-The Flask dashboard is a public, read-only operations view. It reads the runnable student boundary from CRM, reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`. It never reads the legacy Neon `student` table.
+The Flask dashboard is a public, read-only operations view. It reads the runnable student boundary from CRM, reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
 ## Dashboard
 
@@ -11,12 +11,12 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 Routes:
 
 - `/` shows runnable-student summaries for every CRM franchise plus active and recent canonical jobs only when `PYTHON_ENV=dev`; other environments receive a 403 unauthorized page.
-- `/health` and `/login` are compatibility redirects to `/` and therefore reach the same environment gate.
+- `/health` and `/login` redirect to `/` and therefore reach the same environment gate.
 - `/franchise/<franchise_id>` shows runnable CRM students, grade-level filters, current grade snapshots, standing, status, and CRM primary-portal links.
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
 - `/api/jobs` returns shaped, read-only job progress only in dev mode and is polled by the overview every 15 seconds.
 
-The web surface has no login, session, forms, scraper launch controls, or database mutations. Outside dev mode, franchise and student pages remain available only through their direct URLs; the overview does not enumerate them. Anyone with a direct franchise or student URL can still view the corresponding student names and grades. `ui/ext_jobs.py` remains only for legacy runner callback compatibility and is not imported by Flask.
+Outside dev mode, franchise and student pages are available only through their direct URLs; the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
 
 ## Local Dashboard Run
 
@@ -59,7 +59,6 @@ bash ui/start.sh
 
 Set these Replit published-app Secrets before deploying:
 
-- `SESSION_SECRET`
 - `PGHOST`
 - `PGDATABASE`
 - `PGUSER`
@@ -111,7 +110,6 @@ Optional:
 - `PYTHON_ENV=dev` enables the dashboard overview and jobs API and affects runner notification behavior. When unset or set to any other value, `/` and `/api/jobs` return 403 while direct franchise and student URLs remain available.
 - `SLACK_WEBHOOK_URL` enables Slack notifications.
 - `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
-- `OPENAI_API_KEY` and `OPENAI_MODEL` are used by GPT-assisted portal utilities.
 
 ## Scraper Runs
 
@@ -145,7 +143,7 @@ The Python adapter falls back to the documented target-specific and default `rel
 Database rollout is intentionally human-operated:
 
 1. Run and review [`grade_db/sql/000_inspect_boundary.sql`](grade_db/sql/000_inspect_boundary.sql). It selects only schema metadata and row counts.
-2. After review, apply [`grade_db/sql/001_runner_boundary.sql`](grade_db/sql/001_runner_boundary.sql). It is forward-only, performs no legacy student backfill, and does not drop tables or data.
+2. After review, apply [`grade_db/sql/001_runner_boundary.sql`](grade_db/sql/001_runner_boundary.sql). It is forward-only and does not drop tables or data.
 3. Use the templates in `grade_db/sql/operations/` to set or clear portal2, agenda, and GPS fields on existing CRM-created rows.
 4. Run `grade-db.exe doctor`, then pilot one student, one franchise, and agenda collection before enabling scheduled batches.
 
