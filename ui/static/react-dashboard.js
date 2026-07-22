@@ -578,9 +578,6 @@
     }
 
     function FranchisePage({ data }) {
-        const actions = data.homeUrl
-            ? [h(Button, { key: "home", href: data.homeUrl, icon: "home", variant: "outline" }, "Overview")]
-            : [];
         return h(
             Shell,
             {
@@ -589,7 +586,6 @@
                     data,
                     title: `Franchise ${data.franchiseId}`,
                     subtitle: `${(data.students || []).length} runnable students · read-only`,
-                    actions,
                 }),
             },
             h(

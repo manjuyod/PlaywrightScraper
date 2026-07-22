@@ -35,6 +35,30 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
         assert retired not in javascript
 
 
+def test_franchise_header_omits_overview_action() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    franchise_page = javascript.split("function FranchisePage", 1)[1].split(
+        "function GradeHistory", 1
+    )[0]
+
+    assert "data.homeUrl" not in franchise_page
+    assert '"Overview"' not in franchise_page
+
+
+def test_student_header_keeps_overview_action() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    student_page = javascript.split("function StudentPage", 1)[1].split(
+        "function App", 1
+    )[0]
+
+    assert "data.homeUrl" in student_page
+    assert '"Overview"' in student_page
+
+
 def test_franchise_students_render_as_a_read_only_table() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"

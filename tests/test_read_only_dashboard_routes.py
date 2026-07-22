@@ -168,6 +168,23 @@ def test_franchise_filter_uses_crm_grade_and_crmstudentid(monkeypatch) -> None:
     assert "password" not in response.get_data(as_text=True).lower()
 
 
+def test_dev_franchise_page_does_not_expose_home_url(monkeypatch) -> None:
+    client, _routes = _create_client(monkeypatch)
+
+    page_data = _page_data(client.get("/franchise/57"))
+
+    assert "homeUrl" not in page_data
+
+
+def test_dev_student_page_keeps_home_url(monkeypatch) -> None:
+    client, _routes = _create_client(monkeypatch)
+
+    page_data = _page_data(client.get("/franchise/57/student/101"))
+
+    assert page_data["homeUrl"] == "/"
+    assert page_data["backUrl"] == "/franchise/57"
+
+
 def test_student_route_returns_404_when_not_currently_runnable(monkeypatch) -> None:
     client, routes = _create_client(monkeypatch)
     monkeypatch.setattr(
