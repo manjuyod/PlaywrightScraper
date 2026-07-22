@@ -26,6 +26,7 @@ SELECT
 FROM dbo.tblStudents AS s
 WHERE (? IS NULL OR s.FranchiseID = ?)
   AND (? IS NULL OR s.Id = ?)
+  AND s.IsTrail = 'Active'
   AND NULLIF(LTRIM(RTRIM(s.GradePortalURL)), '') IS NOT NULL
   AND NULLIF(LTRIM(RTRIM(s.GradePortalUser)), '') IS NOT NULL
   AND NULLIF(LTRIM(RTRIM(s.GradePortalPwd)), '') IS NOT NULL

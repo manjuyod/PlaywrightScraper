@@ -241,6 +241,36 @@ async fn result_rechecks_crm_and_redacts_payload_when_student_became_ineligible(
 }
 
 #[tokio::test]
+async fn result_is_rejected_when_crm_no_longer_returns_the_student() {
+    let crm = Arc::new(FakeCrm::default());
+    let neon = Arc::new(FakeNeon::default());
+    *neon.active_job.lock().unwrap() = Some(ActiveJob {
+        job_id: Uuid::from_u128(19),
+        lease_token: Uuid::from_u128(42),
+        kind: JobKind::Grade,
+        franchise_id: Some(19),
+        student_id: None,
+    });
+    let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
+    let request = ResultPostRequest {
+        job_id: Uuid::from_u128(19),
+        lease_token: Uuid::from_u128(42),
+        crmstudentid: 1,
+        outcome: ResultOutcome::GradeSuccess {
+            parsed_grades: json!({"Algebra": 94}),
+        },
+    };
+
+    let response = service.post_result(request).await.unwrap();
+
+    assert!(!response.applied);
+    assert_eq!(response.rejection_code.as_deref(), Some("crm_ineligible"));
+    let writes = neon.writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert!(!writes[0].audit_payload.to_string().contains("Algebra"));
+}
+
+#[tokio::test]
 async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
     let crm = Arc::new(FakeCrm::default());
     crm.students.lock().unwrap().push(crm_student(1, None));

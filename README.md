@@ -1,8 +1,8 @@
 # Student Grade Checker
 
-PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, and primary portal credentials. The local Windows `grade-db.exe` boundary reads CRM, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
+PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
-The Flask dashboard is a public, read-only operations view. It reads the runnable student boundary from CRM, reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
+The Flask dashboard is a public, read-only operations view. It uses the same runnable-student definition (`IsTrail = 'Active'` plus complete primary portal credentials), reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
 ## Dashboard
 
@@ -100,7 +100,7 @@ Dashboard read settings:
 
 - `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` provide CRM read connectivity. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
 - `CRM_TRUST_SERVER_CERTIFICATE` controls SQL Server certificate trust (default `no`). `1`, `true`, and `yes` (case-insensitive) are accepted values for enabling `TrustServerCertificate=yes`.
-- The CRM SQL Server connection uses encrypted ODBC transport and `ApplicationIntent=ReadOnly`. Its fixed query checks portal credential eligibility in SQL but selects only ID, franchise, name, grade, and the primary portal URL.
+- The CRM SQL Server connection uses encrypted ODBC transport and `ApplicationIntent=ReadOnly`. Its fixed query requires `IsTrail = 'Active'` and complete primary portal credentials but selects only ID, franchise, name, grade, and the primary portal URL.
 - Neon dashboard reads use the existing `GRADES_NEON_*`/`GRADES_NEON_URL` configuration and begin every transaction with `SET TRANSACTION READ ONLY`.
 
 The bundled nginx config forwards `X-Forwarded-For` and `X-Forwarded-Proto`; Flask applies trusted proxy handling for Replit deployment URLs.

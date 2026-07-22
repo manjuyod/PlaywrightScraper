@@ -26,6 +26,8 @@ def test_crm_query_checks_credentials_without_selecting_them() -> None:
     assert "gradeportalurl" in projection
     assert "gradeportaluser" not in projection
     assert "gradeportalpwd" not in projection
+    assert "istrail" not in projection
+    assert "s.istrail = 'active'" in sql
     assert "nullif(ltrim(rtrim(s.gradeportalurl)), '') is not null" in sql
     assert "nullif(ltrim(rtrim(s.gradeportaluser)), '') is not null" in sql
     assert "nullif(ltrim(rtrim(s.gradeportalpwd)), '') is not null" in sql

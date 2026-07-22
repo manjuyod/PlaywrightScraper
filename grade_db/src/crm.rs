@@ -26,6 +26,7 @@ SELECT
 FROM dbo.tblStudents AS s
 WHERE (@P1 IS NULL OR s.FranchiseID = @P1)
   AND (@P2 IS NULL OR s.Id = @P2)
+  AND s.IsTrail = 'Active'
 ORDER BY s.LastName, s.FirstName, s.Id
 "#;
 }

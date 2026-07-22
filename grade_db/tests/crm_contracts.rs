@@ -8,6 +8,7 @@ fn crm_student_query_is_read_only_and_leaves_eligibility_to_rust() {
     }
     assert!(query.contains("@p1 is null or s.franchiseid = @p1"));
     assert!(query.contains("@p2 is null or s.id = @p2"));
+    assert!(query.contains("s.istrail = 'active'"));
     assert!(!query.contains("nullif(ltrim(rtrim("));
     assert!(!query.contains(" insert "));
     assert!(!query.contains(" update "));
