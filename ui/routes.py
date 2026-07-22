@@ -115,7 +115,7 @@ def _is_dev_mode() -> bool:
 
 
 def _unauthorized():
-    return render_template("unauthorized.html"), 403
+    return render_template("unauthorized.html"), 200
 
 
 @app.get("/")
