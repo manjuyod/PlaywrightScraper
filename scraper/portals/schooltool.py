@@ -33,19 +33,21 @@ class SchoolTool(PortalEngine):
             if await exists(self.page.locator(student_record_page_selector), timeout=15000):
                 if await self.page.locator(student_record_page_selector).is_visible():
                     await self.page.click(student_record_page_selector)
-                    print('clicked student record page, waiting for nav...')
+                    self.logger.debug("portal.navigation.student_record_selected")
                     await wait_after_nav(self.page, wait_after_load=5000)
 
                     # from here, nav to the grades table
                     grades_page_selector = 'a:has-text("Grades")'
                     if await exists(self.page.locator(grades_page_selector), timeout=5000):
                         await self.page.click(grades_page_selector)         
-                        print('clicked grades page, waiting for nav...')   
+                        self.logger.debug("portal.navigation.grades_selected")
                         await wait_after_nav(self.page, wait_after_load=5000)
             else:
-                print("Could not find student record page, may unable to fetch grades")
+                self.logger.warning("portal.navigation.student_record_missing")
         except Exception as e:
-            print(type(e), e)
+            self.logger.error(
+                "portal.login.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
 
     async def alt_sso_login(self):
@@ -75,5 +77,7 @@ class SchoolTool(PortalEngine):
                 grade_selector,
             )
         except Exception as e:
-            print(type(e), e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             return {}

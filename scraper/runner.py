@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import pathlib
 import random
@@ -20,27 +21,50 @@ from scraper.db_cli import (
     GradeDbLeaseExpired,
     GradeDbUnavailable,
 )
-from scraper.notif import Severity, send_notification_to_slack
+from scraper.config.notifications import Severity, send_notification_to_slack
+from scraper.config.logging import bind_log_context, configure_logging, reset_log_context
 from scraper.portals import LoginError, get_portal
 from scraper.portals.utils import get_portal_key_from_url
 
 load_dotenv()
 
 HEARTBEAT_INTERVAL_SECONDS = 60.0
+logger = logging.getLogger("scraper.runner")
+StudentContext = dict[str, Any]
+RawStudentContext = Mapping[str, Any]
+
+class RunnerFatalError(RuntimeError):
+    code: str
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(f"grade job failed: {code}")
+
+async def _send_slack_notification(severity: Severity, message: str) -> None:
+    if not os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
+        return
+    try:
+        _ = await asyncio.to_thread(send_notification_to_slack, severity, message)
+    except Exception as exc:
+        logger.error(
+            "runner.notification.failed",
+            extra={"exception_type": type(exc).__name__},
+        )
 
 
 def _debug_env() -> None:
-    print("[runner] CWD:", os.getcwd(), flush=True)
-    print("[runner] Python:", sys.executable, sys.version, flush=True)
-    print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
-    print(
-        "[runner] GRADE_DB_CLI_PATH set:",
-        bool(os.getenv("GRADE_DB_CLI_PATH")),
-        flush=True,
+    logger.debug(
+        "runner.environment",
+        extra={
+            "cwd": os.getcwd(),
+            "python_executable": sys.executable,
+            "python_version": sys.version,
+            "environment": os.getenv("PYTHON_ENV"),
+            "grade_db_cli_configured": bool(os.getenv("GRADE_DB_CLI_PATH")),
+        },
     )
 
 
-def _student_from_context(context: Mapping[str, Any]) -> dict[str, Any]:
+def student_from_context(context: RawStudentContext) -> StudentContext:
     portal = str(context.get("portal") or "").strip().lower()
     if not portal:
         portal = get_portal_key_from_url(context.get("portal1") or "")
@@ -64,6 +88,10 @@ def _student_from_context(context: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# Compatibility for internal callers written before this became a shared boundary helper.
+_student_from_context = student_from_context
+
+
 def _filter_contexts(
     contexts: list[dict[str, Any]],
     *,
@@ -82,13 +110,24 @@ def _filter_contexts(
         )
     ]
     
-async def scrape_one(browser: Browser, student: dict[str, Any]):
-    """Collect one student's grades without reading or writing a database."""
+async def scrape_one(
+    browser: Browser,
+    student: dict[str, Any],
+    *,
+    login_only: bool = False,
+):
+    """Log in and optionally collect grades without database reads or writes."""
     await asyncio.sleep(random.uniform(0, 1.0))
     context = await browser.new_context()
     page = await context.new_page()
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
+    log_context = {
+        "portal": str(student["portal"]),
+        "student_record_id": int(student["db_id"]),
+    }
+    context_token = bind_log_context(**log_context)
+    logger.info("portal.scrape.started", extra=log_context)
 
     try:
         engine = get_portal(student["portal"])
@@ -110,20 +149,44 @@ async def scrape_one(browser: Browser, student: dict[str, Any]):
                 raise LoginError("portal login rejected")
             await scraper.login(first_name=student.get("student_name"))
         except (LoginError, scraper.LoginError):
+            logger.warning("portal.login.rejected", extra=log_context)
             raise LoginError("portal login rejected") from None
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "portal.login.failed",
+                extra={**log_context, "exception_type": type(exc).__name__},
+            )
             raise RuntimeError("portal login failed") from None
+
+        logger.info("portal.login.succeeded", extra=log_context)
+        if login_only:
+            return {
+                "db_id": student["db_id"],
+                "id": student["id"],
+                "parsed_grades": None,
+            }
 
         grades = await scraper.fetch_grades()
         parsed = grades.get("parsed_grades") if isinstance(grades, dict) else grades
-        return {
+        result = {
             "db_id": student["db_id"],
             "id": student["id"],
             "parsed_grades": parsed,
         }
+        logger.info(
+            "portal.scrape.completed",
+            extra={
+                **log_context,
+                "course_count": len(parsed) if isinstance(parsed, dict) else 0,
+            },
+        )
+        return result
     finally:
-        await page.close()
-        await context.close()
+        try:
+            await page.close()
+            await context.close()
+        finally:
+            reset_log_context(context_token)
 
 
 def project_root() -> pathlib.Path:
@@ -177,7 +240,15 @@ async def _process_grade_students(
                 "passwordgood": False,
             }
             scrape_succeeded = False
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "portal.scrape.failed",
+                extra={
+                    "portal": student["portal"],
+                    "student_record_id": student["db_id"],
+                    "exception_type": type(exc).__name__,
+                },
+            )
             outcome = {
                 "kind": "failure",
                 "code": "scrape_failed",
@@ -232,7 +303,7 @@ async def _heartbeat_loop(
             return
 
 
-async def main(
+async def _run_grade_job(
     franchise_id: int | None = None,
     student_id: int | None = None,
     portal: str | None = None,
@@ -245,7 +316,7 @@ async def main(
         franchise_id=franchise_id,
         student_id=student_id,
     )
-    contexts = [_student_from_context(row) for row in session.get("students", [])]
+    contexts = [student_from_context(row) for row in session.get("students", [])]
     student_list = _filter_contexts(contexts, portal=portal, status=status)
     progress = _new_progress(len(student_list))
 
@@ -300,7 +371,7 @@ async def main(
             )
         except GradeDbError:
             pass
-        raise RuntimeError(f"grade job failed: {failure_code}")
+        raise RunnerFatalError(failure_code)
 
     await asyncio.to_thread(
         client.complete_job,
@@ -318,17 +389,61 @@ async def main(
         Errors encountered: {progress["errors"]}
         """
     ).strip()
-    if os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
-        severity = Severity.Crit if progress["errors"] else Severity.Info
-        try:
-            send_notification_to_slack(severity, summary)
-        except Exception:
-            print("[runner] Slack notification failed", flush=True)
-    print(summary, flush=True)
+    severity = Severity.Crit if progress["errors"] else Severity.Info
+    await _send_slack_notification(severity, summary)
+    logger.info(
+        "runner.completed",
+        extra={
+            "attempted": progress["attempted"],
+            "success": progress["success"],
+            "errors": progress["errors"],
+            "elapsed_seconds": elapsed,
+        },
+    )
     return progress
 
 
+async def main(
+    franchise_id: int | None = None,
+    student_id: int | None = None,
+    portal: str | None = None,
+    status: str | None = None,
+):
+    configure_logging()
+    try:
+        return await _run_grade_job(
+            franchise_id=franchise_id,
+            student_id=student_id,
+            portal=portal,
+            status=status,
+        )
+    except Exception as exc:
+        failure_code = (
+            exc.code if isinstance(exc, RunnerFatalError) else "unhandled_exception"
+        )
+        logger.critical(
+            "runner.fatal",
+            extra={
+                "failure_code": failure_code,
+                "exception_type": type(exc).__name__,
+            },
+            exc_info=os.getenv("LOG_INCLUDE_TRACEBACKS") == "1",
+        )
+        await _send_slack_notification(
+            Severity.Crit,
+            textwrap.dedent(
+                f"""
+                Grade scraping stopped because of a fatal error.
+                Failure code: {failure_code}
+                Exception type: {type(exc).__name__}
+                """
+            ).strip(),
+        )
+        raise
+
+
 if __name__ == "__main__":
+    configure_logging()
     _debug_env()
     parser = argparse.ArgumentParser(description="Scrape student grades.")
     parser.add_argument("-f", "--franchise-id", type=int)

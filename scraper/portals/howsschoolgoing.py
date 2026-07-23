@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
+from bs4.element import Tag
 from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -32,7 +33,9 @@ class HowsSchoolGoing(PortalEngine):
             await self.page.locator("#data-tab").get_by_role("button", name="Grades").click() # this button on the front page takes us to the grades page
             await self.page.wait_for_timeout(3000)
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.login.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
         finally:
             pass
@@ -48,9 +51,16 @@ class HowsSchoolGoing(PortalEngine):
         try:
             soup = await self.get_soup()
             course_table = soup.find("div", class_="dataSource_Common_StudentProfile_Grades_GradesTable")
+            if not isinstance(course_table, Tag):
+                self.logger.warning("portal.parse.grade_table_missing")
+                return {}
             courses = course_table.find_all('tr') # possible 
-            print(f'found {len(courses)} courses')
+            self.logger.debug(
+                "portal.fetch.courses_found", extra={"course_count": len(courses)}
+            )
             for course in courses:
+                if not isinstance(course, Tag):
+                    continue
                 columns = course.find_all('td')
                 if len(columns) >= 2:
                     title = columns[0].get_text(strip=True)
@@ -65,12 +75,14 @@ class HowsSchoolGoing(PortalEngine):
                         grade = canonicalize_grade(grades[1])
                     else:
                         grade = canonicalize_grade(grades[0])
-                    print(title, grade)
-                    # print(f'found {title}\n\tgrade: {grade}')
                     if grade:
                         parsed[title] = grade
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
         finally:
-            print(parsed)
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
             return parsed

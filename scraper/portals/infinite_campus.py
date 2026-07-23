@@ -21,7 +21,7 @@ class InfiniteCampus(PortalEngine):
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         """Only log in and arrive on the parent/home shell."""
-        print(f"[IC] Logging in {first_name}")
+        self.logger.info("portal.login.started")
         username_selector = '#username'
         password_selector = '#password'
         try:
@@ -35,31 +35,30 @@ class InfiniteCampus(PortalEngine):
                 microsoft_callback=self.microsoft_login,
                 google_callback=self.google_login
             )
-            print("[IC] Attemped login, waiting for nav-wrapper.")
+            self.logger.debug("portal.login.awaiting_redirect")
 
             invalid_creds_msg = "Incorrect Username and/or Password"
             login_failed = await exists(self.page.get_by_text(invalid_creds_msg, exact=False))
             await self.raise_login_error_if(login_failed, "Infinite Campus login failed due to incorrect credentials")
             await self.raise_login_error_if('nav-wrapper' not in self.page.url)
             await self.page.wait_for_load_state("networkidle")
-            print("[IC] nav-wrapper found in url, login successful.")
-            print("Successfully reached the home page")
+            self.logger.info("portal.login.succeeded")
             await self.select_student(first_name, self.page) # select for student if necessary
-            print("[IC] Logged in and on student/home.")
+            self.logger.debug("portal.login.student_home_ready")
         except self.LoginError:
             raise
     # helper
-    @staticmethod
-    async def select_student(first_name: str, page: Page):
+    async def select_student(self, first_name: str | None, page: Page):
         parent = page.frame("main-workspace")
         if not parent:
             parent = page
+        if not first_name:
+            return
         try:  # click the student with first name if it exists
-            print(f"[IC] Attempting to select student {first_name}")
+            self.logger.debug("portal.student_selection.started")
             await parent.get_by_role('link', name=first_name, exact=False).click(timeout=2000)
-        except PlaywrightTimeout as e:
-            print(e)
-            print(f"[IC] Could not find student {first_name}, continuing without selecting.")
+        except PlaywrightTimeout:
+            self.logger.info("portal.student_selection.not_available")
             pass  # no alternate student
 
     # ---------------------- NAV TO GRADES -------
@@ -99,7 +98,7 @@ class InfiniteCampus(PortalEngine):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> dict[Any, Any] | None: # TODO: Alter to parse from 'All terms' instead of 'Current term'
+    async def fetch_grades(self) -> dict[Any, Any]: # TODO: Alter to parse from 'All terms' instead of 'Current term'
         """Collect grades from the grade tab"""
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(1500)
@@ -110,6 +109,7 @@ class InfiniteCampus(PortalEngine):
 
             frame_selector = "main-workspace"
             frame = self.page.frame(frame_selector)
+            assert frame is not None, "Infinite Campus main workspace frame not found"
             # target the correct timeframe
 
 
@@ -152,14 +152,17 @@ class InfiniteCampus(PortalEngine):
                 if recent_grade:
                     cur_q_grades[course] = recent_grade
 
-            print(cur_q_grades)
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(cur_q_grades)}
+            )
             return cur_q_grades
-        except Exception:
-            import traceback
-            print(traceback.print_exc())
+        except Exception as exc:
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(exc).__name__}
+            )
             raise
         finally:
-            print("finished fetching")
+            self.logger.debug("portal.fetch.finished")
 
     @staticmethod
     async def select_timeframe(current_sem: int, frame: Frame, q_before = False) -> None:

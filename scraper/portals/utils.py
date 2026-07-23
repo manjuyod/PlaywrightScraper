@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
-from typing import Callable, Dict, List, Literal, Optional, Pattern, Tuple
+from typing import Awaitable, Callable, Dict, List, Literal, Optional, Pattern, Tuple
 
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Frame, Locator, Page, expect
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -18,6 +20,25 @@ from tenacity import (
 )
 
 from . import LoginError
+
+LoginCallback = Callable[[], Awaitable[None]]
+
+
+logger = logging.getLogger("scraper.portals.shared")
+
+
+def log_retry(retry_state: RetryCallState) -> None:
+    exception = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        "portal.operation.retrying",
+        extra={
+            "attempt": retry_state.attempt_number,
+            "exception_type": type(exception).__name__ if exception else None,
+            "sleep_seconds": (
+                retry_state.next_action.sleep if retry_state.next_action else None
+            ),
+        },
+    )
 
 
 def get_portal_key_from_url(url: str) -> str | None:
@@ -32,7 +53,7 @@ def get_portal_key_from_url(url: str) -> str | None:
     if not url:
         return None
     for portal, rules in managed_portals.items():
-        if any(rule in url for rule in rules):
+        if any(rule.lower() in url.lower() for rule in rules):
             return portal
     return None
 
@@ -91,9 +112,9 @@ async def universal_login_flow(
     username_selector: str,
     password_selector: str,
     *,
-    microsoft_callback: Optional[Callable] = None,
-    google_callback: Optional[Callable] = None,
-    alt_sso_callback: Optional[Callable] = None,
+    microsoft_callback: Optional[LoginCallback] = None,
+    google_callback: Optional[LoginCallback] = None,
+    alt_sso_callback: Optional[LoginCallback] = None,
     sso_login_selector: Optional[str] = None,
     pre_fill_wait: int = 500,
     post_fill_wait: int = 1000,
@@ -117,7 +138,7 @@ async def universal_login_flow(
         pre_fill_wait: Milliseconds to wait before filling form
         post_fill_wait: Milliseconds to wait after filling form
     """
-    print("Entered login flow")
+    logger.debug("portal.login.flow_started")
     if login_url != page.url:  # Only nav if we are not at the target page
         await page.goto(login_url, wait_until="domcontentloaded", timeout=15_000)
     await page.wait_for_timeout(pre_fill_wait)
@@ -153,21 +174,21 @@ async def universal_login_flow(
             return
 
     if await exists(username_field):
-        print("Found user field")
+        logger.debug("portal.login.username_field_found")
         await username_field.fill(sid)
         await page.wait_for_timeout(post_fill_wait)
         # unable to click enter here because that may cause a failed login attempt and clear fields
     else:
-        print("Username field not found")
+        logger.debug("portal.login.username_field_missing")
     
     if await exists(password_field):
-        print("Found password field")
+        logger.debug("portal.login.password_field_found")
         await password_field.fill(pw)
         await page.wait_for_timeout(post_fill_wait)
         await password_field.press("Enter")
         await wait_for_login_form_to_disappear()
     else:  # either the Username and Password fields are on different screens, or we may have reached an alternate login page (google/microsoft/misc)
-        print("No password field found")
+        logger.debug("portal.login.password_field_missing")
         if await exists(
             username_field
         ):  # We may not have moved on from the Username field yet, try to submit on it now
@@ -185,7 +206,7 @@ async def universal_login_flow(
 
         # otherwise attempt sso
         async def try_sso_login():
-            print("try SSO login")
+            logger.debug("portal.login.sso_attempted")
             await wait_after_nav(
                 page
             )  # just in case we nav'ed, do not continue until the page is populated
@@ -203,9 +224,7 @@ async def universal_login_flow(
                 )
 
         if sso_login_selector and await exists(page.locator(sso_login_selector)):
-            print(
-                f"No username or password fields exist, attempt SSO login with {sso_login_selector}"
-            )
+            logger.info("portal.login.sso_entry_selected")
             await page.locator(sso_login_selector).click()
             await wait_after_nav(page)
         try:
@@ -216,7 +235,7 @@ async def universal_login_flow(
             LoginError,
             PlaywrightTimeout,
         ):  # Normal SSO didn't get us through, at this point we may need to try to use the alt_sso_callback
-            print("SSO login failed, attempting alternate SSO login")
+            logger.warning("portal.login.sso_fallback")
             if alt_sso_callback:
                 await alt_sso_callback()
             else:
@@ -229,8 +248,8 @@ async def use_sso_login(
     page: Page,
     check_microsoft: bool,
     check_google: bool,
-    microsoft_login_callback: Optional[Callable] = None,
-    google_login_callback: Optional[Callable] = None,
+    microsoft_login_callback: Optional[LoginCallback] = None,
+    google_login_callback: Optional[LoginCallback] = None,
 ) -> bool:
     """
     Apply the appropriate login method based on URL (handles SSO delegation).
@@ -245,7 +264,7 @@ async def use_sso_login(
     Returns:
         True if a SSO was used, otherwise False
     """
-    print("use SSO login")
+    logger.debug("portal.login.sso_detecting")
     current_url = page.url.lower()
     if check_microsoft and "microsoft" in current_url:
         if microsoft_login_callback:
@@ -286,9 +305,7 @@ async def wait_after_nav(
         wait_until: Defines what state the page is waiting on ('load', 'networkidle', 'domcontentloaded', 'commit')
     """
     if pattern is not None:
-        # print(f"wait for pattern {pattern} in url {page.url}")
         await page.wait_for_url(pattern, timeout=timeout, wait_until=wait_until)
-        # print("pattern found")
     else:
         await page.wait_for_load_state(wait_until)
 
@@ -512,15 +529,12 @@ async def grades_table_to_dict(
             page = frame
         parsed = {}
         rows = await page.locator(f"{table_selector}").all()
-        # print(f"Found {len(rows)} courses")
         for row in rows:
             try:
                 class_title = (await row.locator(title_selector).inner_text()).strip()
-                # print("Checking class: " + class_title)
                 grades = await row.locator(grade_selector).all()
 
                 if len(grades) == 0:
-                    # print("no grade info")
                     continue
 
                 if len(grades) > 1:
@@ -538,7 +552,7 @@ async def grades_table_to_dict(
                             grade_text = text
                             break
                     if grade_text is None:  # bail if we couldn't find a valid grade
-                        print("no percentage grade found")
+                        logger.debug("portal.parse.grade_missing")
                         continue
                 else:  # there is only one element in the grades
                     grade_text = (await grades[0].inner_text()).strip()
@@ -547,11 +561,17 @@ async def grades_table_to_dict(
                 if grade:
                     parsed[class_title.upper()] = grade
             except (PlaywrightError, PlaywrightTimeout) as e:
-                print(f"{type(e)}: {e}")
+                logger.warning(
+                    "portal.parse.row_skipped",
+                    extra={"exception_type": type(e).__name__},
+                )
                 continue
             except Exception as e:
-                print(f"{type(e)}: {e}")
-    print(parsed)
+                logger.warning(
+                    "portal.parse.row_skipped",
+                    extra={"exception_type": type(e).__name__},
+                )
+    logger.info("portal.parse.completed", extra={"course_count": len(parsed)})
     return parsed
 
 

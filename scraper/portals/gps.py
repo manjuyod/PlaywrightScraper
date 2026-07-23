@@ -80,7 +80,7 @@ class GPS(PortalEngine):
 
         await wait_after_nav(self.page, wait_after_load=5000, wait_until="networkidle")
         await self.raise_login_error_if("nav-wrapper" not in self.page.url)
-        print("Successfully reached the home page")
+        self.logger.info("portal.navigation.grades_home_reached")
 
     # ---------------------- FETCH (notifications → latest per subject) -------
     @retry(

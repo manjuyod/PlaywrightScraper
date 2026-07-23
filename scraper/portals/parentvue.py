@@ -32,7 +32,7 @@ class ParentVUE(PortalEngine):
             if 'Login_Parent' in self.login_url:
                 await self.select_student(first_name)
             # nav to grades page given that we are on the home page
-            print(f"[PARENTVUE] Reached Home Page; Navigating to Gradebook for {first_name}")
+            self.logger.info("portal.navigation.gradebook_started")
             await self.page.get_by_role("listitem").filter(has_text="Grade Book").click()
             await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
         except Exception:
@@ -53,7 +53,7 @@ class ParentVUE(PortalEngine):
         target = (first_name or getattr(self, "student_name", "") or "").strip()
         if not target:
             raise RuntimeError("No first_name provided to select_student()")
-        print(f'[PARENTVUE] Selecting student {target}]')
+        self.logger.debug("portal.student_selection.started")
         target_lc = target.lower()
 
         # base selectors
@@ -72,7 +72,7 @@ class ParentVUE(PortalEngine):
                 agu = await self.page.locator(f"{selector_root} .current .student-info").get_attribute("data-agu")
                 if not agu:
                     raise RuntimeError("Could not read data-agu from current student")
-                print(f"[PARENTVUE] Already on {name}; abort selection")
+                self.logger.debug("portal.student_selection.already_selected")
                 return
         except Exception:
             # continue to the dropdown approach
@@ -95,7 +95,7 @@ class ParentVUE(PortalEngine):
             if target_lc in name.lower():
                 agu = await info.get_attribute("data-agu")
                 await info.click()
-                print(f"[PARENTVUE] Clicked student '{name}' (AGU={agu})")
+                self.logger.info("portal.student_selection.succeeded")
                 break
         if not agu:
             raise RuntimeError(f"No dropdown student matched '{target}'")
@@ -116,7 +116,9 @@ class ParentVUE(PortalEngine):
                 should_truncate_before=True
             )
         except Exception as e:
-            print(f"{type(e)}: {e}")
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
         finally:
             pass
         return {}

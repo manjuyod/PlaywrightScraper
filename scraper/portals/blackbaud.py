@@ -1,19 +1,22 @@
 # scraper/portals/blackbaud_student_bghs.py
 from __future__ import annotations
-import logging
 from typing import Dict, Any, Optional
 from playwright.async_api import expect
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
-    retry_if_exception_type, before_sleep_log
+    retry_if_exception_type
 )
 
 from .base import PortalEngine, PlaywrightTimeout
 from . import register_portal
-from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict
+from .utils import (
+    exists,
+    grades_table_to_dict,
+    log_retry,
+    universal_login_flow,
+    wait_after_nav,
+)
 
-logger = logging.getLogger("blackbaud")
-logger.setLevel(logging.INFO)
 @register_portal("blackbaud")
 class Blackbaud(PortalEngine):
     """Blackbaud portal scraper."""
@@ -23,12 +26,12 @@ class Blackbaud(PortalEngine):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=15),
         retry=retry_if_exception_type(PlaywrightTimeout),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
+        before_sleep=log_retry,
         reraise=True,  # <- expose inner exception instead of RetryError
     )
     async def login(self, first_name: Optional[str] = None) -> None:
         try:
-            print("[BBG] starting login()")
+            self.logger.info("portal.login.started")
             # Entry page (Blackbaud SSO landing)
             username_selector = '#Username'
             password_selector = ''
@@ -70,7 +73,7 @@ class Blackbaud(PortalEngine):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=15),
         retry=retry_if_exception_type(PlaywrightTimeout),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
+        before_sleep=log_retry,
         reraise=True,
     )
     async def fetch_grades(self) -> Dict[str, Any]:
@@ -90,9 +93,13 @@ class Blackbaud(PortalEngine):
                 truncate_title_on=truncate_on
             )
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
         finally:
-            print(parsed)
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
             return {"parsed_grades": parsed}
 
     # ── PARSERS ──────────────────────────────────────────────────────────────

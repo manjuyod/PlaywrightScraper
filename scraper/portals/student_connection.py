@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
+from bs4.element import Tag
 
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -40,7 +41,10 @@ class StudentConnection(PortalEngine):
 
             try:
                 login_not_found = await exists(self.page.get_by_text("Login Not Found", exact=False))
-                print("Login found? ", not login_not_found)
+                self.logger.debug(
+                    "portal.login.result_checked",
+                    extra={"login_rejected": login_not_found},
+                )
                 await self.raise_login_error_if(login_not_found)
             except PlaywrightTimeout: # not a failed login if this times out
                 pass
@@ -80,23 +84,28 @@ class StudentConnection(PortalEngine):
                 else:
                     pulse = False
             except Exception as e:
-                print(e)
+                self.logger.warning(
+                    "portal.fetch.pulse_failed",
+                    extra={"exception_type": type(e).__name__},
+                )
                 pass  # Not fatal—continue and rely on table presence
 
             if pulse:
                 parsed = await self.collect_from_pulse()
             else:
-                print('no pulse, fallback to assignments table')
+                self.logger.info("portal.fetch.assignments_fallback")
                 parsed = await self.collect_from_assignments()
 
             # if not parsed:
                 # html = await self.page.content()
-                # print("Parsed 0 rows. First 4k of HTML follows:")
-                # print(html[:4000])
-            print(f"[SC] Grades parsed: {parsed}")
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
             return {"parsed_grades": parsed}
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
         finally:
             pass
@@ -104,13 +113,23 @@ class StudentConnection(PortalEngine):
     async def collect_from_assignments(self) -> Dict[str, Any]:
         soup = await self.get_soup()
         assignments = soup.find('tr', id='trSP1_Assignments')
+        if not isinstance(assignments, Tag):
+            self.logger.warning("portal.parse.assignments_missing")
+            return {}
         courses_table = assignments.find('div', id='SP_Assignments')
+        if not isinstance(courses_table, Tag):
+            self.logger.warning("portal.parse.assignments_table_missing")
+            return {}
         courses = courses_table.find_all('table')
         parsed: Dict[str, Any] = {}
         for course in courses:
+            if not isinstance(course, Tag):
+                continue
             # title
-            course_name = course.find('caption') # get course name from the caption
-            course_name = course_name.text.strip()
+            caption = course.find('caption') # get course name from the caption
+            if not isinstance(caption, Tag):
+                continue
+            course_name = caption.get_text(strip=True)
             # title formatting
             try:
                 course_name = course_name[:course_name.index('(')]
@@ -119,8 +138,13 @@ class StudentConnection(PortalEngine):
             if "Per" in course_name:
                 course_name = course_name[9:]
             # grade
-            course.find('td').find('b').decompose() # get rid of the extra text in this element
-            grade = course.find('td').text.strip() # LIKE [A, 98] or [A]
+            grade_cell = course.find('td')
+            if not isinstance(grade_cell, Tag):
+                continue
+            extra_label = grade_cell.find('b')
+            if isinstance(extra_label, Tag):
+                extra_label.decompose() # get rid of the extra text in this element
+            grade = grade_cell.get_text(strip=True) # LIKE [A, 98] or [A]
             grade_content = grade.split('(')
             letter_grade_idx = 0
             percent_grade_idx = 1
@@ -130,8 +154,6 @@ class StudentConnection(PortalEngine):
                 grade = grade_content[percent_grade_idx]
 
             percent_grade = canonicalize_grade(grade)
-            print(grade_content)
-            print(course_name, percent_grade)
             truncate_on = ": "
             course_name = canonicalize_course_title(course_name, truncate_on=truncate_on, truncate_before=True)
             parsed[course_name] = percent_grade
@@ -164,9 +186,7 @@ class StudentConnection(PortalEngine):
                 timeout=4_000,
             )
         except PlaywrightTimeout:
-            html = await self.page.content()
-            print("Pulse table had no rows. Dumping snippet for debug…")
-            print(html[:4000])
+            self.logger.warning("portal.parse.pulse_rows_missing")
             return {}
 
         # Map the header indices so we don’t rely on column order.
@@ -192,9 +212,10 @@ class StudentConnection(PortalEngine):
         idx_letter = col_idx("CurrentGrade")
 
         if idx_class is None or (idx_pct is None and idx_letter is None):
-            html = await self.page.content()
-            print("Missing expected headers. Headers seen:", header_texts)
-            print(html[:4000])
+            self.logger.warning(
+                "portal.parse.pulse_headers_missing",
+                extra={"header_count": len(header_texts)},
+            )
             return {}
 
         # Extract rows
@@ -215,7 +236,10 @@ class StudentConnection(PortalEngine):
                     text = await cells.nth(j).text_content()
                     return (text or "").strip()
                 except Exception as e:
-                    print(e)
+                    self.logger.warning(
+                        "portal.parse.row_skipped",
+                        extra={"exception_type": type(e).__name__},
+                    )
                     return ""
 
             course = (await safe_text(idx_class)).upper()

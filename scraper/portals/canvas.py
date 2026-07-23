@@ -5,7 +5,7 @@ import re
 from time import monotonic
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, TypedDict
 from urllib.parse import urlparse, urljoin
 
 from bs4 import BeautifulSoup, Tag
@@ -19,12 +19,20 @@ from .utils import exists, canonicalize_grade, wait_after_nav, universal_login_f
 
 # --------------------- utilities ---------------------
 
+AgendaItem = tuple[str, str, str | None]
+
+
+class TermContext(TypedDict):
+    fall_year: int
+    spring_year: int
+    term: str
+
 def _origin(url: str) -> str:
     u = urlparse(url)
     return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else url
 
 
-def _term_context_from_today() -> dict:
+def _term_context_from_today() -> TermContext:
     """
     Determine current academic term context.
 
@@ -47,7 +55,7 @@ def _term_context_from_today() -> dict:
     return {"fall_year": fall_year, "spring_year": fall_year + 1, "term": term}
 
 
-def _build_term_regexes(fall_year: int, spring_year: int, term: str) -> tuple[List[re.Pattern], List[re.Pattern]]:
+def _build_term_regexes(fall_year: int, spring_year: int, term: str) -> tuple[List[re.Pattern[str]], List[re.Pattern[str]]]:
     yy_fall = fall_year % 100
     yy_spring = spring_year % 100
     prev_fall = fall_year - 1
@@ -79,7 +87,7 @@ def _build_term_regexes(fall_year: int, spring_year: int, term: str) -> tuple[Li
     return allow, deny
 
 
-def _matches_current_term(text: str, allow: List[re.Pattern], deny: List[re.Pattern]) -> bool:
+def _matches_current_term(text: str, allow: List[re.Pattern[str]], deny: List[re.Pattern[str]]) -> bool:
     t = text or ""
     if any(r.search(t) for r in deny):
         return False
@@ -406,10 +414,14 @@ class CanvasEngine(PortalEngine):
             parsed = await self.parse_grades_from_list_view()
             if len(parsed) == 0:
                 parsed = await self.parse_grades_iterative()
-            print(parsed)
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
             return parsed
         except Exception as e:
-            print(f"[Canvas] Error: {e}")
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
 
     async def parse_grades_from_list_view(self) -> dict[str, float]:
@@ -435,35 +447,36 @@ class CanvasEngine(PortalEngine):
             # 2. parse
             course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
             count = len(course_grades)
-            print(f"Found {count} grades")
-            # print("Course cards: ", course_cards)
+            self.logger.debug(
+                "portal.fetch.grade_cards_found", extra={"course_count": count}
+            )
+
+            grade_str: str | None = None
             for i in range(count):
                 course_grade = course_grades[i]
                 course_card = course_grade.locator('xpath=..') # nav to the parent, we got a list of grades which are inner elems
                 course = await course_card.get_by_role('link').inner_text()
-                grade_str: str = await course_grade.inner_text()
+                grade_str = await course_grade.inner_text()
                 if grade_str.lower() == "no grade":
                     continue
-                print("Canvas: Grade found", grade_str)
                 grade = canonicalize_grade(grade_str)
                 if grade:
                     parsed[course] = grade
-                # print(course, grade_str)
-            # print(grade_cards)
             return parsed
 
         course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
         count = len(course_grades)
-        print(f"Found {count} grades")
+        self.logger.debug(
+            "portal.fetch.grade_cards_found", extra={"course_count": count}
+        )
 
         for i in range(count):
             course_grade = course_grades[i]
             course_card = course_grade.locator("xpath=..")
             course = await course_card.get_by_role("link").inner_text()
-            grade_str: str = await course_grade.inner_text()
+            grade_str = await course_grade.inner_text()
             if grade_str.lower() == "no grade":
                 continue
-            print("Canvas: Grade found", grade_str)
             grade = canonicalize_grade(grade_str)
             if grade:
                 parsed[course] = grade
@@ -602,9 +615,12 @@ class CanvasEngine(PortalEngine):
                         pass
 
             except TimeoutError:
-                print(f"[Canvas] Timeout while scraping course {course_name} ({cid})")
+                self.logger.warning("portal.fetch.course_timeout")
             except Exception as e:
-                print(f"[Canvas] Error scraping course {course_name} ({cid}): {e}")
+                self.logger.warning(
+                    "portal.fetch.course_failed",
+                    extra={"exception_type": type(e).__name__},
+                )
 
         return results
 
@@ -656,7 +672,7 @@ class CanvasEngine(PortalEngine):
     async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
         await self.page.wait_for_load_state("domcontentloaded")
 
-        agenda: dict[str, list[tuple]] = {}
+        agenda: dict[str, list[AgendaItem]] = {}
         await self.page.locator('[data-testid="dashboard-options-button"]').click()
         await self.page.locator('[data-testid="list-view-menu-item"]').click()
         await self.page.wait_for_timeout(1500)
@@ -692,7 +708,7 @@ class CanvasEngine(PortalEngine):
                 day, _ = reconcile_day_time(date_text, reference=datetime.now())
                 due_date = day.strftime("%m/%d/%Y")
 
-                assignments: list[tuple] = []
+                assignments: list[AgendaItem] = []
                 class_groups = day_block.select("div.planner-grouping")
 
                 for course in class_groups:

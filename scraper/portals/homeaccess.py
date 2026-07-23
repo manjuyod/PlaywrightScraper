@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup  # type: ignore[import-untyped]
+from bs4.element import Tag
+from playwright.async_api import Frame, TimeoutError as PlaywrightTimeout
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from typing_extensions import override
 
 from . import register_portal
-from .base import PortalEngine, PlaywrightTimeout
+from .base import PortalEngine
 from .utils import (
     canonicalize_course_title,
     canonicalize_grade,
@@ -30,7 +32,10 @@ class HomeAccess(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
+    @override
+    async def login(self, first_name: str | None = None) -> None:
+        _ = first_name
+        self.logger.info("portal.login.started")
         try:
             await universal_login_flow(
                 self.page,
@@ -49,7 +54,9 @@ class HomeAccess(PortalEngine):
                 "HomeAccess login did not leave the logon page",
             )
 
-            await self.page.goto(self._classwork_url(), wait_until="domcontentloaded")
+            _ = await self.page.goto(
+                self._classwork_url(), wait_until="domcontentloaded"
+            )
             await wait_after_nav(
                 self.page,
                 pattern=lambda url: "/HomeAccess/Classes/Classwork" in url if url else False,
@@ -62,6 +69,7 @@ class HomeAccess(PortalEngine):
                 frame is None,
                 "HomeAccess classwork iframe was not available after login",
             )
+            self.logger.info("portal.login.succeeded")
         except Exception:
             raise
 
@@ -71,19 +79,25 @@ class HomeAccess(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
+    @override
+    async def fetch_grades(self) -> dict[str, object]:
+        self.logger.info("portal.fetch.started")
         frame = await self._get_classwork_frame()
         if frame is None:
             raise self.LoginError("HomeAccess classwork iframe not found")
 
         html = await frame.content()
-        return {"parsed_grades": self.parse_classwork_html(html)}
+        parsed = self.parse_classwork_html(html)
+        self.logger.info(
+            "portal.fetch.completed", extra={"course_count": len(parsed)}
+        )
+        return {"parsed_grades": parsed}
 
     def _classwork_url(self) -> str:
         parsed = urlsplit(self.login_url)
         return f"{parsed.scheme}://{parsed.netloc}/HomeAccess/Classes/Classwork"
 
-    async def _get_classwork_frame(self, timeout_ms: int = 5000):
+    async def _get_classwork_frame(self, timeout_ms: int = 5000) -> Frame | None:
         attempts = max(1, timeout_ms // 500)
         for _ in range(attempts):
             frame = self.page.frame(name="sg-legacy-iframe")
@@ -100,9 +114,9 @@ class HomeAccess(PortalEngine):
         return None
 
     @classmethod
-    def parse_classwork_html(cls, html: str) -> Dict[str, float]:
+    def parse_classwork_html(cls, html: str) -> dict[str, float]:
         soup = BeautifulSoup(html, "html.parser")
-        parsed: Dict[str, float] = {}
+        parsed: dict[str, float] = {}
 
         for card in soup.select("div.AssignmentClass"):
             title_elem = card.select_one("a.sg-header-heading")
@@ -122,7 +136,7 @@ class HomeAccess(PortalEngine):
         return canonicalize_course_title(stripped)
 
     @staticmethod
-    def _extract_average(card: Any) -> float | None:
+    def _extract_average(card: Tag) -> float | None:
         for elem in card.select("span.sg-header-heading"):
             text = elem.get_text(" ", strip=True)
             match = re.search(r"MP Average\s*([0-9]+(?:\.[0-9]+)?)%", text, re.I)

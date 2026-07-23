@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
 import re
+from typing_extensions import override
 
 from scraper.portals.base import PortalEngine
 from scraper.portals import register_portal
@@ -17,7 +17,9 @@ class PowerSchool(PortalEngine):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
+    @override
+    async def login(self, first_name: str | None = None) -> None:
+        _ = first_name
         username_selector = "#fieldAccount"
         password_selector = "#fieldPassword"
 
@@ -38,22 +40,25 @@ class PowerSchool(PortalEngine):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
-        # grab full HTML
+    @override
+    async def fetch_grades(self) -> dict[str, object]:
+        self.logger.info("portal.fetch.started")
         html = await self.page.content()
         parsed = self._parse_gradebook(html)
-        print(parsed)
+        self.logger.info(
+            "portal.fetch.completed", extra={"course_count": len(parsed)}
+        )
         return {"parsed_grades": parsed}
 
     @staticmethod
-    def _parse_gradebook(html: str) -> Dict[str, Any]:
+    def _parse_gradebook(html: str) -> dict[str, float | str]:
         """
         Parse PowerSchool LTS table rows into { course_name: value }.
         Prefers the last <a class="bold">…</a> in each row (current term).
         Percentage → float, else letter.  N/A → "".
         """
         soup = BeautifulSoup(html, "html.parser")
-        results: Dict[str, Any] = {}
+        results: dict[str, float | str] = {}
         table_selector = "tr[id^=ccid_]"
         # Select each student row by id starting with ccid_
         table = soup.select(table_selector)
@@ -69,7 +74,7 @@ class PowerSchool(PortalEngine):
             title = canonicalize_course_title(title, truncate_on=truncate_on)
 
             cols = course.select("td")[:-2] # exclude the absences and tardies rows
-            grade: float | None = None
+            grade: float | str | None = None
             for col in reversed(cols): # make sure we grab the most recent grade
                 grades_text = col.get_text(separator='\n', strip=True)
                 grades = grades_text.splitlines()

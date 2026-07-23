@@ -31,7 +31,9 @@ class ASUPrep(PortalEngine):
             await self.page.click('a:has-text("Gradebook")')
             await wait_after_nav(self.page, wait_until='networkidle', wait_after_load=5000)
         except Exception as e:
-            print(type(e), e)
+            self.logger.error(
+                "portal.login.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
 
     async def alt_sso_login(self):
@@ -58,5 +60,7 @@ class ASUPrep(PortalEngine):
                 grade_selector,
             )
         except Exception as e:
-            print(type(e), e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             return {}

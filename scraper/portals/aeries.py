@@ -144,7 +144,7 @@ class Aeries(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
-        print("\nfetching grades")
+        self.logger.info("portal.fetch.started")
         try:
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000)
@@ -170,16 +170,21 @@ class Aeries(PortalEngine):
                     grade_selector,
                     decompose_labels=True,
                 )
-                print(f"[AERIES] parsed {len(courses_dict)}: {courses_dict}")
+                self.logger.info(
+                    "portal.fetch.completed", extra={"course_count": len(courses_dict)}
+                )
                 return {"parsed_grades": courses_dict}
             else:
-                print("grades tab DNE, parsing grades from dashboard")
+                self.logger.info("portal.fetch.dashboard_fallback")
                 await self.page.reload()
                 courses_dict = {}
 
                 if isinstance(class_table, Tag) and len(class_table.select("div.Card")) > 0:
                     class_cards = class_table.select("div.Card")
-                    print(f"[AERIES] found {len(class_cards)}")
+                    self.logger.debug(
+                        "portal.fetch.course_cards_found",
+                        extra={"course_count": len(class_cards)},
+                    )
                     for card in class_cards:
                         class_link = card.find("a", class_="TextHeading")
                         if class_link is None: 
@@ -199,8 +204,9 @@ class Aeries(PortalEngine):
                         grade = canonicalize_grade(grade_str)
                         courses_dict[title] = grade
 
-                import pprint
-                pprint.pprint(courses_dict)
+                self.logger.info(
+                    "portal.fetch.completed", extra={"course_count": len(courses_dict)}
+                )
                 return courses_dict
 
         except Exception:

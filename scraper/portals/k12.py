@@ -27,7 +27,9 @@ class K12(PortalEngine):
                 pw_selector
             )
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.login.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
         finally:
             pass
@@ -43,7 +45,11 @@ class K12(PortalEngine):
         try:
             pass
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
         finally:
-            print(parsed)
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
             return parsed

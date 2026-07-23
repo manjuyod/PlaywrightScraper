@@ -110,6 +110,14 @@ Optional:
 - `PYTHON_ENV=dev` enables the dashboard overview and jobs API and affects runner notification behavior. When unset or set to any other value, `/` and `/api/jobs` return 403 while direct franchise and student URLs remain available.
 - `SLACK_WEBHOOK_URL` enables Slack notifications.
 - `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
+- `LOG_LEVEL` sets the runner and portal log level (default `INFO`).
+- `LOG_FORMAT=text` controls readable terminal output (the default); set `LOG_FORMAT=json` when a console log collector expects JSON.
+- `LOG_DIRECTORY` sets the rotating JSONL directory (default: `logs/`). `LOG_FILE` can override the complete file path.
+- `LOG_MAX_BYTES` controls rotation size (default: 10 MiB), and `LOG_BACKUP_COUNT` controls retained rotated files (default: 10).
+- `LOG_FILE_ENABLED=0` disables persistent JSONL logging when an external collector already provides durable storage.
+- `LOG_INCLUDE_TRACEBACKS=1` includes tracebacks on fatal runner events. It is off by default so exception messages cannot accidentally expose portal data.
+
+Portal logs use stable event names and include the portal key and CRM student record ID as context. They report counts and controlled outcome codes, not credentials, student names, grade values, authentication answers, page HTML, or full URLs. A terminal runner failure sends a critical Slack notification containing only its controlled failure code and exception type.
 
 ## Scraper Runs
 
@@ -161,9 +169,9 @@ $env:TEST_FRANCHISE_ID = "19"; uv run pytest -q --run-integration
 
 Portal engines live in `scraper/portals/`.
 
-To add or update a portal:
+### To add or update a portal:
 
 1. Implement the portal module under `scraper/portals/`.
 2. Register the portal key in `scraper/portals/__init__.py`.
-3. Make sure `scraper/portals/utils.py` can infer the portal key from the stored portal URL.
+3. Alongside the key, add common url strings for this portal so that `scraper/portals/utils.py` may infer the portal key from the stored portal URL.
 4. Add or update fixtures/tests when the parsing behavior changes.

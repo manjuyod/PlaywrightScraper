@@ -65,7 +65,7 @@ def test_portal_code_does_not_capture_login_traces_or_log_gps_answers() -> None:
     assert "tracing.start(" not in source
     assert "print(self.auth_images" not in source
     assert "for {self.auth_images}" not in source
-    portal_test = (ROOT / "scraper" / "work_flows" / "test_portals.py").read_text(
+    portal_test = (ROOT / "scraper" / "workflows" / "test_portal.py").read_text(
         encoding="utf-8"
     )
     assert "print(student)" not in portal_test

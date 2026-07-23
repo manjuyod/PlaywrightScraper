@@ -46,7 +46,7 @@ class Classlink(PortalEngine):
         retry=retry_if_exception_type(Exception),
     )
     async def fetch_grades(self) -> Dict[str, Any]:
-        print('fetching grades')
+        self.logger.info("portal.fetch.started")
         if 'infinitecampus' in self.page.url:
             return await InfiniteCampus(self.page, self.sid, self.pw, self.login_url).fetch_grades()
         else:

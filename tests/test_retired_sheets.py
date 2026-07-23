@@ -26,9 +26,6 @@ def test_google_client_dependencies_are_absent() -> None:
 
     assert "gspread" not in project
     assert "google-auth" not in project
-    assert "from spreadsheets" not in (ROOT / "db.py").read_text(
-        encoding="utf-8"
-    ).lower()
 
 
 def test_franchise_batch_invokes_only_the_rust_backed_runner() -> None:

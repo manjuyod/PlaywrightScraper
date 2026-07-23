@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Type
+from collections.abc import Callable
 import importlib
 from .base import PortalEngine
 
@@ -11,23 +11,24 @@ class LoginError(Exception):
     pass
 
 
-_REGISTRY: Dict[str, Type[PortalEngine]] = {}
+_REGISTRY: dict[str, type[PortalEngine]] = {}
 
 
-def register_portal(key: str) -> Callable[[Type[PortalEngine]], Type[PortalEngine]]:
+def register_portal(key: str) -> Callable[[type[PortalEngine]], type[PortalEngine]]:
     """
     Class decorator to auto-register a portal engine under a simple key.
     Example in an engine file:
         @register_portal("canvas")
         class CanvasEngine(PortalEngine): ...
     """
-    def decorator(cls: Type[PortalEngine]) -> Type[PortalEngine]:
+    def decorator(cls: type[PortalEngine]) -> type[PortalEngine]:
+        cls.portal_key = key.lower()
         _REGISTRY[key.lower()] = cls
         return cls
     return decorator
 
 
-def get_portal(key: str) -> Type[PortalEngine]:
+def get_portal(key: object) -> type[PortalEngine]:
     """Return the engine class previously registered under `key`."""
     if not key or not isinstance(key, str):
         raise ValueError(f"Invalid or missing portal key: {key!r}")
@@ -43,15 +44,15 @@ def get_portal(key: str) -> Type[PortalEngine]:
 
 # Map of portal keys -> list of URL substrings commonly found in their login URLs.
 # (Useful for auto-detect; runner can use detect_portal_from_url when DB portal is NULL.)
-managed_portals: Dict[str, list[str]] = {
+managed_portals: dict[str, list[str]] = {
     "classlink": ["classlink"],
     "gps": ["gpsportal"],
     "microsoft_benjamin_franklin": ["benjaminfranklincs"],
     "homeaccess": ["homeaccess", "HomeAccess"],
     "parentvue": ["parentvue", "Login_Parent", "Login_Student"],
     "powerschool": ["powerschool"],
-    "blackbaud": ["myschoolapp, blackbaud"],
-    "aeries": ["aeries", "LoginParent.aspx, Dashboard.aspx"],
+    "blackbaud": ["myschoolapp", "blackbaud"],
+    "aeries": ["aeries", "LoginParent.aspx", "Dashboard.aspx"],
     "infinite_campus": ["campus/portal", "infinitecampus"],
     "student_connection": ["studentconnect"],
     "schoology": ["schoology"],
@@ -64,7 +65,7 @@ managed_portals: Dict[str, list[str]] = {
    }
 # Import engines so they register. NOTE: The managed portal should match the .py file name that manages it
 for portal in managed_portals.keys():
-    importlib.import_module(f".{portal}", __name__)
+    _ = importlib.import_module(f".{portal}", __name__)
 
 
 # ---------------------------

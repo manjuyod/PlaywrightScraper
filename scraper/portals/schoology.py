@@ -35,7 +35,9 @@ class Schoology(PortalEngine):
             await self.page.get_by_text('Grade Report').click()
             await self.page.wait_for_timeout(3000)
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.login.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
 
     @retry(

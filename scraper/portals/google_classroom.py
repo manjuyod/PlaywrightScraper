@@ -8,6 +8,8 @@ from scraper.portals.base import PortalEngine, PlaywrightTimeout
 from scraper.portals import register_portal, get_portal
 from .utils import exists, wait_after_nav, reconcile_day_time, grades_table_to_dict, get_portal_key_from_url
 
+AgendaItem = tuple[str, str, str | None]
+
 @register_portal("google_classroom")
 class GoogleClassroom(PortalEngine):
     @retry(
@@ -39,8 +41,8 @@ class GoogleClassroom(PortalEngine):
         except Exception:
             raise
 
-    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming") -> dict[str, list[tuple]]:
-        agenda: dict[str, list[tuple]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
+    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming") -> dict[str, list[AgendaItem]]:
+        agenda: dict[str, list[AgendaItem]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
         try:
             menu_sidebar_selector = 'button[aria-label="Main Menu"]'
             await self.page.wait_for_selector(menu_sidebar_selector, timeout=10000)
@@ -99,7 +101,6 @@ class GoogleClassroom(PortalEngine):
 
 
 
-                # print(title, course, day, due_at)
                 if not title or not course or not day:
                     continue
                 due_date = day.strftime("%m/%d/%Y")
@@ -129,7 +130,9 @@ class GoogleClassroom(PortalEngine):
                 should_truncate_before=True
             )
         except Exception as e:
-            print(f"{type(e)}: {e}")
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
         finally:
             pass

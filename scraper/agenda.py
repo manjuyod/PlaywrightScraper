@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import queue
 from typing import Any, Literal, Mapping
 
 from dotenv import load_dotenv
@@ -20,7 +19,7 @@ from scraper.runner import (
     _advance_progress,
     _heartbeat_loop,
     _new_progress,
-    _student_from_context,
+    student_from_context,
 )
 
 load_dotenv()
@@ -30,7 +29,7 @@ async def fetch_agenda(
     ctx: BrowserContext,
     student: dict[str, Any],
     target: Literal["upcoming", "missing"],
-) -> tuple[dict, dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     page = await ctx.new_page()
     try:
         if student["portal"] == "canvas":
@@ -65,7 +64,7 @@ async def fetch_agenda(
         await page.close()
 
 
-async def _cancel_tasks(tasks: set[asyncio.Task]) -> None:
+async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
     for task in tasks:
         task.cancel()
     if tasks:
@@ -155,12 +154,8 @@ async def _collect_and_post_agendas(
 async def main(
     franchise_id: int | None,
     student_id: int | None,
-    job_id: str | None = None,
-    state_q: queue.Queue | None = None,
     target: Literal["upcoming", "missing"] = "upcoming",
 ):
-    if target not in ("upcoming", "missing"):
-        raise ValueError("agenda target is invalid")
     client = GradeDbClient()
     session = await asyncio.to_thread(
         client.start_job,
@@ -168,7 +163,7 @@ async def main(
         franchise_id=franchise_id,
         student_id=student_id,
     )
-    students = [_student_from_context(row) for row in session.get("students", [])]
+    students = [student_from_context(row) for row in session.get("students", [])]
     progress = _new_progress(len(students))
 
     if not students:
