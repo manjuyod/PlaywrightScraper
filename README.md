@@ -175,3 +175,55 @@ Portal engines live in `scraper/portals/`.
 2. Register the portal key in `scraper/portals/__init__.py`.
 3. Alongside the key, add common url strings for this portal so that `scraper/portals/utils.py` may infer the portal key from the stored portal URL.
 4. Add or update fixtures/tests when the parsing behavior changes.
+5. Registered portals automatically have a logger registered, which can be used via `self.logger` to track events and error states, but is not intended to track page data.
+
+### Live portal diagnostics
+
+The explicit live diagnostic does not access CRM or Neon and does not persist grades
+or login outcomes. It reads only an operator-provided, Git-ignored account manifest;
+dedicated test accounts are strongly preferred. By default, success means `login()`
+completed and grade fetching is not attempted. Without `--portal`, it tests one
+random configured account for every registered portal. With `--portal`, it
+concurrently tests up to five configured accounts for that portal (or every
+available account when fewer exist). Pass `--grades` to continue through grade
+fetching after a successful login.
+
+Create `config/students.portal-test.json` with owner-only permissions. This path is
+already covered by `.gitignore`'s `config/students.*` rule:
+
+```json
+[
+  {
+    "test_id": 1001,
+    "portal": "powerschool",
+    "login_url": "https://school.example/login",
+    "id": "dedicated-test-user",
+    "password": "dedicated-test-password"
+  }
+]
+```
+
+```bash
+chmod 600 config/students.portal-test.json
+export PORTAL_TEST_ACCOUNTS_FILE=config/students.portal-test.json
+```
+
+`test_id` is only a non-secret correlation value for diagnostic logs; it does not
+need to be a CRM student ID. On Windows, restrict the file's NTFS ACL to the account
+that runs the diagnostic.
+
+```powershell
+uv run python -m scraper.workflows.test_portal
+uv run python -m scraper.workflows.test_portal --portal powerschool
+uv run python -m scraper.workflows.test_portal --portal powerschool --seed 19 --headless
+uv run python -m scraper.workflows.test_portal --portal powerschool --grades
+```
+
+Runner events are retained as JSON lines in `logs/scraper.jsonl`; explicit portal
+diagnostics use `logs/portal-tests.jsonl`. Both rotate automatically. Terminal
+output remains human-readable unless `LOG_FORMAT=json` is explicitly selected.
+For example, query failed PowerSchool diagnostic events with:
+
+```bash
+jq 'select(.portal == "powerschool" and .level == "ERROR")' logs/portal-tests.jsonl
+```
