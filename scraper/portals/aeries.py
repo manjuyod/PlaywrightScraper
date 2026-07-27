@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 from time import monotonic
-from typing import Any, Dict, Optional
 
 from bs4 import Tag
 
-from . import register_portal
-from .base import PortalEngine
+from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict, canonicalize_course_title, canonicalize_grade, PlaywrightTimeout
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 
-@register_portal("aeries")
 class Aeries(PortalEngine):
+    portal_key = "aeries"
+    url_patterns = ("aeries", "LoginParent.aspx", "Dashboard.aspx")
+    login_config = UniversalLoginConfig(
+        username_selector="input#portalAccountUsername",
+        password_selector="input#portalAccountPassword",
+        sso_entry_selector="#LoginButton",
+        google_sso=True,
+        alternate_sso=True,
+    )
+
     async def _is_logged_in(self) -> bool:
         url = self.page.url or ""
 
@@ -70,52 +77,21 @@ class Aeries(PortalEngine):
 
         raise PlaywrightTimeout(f"Timed out waiting for Aeries login result (url={self.page.url})")
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
-        reraise=True,
-    )
-    async def login(self, first_name: Optional[str] = None) -> None:
+    async def validate_login(self) -> None:
+        if not await self._wait_for_login_result(timeout_ms=14000):
+            raise self.LoginError("portal login rejected")
+
+    async def after_login(self, first_name: str | None) -> None:
+        _ = first_name
         try:
-            username_selector = "input#portalAccountUsername"
-            password_selector = "input#portalAccountPassword"
-            sso_login_selector = "#LoginButton"
-
-            await universal_login_flow(
-                self.page,
-                self.login_url,
-                self.sid,
-                self.pw,
-                username_selector,
-                password_selector,
-                google_callback=self.google_login,
-                alt_sso_callback=self.iusd_login,
-                sso_login_selector=sso_login_selector,
+            await wait_after_nav(
+                self.page, pattern="**/Dashboard**", timeout=10000
             )
-
-            login_ok = await self._wait_for_login_result(timeout_ms=14000)
-            if not login_ok:
-                raise self.LoginError("Invalid username/password")
-
-            try:
-                await wait_after_nav(self.page, pattern="**/Dashboard**", timeout=10000)
-            except Exception:
-                if not await self._is_logged_in():
-                    raise
-            
-            await wait_after_nav(self.page, pattern='**/Dashboard**', timeout=10000)
-
-            # TODO: gate on bad login alert
-            # if await exists(self.page.get_by_text("""
-            #     The Username or Password entered are incorrect.
-            #     Try again with Valid Credentials.
-            # """, exact=False)):
-            #     raise self.LoginError("Invalid credentials")
         except Exception:
-            raise
+            if not await self._is_logged_in():
+                raise
 
-    async def iusd_login(self):
+    async def alternate_sso_login(self) -> None:
         username_selector = "#input28"
         pw_selector = "#input62"
         await universal_login_flow(
@@ -143,7 +119,7 @@ class Aeries(PortalEngine):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
+    async def fetch_grades(self) -> GradeMap:
         self.logger.info("portal.fetch.started")
         try:
             await self.raise_login_error_if("Dashboard" not in self.page.url)
@@ -173,7 +149,7 @@ class Aeries(PortalEngine):
                 self.logger.info(
                     "portal.fetch.completed", extra={"course_count": len(courses_dict)}
                 )
-                return {"parsed_grades": courses_dict}
+                return courses_dict
             else:
                 self.logger.info("portal.fetch.dashboard_fallback")
                 await self.page.reload()
@@ -202,7 +178,8 @@ class Aeries(PortalEngine):
                             continue
                         title = canonicalize_course_title(course_name)
                         grade = canonicalize_grade(grade_str)
-                        courses_dict[title] = grade
+                        if grade is not None:
+                            courses_dict[title] = grade
 
                 self.logger.info(
                     "portal.fetch.completed", extra={"course_count": len(courses_dict)}

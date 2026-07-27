@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -7,43 +6,27 @@ from tenacity import (
     wait_exponential,
 )
 
-from scraper.portals.infinite_campus import InfiniteCampus
-
-from . import register_portal
-from .base import PortalEngine
-from .utils import universal_login_flow, wait_after_nav, PlaywrightTimeout
+from .base import GradeMap, PortalEngine, UniversalLoginConfig
+from .utils import wait_after_nav
 
 
-@register_portal("gps")
 class GPS(PortalEngine):
     """Portal scraper for Gilbert Public Schools' portal.
 
-    The class uses Playwright to automate login and extract quarter grades
-    for each course. Grades are returned as a list of course/grade
-    dictionaries under the ``parsed_grades`` key.
+    The class uses Playwright to automate login and extract current grades
+    for each course.
     """
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
-        reraise=True,
+    portal_key = "gps"
+    url_patterns = ("gpsportal",)
+    login_config = UniversalLoginConfig(
+        username_selector="input#identification",
+        password_selector="input#ember535",
+        post_fill_wait=4000,
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        """Authenticate the user on the GPS parent portal."""
-        username_selector = "input#identification"
-        password_selector = "input#ember535"
-        await universal_login_flow(
-            self.page,
-            self.login_url,
-            self.sid,
-            self.pw,
-            username_selector,
-            password_selector,
-            post_fill_wait=4000,
-        )
 
-        # Pictograph auth (three picks)
+    async def after_login(self, first_name: str | None) -> None:
+        _ = first_name
         await self.do_gps_auth()
 
     # Login Helper
@@ -88,13 +71,13 @@ class GPS(PortalEngine):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(TimeoutError),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
+    async def fetch_grades(self) -> GradeMap:
         """Collect grades from the grade tab"""
         # GPS uses Infinite Campus as their portal, GPS is just a login wrapper
-        try:
-            await self.nav_to_ic()
-            return await InfiniteCampus(
-                self.page, self.sid, self.pw, self.login_url
-            ).fetch_grades()
-        finally:
-            pass
+        await self.nav_to_ic()
+        from .registry import get_portal
+
+        engine = get_portal("infinite_campus")
+        return await engine(
+            self.page, self.sid, self.pw, self.login_url
+        ).fetch_grades()

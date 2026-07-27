@@ -1,71 +1,50 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from bs4.element import Tag
 
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from .base import PortalEngine
-from . import register_portal  # helper we'll create in __init__.py
+from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import (
     canonicalize_course_title,
     canonicalize_grade,
     exists,
-    universal_login_flow,
     wait_after_nav,
 )
 
-@register_portal("student_connection")
 class StudentConnection(PortalEngine):
     """Portal scraper for Student Connection."""
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=3, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
-        reraise=True,
+    portal_key = "student_connection"
+    url_patterns = ("studentconnect",)
+    login_config = UniversalLoginConfig(
+        username_selector="input[name='Pin']",
+        password_selector="input[name='Password']",
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        """Authenticate the user on the StudentConnection portal."""
-        username_selector = "input[name='Pin']"
-        password_selector = "input[name='Password']"
+
+    async def validate_login(self) -> None:
         try:
-            await universal_login_flow(
-                self.page,
-                self.login_url,
-                self.sid,
-                self.pw,
-                username_selector,
-                password_selector,
+            rejected = await exists(
+                self.page.get_by_text("Login Not Found", exact=False)
             )
+            await self.raise_login_error_if(rejected)
+        except PlaywrightTimeout:
+            return
 
-            try:
-                login_not_found = await exists(self.page.get_by_text("Login Not Found", exact=False))
-                self.logger.debug(
-                    "portal.login.result_checked",
-                    extra={"login_rejected": login_not_found},
-                )
-                await self.raise_login_error_if(login_not_found)
-            except PlaywrightTimeout: # not a failed login if this times out
-                pass
-            # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
-            await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
-
-
-
-
-        except Exception:
-            raise
+    async def after_login(self, first_name: str | None) -> None:
+        _ = first_name
+        await wait_after_nav(
+            self.page,
+            pattern=lambda url: "PortalMainPage" in url,
+            wait_after_load=2000,
+        )
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
-        """
-        Scrape the Pulse table on PortalMainPage and return:
-        {"parsed_grades": {"COURSE NAME": 93.4, ...}}
-        """
+    async def fetch_grades(self) -> GradeMap:
+        """Scrape the Pulse table into a normalized course-to-grade mapping."""
         try:
             pulse = True  # default to using the pulse table
             # parsed: None | Dict[str, Any] = None
@@ -101,14 +80,12 @@ class StudentConnection(PortalEngine):
             self.logger.info(
                 "portal.fetch.completed", extra={"course_count": len(parsed)}
             )
-            return {"parsed_grades": parsed}
+            return parsed
         except Exception as e:
             self.logger.error(
                 "portal.fetch.failed", extra={"exception_type": type(e).__name__}
             )
             raise
-        finally:
-            pass
 # HELPERS
     async def collect_from_assignments(self) -> Dict[str, Any]:
         soup = await self.get_soup()
@@ -156,7 +133,8 @@ class StudentConnection(PortalEngine):
             percent_grade = canonicalize_grade(grade)
             truncate_on = ": "
             course_name = canonicalize_course_title(course_name, truncate_on=truncate_on, truncate_before=True)
-            parsed[course_name] = percent_grade
+            if percent_grade is not None:
+                parsed[course_name] = percent_grade
         return parsed
 
     async def collect_from_pulse(self):
@@ -221,7 +199,7 @@ class StudentConnection(PortalEngine):
         # Extract rows
         rows = self.page.locator("#SP-Pulse tbody tr")
         n = await rows.count()
-        parsed: Dict[str, Any] = {}
+        parsed: GradeMap = {}
 
         for r in range(n):
             cells = rows.nth(r).locator("td")
@@ -256,7 +234,7 @@ class StudentConnection(PortalEngine):
 
             truncate_on = ": "
             course = canonicalize_course_title(course, truncate_on=truncate_on, truncate_before=True)
-            if course:
+            if course and grade is not None:
                 parsed[course] = grade
 
         return parsed

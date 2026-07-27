@@ -52,7 +52,7 @@ def test_fetch_grades_derives_gradebook_from_authenticated_portal_origin() -> No
     assert page.visited_url == (
         "https://benjaminfranklincs.powerschool.com/apps/portal/parent/grades"
     )
-    assert result == {"parsed_grades": []}
+    assert result == {}
 
 
 def test_fetch_grades_prefers_configured_alternate_portal_url() -> None:
@@ -62,3 +62,31 @@ def test_fetch_grades_prefers_configured_alternate_portal_url() -> None:
     asyncio.run(_engine(page, alt_portal_url=gradebook_url).fetch_grades())
 
     assert page.visited_url == gradebook_url
+
+
+def test_quarter_grade_parser_returns_normalized_percentages() -> None:
+    html = """
+    <div class="collapsible-card grades__card">
+      <tl-grading-section-header><a>Algebra I</a></tl-grading-section-header>
+      <tl-grading-task-list>
+        <li>
+          <span class="ng-star-inserted">Quarter Grade</span>
+          <tl-grading-score><b>A</b><b>(93.5%)</b></tl-grading-score>
+        </li>
+      </tl-grading-task-list>
+    </div>
+    <div class="collapsible-card grades__card">
+      <tl-grading-section-header><h4>English</h4></tl-grading-section-header>
+      <tl-grading-task-list>
+        <li>
+          <span class="ng-star-inserted">Quarter Grade</span>
+          <tl-grading-score><b>B+</b></tl-grading-score>
+        </li>
+      </tl-grading-task-list>
+    </div>
+    """
+
+    assert _engine(FakePage())._parse_quarter_grades(html) == {
+        "ALGEBRA I": 93.5,
+        "ENGLISH": 89.0,
+    }

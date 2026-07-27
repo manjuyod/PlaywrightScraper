@@ -1,52 +1,37 @@
 from __future__ import annotations
 from datetime import datetime
-from typing import Any, Optional
 
 from playwright.async_api import Frame, Page, expect
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from . import register_portal  # helper we'll create in __init__.py
-from .base import PortalEngine, PlaywrightTimeout
-from .utils import exists, grades_table_to_dict, universal_login_flow
+from .base import GradeMap, PortalEngine, PlaywrightTimeout, UniversalLoginConfig
+from .utils import exists, grades_table_to_dict
 
 
-@register_portal("infinite_campus")
 class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
-    # ---------------------- LOGIN (home only) ----------------------
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
+    portal_key = "infinite_campus"
+    url_patterns = ("campus/portal", "infinitecampus")
+    login_config = UniversalLoginConfig(
+        username_selector="#username",
+        password_selector="#password",
+        microsoft_sso=True,
+        google_sso=True,
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        """Only log in and arrive on the parent/home shell."""
-        self.logger.info("portal.login.started")
-        username_selector = '#username'
-        password_selector = '#password'
-        try:
-            await universal_login_flow(
-                self.page,
-                self.login_url,
-                self.sid,
-                self.pw,
-                username_selector,
-                password_selector,
-                microsoft_callback=self.microsoft_login,
-                google_callback=self.google_login
-            )
-            self.logger.debug("portal.login.awaiting_redirect")
 
-            invalid_creds_msg = "Incorrect Username and/or Password"
-            login_failed = await exists(self.page.get_by_text(invalid_creds_msg, exact=False))
-            await self.raise_login_error_if(login_failed, "Infinite Campus login failed due to incorrect credentials")
-            await self.raise_login_error_if('nav-wrapper' not in self.page.url)
-            await self.page.wait_for_load_state("networkidle")
-            self.logger.info("portal.login.succeeded")
-            await self.select_student(first_name, self.page) # select for student if necessary
-            self.logger.debug("portal.login.student_home_ready")
-        except self.LoginError:
-            raise
+    async def validate_login(self) -> None:
+        invalid = await exists(
+            self.page.get_by_text(
+                "Incorrect Username and/or Password", exact=False
+            )
+        )
+        await self.raise_login_error_if(invalid or "nav-wrapper" not in self.page.url)
+
+    async def after_login(self, first_name: str | None) -> None:
+        await self.page.wait_for_load_state("networkidle")
+        await self.select_student(first_name, self.page)
+        self.logger.debug("portal.login.student_home_ready")
+
     # helper
     async def select_student(self, first_name: str | None, page: Page):
         parent = page.frame("main-workspace")
@@ -98,7 +83,7 @@ class InfiniteCampus(PortalEngine):
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> dict[Any, Any]: # TODO: Alter to parse from 'All terms' instead of 'Current term'
+    async def fetch_grades(self) -> GradeMap: # TODO: Alter to parse from 'All terms' instead of 'Current term'
         """Collect grades from the grade tab"""
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(1500)

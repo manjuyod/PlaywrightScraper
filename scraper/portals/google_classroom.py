@@ -1,17 +1,19 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, Literal
+from typing import Optional, Literal
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime, date, time
 # from bs4 import BeautifulSoup
 
-from scraper.portals.base import PortalEngine, PlaywrightTimeout
-from scraper.portals import register_portal, get_portal
-from .utils import exists, wait_after_nav, reconcile_day_time, grades_table_to_dict, get_portal_key_from_url
+from scraper.portals.base import GradeMap, PortalEngine, PlaywrightTimeout
+from scraper.portals import get_portal
+from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_from_url
 
 AgendaItem = tuple[str, str, str | None]
 
-@register_portal("google_classroom")
 class GoogleClassroom(PortalEngine):
+    portal_key = "google_classroom"
+    url_patterns = ("classroom.google", "accounts.google")
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -115,27 +117,8 @@ class GoogleClassroom(PortalEngine):
             pass
         return agenda
 
-    async def fetch_grades(self) -> Dict[str, Any]:
-        try:
-            table_selector = 'None'
-            title_selector = 'None'
-            pair_selector = 'None'
-            grade_selector = 'None'
-            return await grades_table_to_dict(
-                self.page,
-                table_selector,
-                title_selector,
-                grade_selector,
-                pair_selector=pair_selector,
-                should_truncate_before=True
-            )
-        except Exception as e:
-            self.logger.error(
-                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
-            )
-            raise
-        finally:
-            pass
+    async def fetch_grades(self) -> GradeMap:
+        return {}
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(300)

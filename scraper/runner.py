@@ -148,7 +148,7 @@ async def scrape_one(
             if not scraper.sid or not scraper.pw:
                 raise LoginError("portal login rejected")
             await scraper.login(first_name=student.get("student_name"))
-        except (LoginError, scraper.LoginError):
+        except LoginError:
             logger.warning("portal.login.rejected", extra=log_context)
             raise LoginError("portal login rejected") from None
         except Exception as exc:
@@ -166,8 +166,7 @@ async def scrape_one(
                 "parsed_grades": None,
             }
 
-        grades = await scraper.fetch_grades()
-        parsed = grades.get("parsed_grades") if isinstance(grades, dict) else grades
+        parsed = await scraper.fetch_grades()
         result = {
             "db_id": student["db_id"],
             "id": student["id"],
@@ -177,7 +176,7 @@ async def scrape_one(
             "portal.scrape.completed",
             extra={
                 **log_context,
-                "course_count": len(parsed) if isinstance(parsed, dict) else 0,
+                "course_count": len(parsed),
             },
         )
         return result

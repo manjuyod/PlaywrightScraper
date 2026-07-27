@@ -169,13 +169,65 @@ $env:TEST_FRANCHISE_ID = "19"; uv run pytest -q --run-integration
 
 Portal engines live in `scraper/portals/`.
 
-### To add or update a portal:
+### To add a portal:
 
-1. Implement the portal module under `scraper/portals/`.
-2. Register the portal key in `scraper/portals/__init__.py`.
-3. Alongside the key, add common url strings for this portal so that `scraper/portals/utils.py` may infer the portal key from the stored portal URL.
-4. Add or update fixtures/tests when the parsing behavior changes.
-5. Registered portals automatically have a logger registered, which can be used via `self.logger` to track events and error states, but is not intended to track page data.
+Portal modules are discovered automatically. A typical portal declares everything
+needed for registration and the shared login flow beside its engine:
+
+```python
+from scraper.portals import (
+    GradeTableConfig,
+    PortalEngine,
+    UniversalLoginConfig,
+)
+
+
+class ExamplePortal(PortalEngine):
+    portal_key = "example"
+    url_patterns = ("grades.example.org", "/example/login")
+    login_config = UniversalLoginConfig(
+        username_selector="#username",
+        password_selector="#password",
+        microsoft_sso=True,
+    )
+    grade_table_config = GradeTableConfig(
+        table_selector=".course",
+        title_selector=".course-title",
+        grade_selector=".current-grade",
+    )
+```
+
+Adding this module under `scraper/portals/` is sufficient; do not edit a central
+portal list. URL detection is case-insensitive and selects the longest matching
+declared pattern.
+
+Override `validate_login()` to recognize portal-specific rejection states and
+`after_login(first_name)` for student selection, secondary authentication, or
+post-login navigation. Set `alternate_sso=True` and override
+`alternate_sso_login()` for a nonstandard SSO fallback. Override `login()` only
+when the universal flow cannot represent the portal.
+
+`fetch_grades()` always returns a `dict[str, float]` mapping normalized course
+names to percentages. Use `GradeTableConfig` when the shared table parser fits;
+override `fetch_grades()` for custom layouts. The runner adds the outer
+`parsed_grades` result field.
+
+Each registered portal receives `self.logger`. Log stable events, counts, and
+controlled states only---never credentials, student data, grade values, page HTML,
+or full URLs. Add fixture-backed tests whenever login declarations or parsing
+behavior changes.
+
+### To update/fix a portal:
+
+Make targeted changes.
+
+Test that the changes worked by running the portal test:
+
+```bash
+bash scraper/workflows/test_portal.py --portal {portal_key}
+```
+
+Add the --grades flag if you need to test grade parsing as well.
 
 ### Live portal diagnostics
 

@@ -5,7 +5,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
-from typing import Awaitable, Callable, Dict, List, Literal, Optional, Pattern, Tuple
+from typing import Awaitable, Callable, List, Literal, Optional, Pattern, Tuple
 
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Error as PlaywrightError
@@ -19,7 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from . import LoginError
+from .base import LoginError
 
 LoginCallback = Callable[[], Awaitable[None]]
 
@@ -42,33 +42,15 @@ def log_retry(retry_state: RetryCallState) -> None:
 
 
 def get_portal_key_from_url(url: str) -> str | None:
-    from scraper.portals import managed_portals
+    """Compatibility wrapper for registry-backed URL detection."""
+    from .registry import get_portal_key_from_url as detect
 
-    """
-    Args:
-        url: The url to match from
-    Returns:
-        A managed portal key by if any portal can be detected in the url | else None
-    """
-    if not url:
-        return None
-    for portal, rules in managed_portals.items():
-        if any(rule.lower() in url.lower() for rule in rules):
-            return portal
-    return None
+    return detect(url)
 
 
 # ============================================================================
 # RETRY DECORATORS
 # ============================================================================
-
-# Standard retry configurations
-standard_login_retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type(PlaywrightTimeout),
-    reraise=True,
-)
 
 standard_fetch_retry = retry(
     stop=stop_after_attempt(3),
@@ -466,7 +448,7 @@ async def grades_table_to_dict(
     should_truncate_before: bool = False,
     decompose_labels: bool = False,
     use_soup: bool = True,
-) -> Dict[str, str]:
+) -> dict[str, float]:
     """
     Generic table parser for grade extraction.
 
@@ -488,7 +470,6 @@ async def grades_table_to_dict(
     IMPORTANT:
         Ensure the page as fully loaded and the table is present prior to this function's execution
     """
-    assert isinstance(page, Page)
     if use_soup:  # bs4 parsing (default)
         html = await page.content()
         soup = BeautifulSoup(html, "html.parser")
@@ -497,7 +478,7 @@ async def grades_table_to_dict(
         if not table:
             return {}
 
-        parsed = {}
+        parsed: dict[str, float] = {}
         for course in table:
             parent_elem = course
             class_elem = parent_elem.select_one(title_selector)
@@ -520,10 +501,12 @@ async def grades_table_to_dict(
                 class_title = canonicalize_course_title(
                     class_title, truncate_title_on, should_truncate_before
                 )
-                if grade:
+                if grade is not None:
                     parsed[class_title] = grade
     else:  # Playwright locator version
         if frame_selector is not None:
+            if not isinstance(page, Page):
+                raise TypeError("frame_selector requires a Playwright Page")
             frame = page.frame(name=frame_selector)
             assert frame is not None, f"Could not find frame with selector {frame_selector}"
             page = frame
@@ -531,7 +514,11 @@ async def grades_table_to_dict(
         rows = await page.locator(f"{table_selector}").all()
         for row in rows:
             try:
-                class_title = (await row.locator(title_selector).inner_text()).strip()
+                class_title = canonicalize_course_title(
+                    await row.locator(title_selector).inner_text(),
+                    truncate_title_on,
+                    should_truncate_before,
+                )
                 grades = await row.locator(grade_selector).all()
 
                 if len(grades) == 0:
@@ -558,8 +545,8 @@ async def grades_table_to_dict(
                     grade_text = (await grades[0].inner_text()).strip()
 
                 grade = canonicalize_grade(grade_text)
-                if grade:
-                    parsed[class_title.upper()] = grade
+                if grade is not None:
+                    parsed[class_title] = grade
             except (PlaywrightError, PlaywrightTimeout) as e:
                 logger.warning(
                     "portal.parse.row_skipped",
@@ -586,6 +573,7 @@ def percent_from_letter_grade(letter_grade: str) -> int:
     Args:
         letter_grade
     """
+    letter_grade = letter_grade.strip().upper()
     minus = letter_grade.endswith("-")
     plus = letter_grade.endswith("+")
     modifier = -5 if minus else 5 if plus else 0
@@ -619,13 +607,14 @@ def canonicalize_grade(grade_text: str) -> float | None:
     Returns:
         float: Numeric percentage grade
     """
-    grade_text = grade_text.strip()
-    try:  # Remove % sign if present
-        if "%" or "(" or ")" in grade_text.strip():
-            return float(grade_text.replace("%", "").replace("(", "").replace(")", ""))
-    except ValueError:  # NaN
-        pass
-    # Maybe a letter grade
+    grade_text = normalize_whitespace(grade_text)
+    numeric = re.fullmatch(
+        r"\(?\s*([+-]?\d+(?:\.\d+)?)\s*%?\s*\)?",
+        grade_text,
+    )
+    if numeric:
+        return float(numeric.group(1))
+
     grade = percent_from_letter_grade(grade_text)
     return float(grade) if grade and grade >= 0 else None
 

@@ -12,9 +12,8 @@ from bs4 import BeautifulSoup, Tag
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import TimeoutError
 
-from .base import PortalEngine, PlaywrightTimeout
-from . import register_portal, LoginError
-from .utils import exists, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
+from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
+from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
 
 
 # --------------------- utilities ---------------------
@@ -96,7 +95,6 @@ def _matches_current_term(text: str, allow: List[re.Pattern[str]], deny: List[re
 
 # --------------------- engine ---------------------
 
-@register_portal("canvas")
 class CanvasEngine(PortalEngine):
     """
     Expects runner to pass:
@@ -104,6 +102,9 @@ class CanvasEngine(PortalEngine):
       - password (Student.P1Password)
       - login_url (Student.Portal1), e.g. https://<tenant>.instructure.com/login/canvas
     """
+
+    portal_key = "canvas"
+    url_patterns = ("instructure.com", "canvas")
 
     # ----------------- helpers -----------------
 
@@ -396,7 +397,7 @@ class CanvasEngine(PortalEngine):
 
     # ----------------- grades scraping -----------------
 
-    async def fetch_grades(self) -> Dict[str, Any]:
+    async def fetch_grades(self) -> GradeMap:
         """
         Prefer dashboard/list view parsing first.
         Fall back to iterative course-by-course parsing.
@@ -460,8 +461,8 @@ class CanvasEngine(PortalEngine):
                 if grade_str.lower() == "no grade":
                     continue
                 grade = canonicalize_grade(grade_str)
-                if grade:
-                    parsed[course] = grade
+                if grade is not None:
+                    parsed[canonicalize_course_title(course)] = grade
             return parsed
 
         course_grades = await self.page.locator('[data-testid="my-grades-score"]').all()
@@ -478,8 +479,8 @@ class CanvasEngine(PortalEngine):
             if grade_str.lower() == "no grade":
                 continue
             grade = canonicalize_grade(grade_str)
-            if grade:
-                parsed[course] = grade
+            if grade is not None:
+                parsed[canonicalize_course_title(course)] = grade
 
         return parsed
 
@@ -610,7 +611,9 @@ class CanvasEngine(PortalEngine):
 
                 if "final_percent" in course_result:
                     try:
-                        results[course_name] = float(course_result["final_percent"])
+                        results[canonicalize_course_title(course_name)] = float(
+                            course_result["final_percent"]
+                        )
                     except Exception:
                         pass
 

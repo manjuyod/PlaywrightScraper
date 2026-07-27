@@ -23,6 +23,13 @@ PlaywrightScraper/
 └── pyproject.toml
 ```
 
+Portal engines are self-describing and automatically discovered. Their class
+metadata owns the portal key, URL-detection patterns, universal-login selectors,
+and optional shared grade-table selectors. Portal-specific behavior belongs in
+login validation/post-login hooks or a focused method override. Grade engines
+return a normalized `dict[str, float]`; the runner owns the surrounding result
+payload and database boundary.
+
 ## High-Level Flow
 
 1. `scraper.runner` or `scraper.agenda` starts a leased job through `grade-db.exe`.

@@ -1,42 +1,45 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from scraper.portals.base import PortalEngine, PlaywrightTimeout
-from scraper.portals import register_portal
+from scraper.portals.base import (
+    GradeTableConfig,
+    PortalEngine,
+    UniversalLoginConfig,
+)
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from .utils import grades_table_to_dict, universal_login_flow, wait_after_nav
+from .utils import wait_after_nav
 
-@register_portal("parentvue")
 class ParentVUE(PortalEngine):
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
+    portal_key = "parentvue"
+    url_patterns = ("parentvue", "Login_Parent", "Login_Student")
+    login_config = UniversalLoginConfig(
+        username_selector="#ctl00_MainContent_username",
+        password_selector="#ctl00_MainContent_password",
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        try:
-            username_selector = '#ctl00_MainContent_username'
-            password_selector = '#ctl00_MainContent_password'
-            await universal_login_flow(
-                self.page,
-                self.login_url,
-                self.sid,
-                self.pw,
-                username_selector,
-                password_selector,
-            )
-            await self.raise_login_error_if('Login' in self.page.url)  # we should move past the login screen after clicking the login button
-            await wait_after_nav(self.page, wait_until='domcontentloaded', timeout=30000)
+    grade_table_config = GradeTableConfig(
+        table_selector="div.gb-class-header.gb-class-row",
+        title_selector=".course-title",
+        grade_selector=".score",
+        pair_selector="gb-class-row",
+        should_truncate_before=True,
+    )
 
-            # ensure that we select the correct student if there may be multiple
-            if 'Login_Parent' in self.login_url:
-                await self.select_student(first_name)
-            # nav to grades page given that we are on the home page
-            self.logger.info("portal.navigation.gradebook_started")
-            await self.page.get_by_role("listitem").filter(has_text="Grade Book").click()
-            await self.page.wait_for_load_state(state='domcontentloaded', timeout=30000)
-        except Exception:
-            raise
+    async def validate_login(self) -> None:
+        await self.raise_login_error_if("Login" in self.page.url)
+
+    async def after_login(self, first_name: str | None) -> None:
+        await wait_after_nav(
+            self.page, wait_until="domcontentloaded", timeout=30000
+        )
+        if "Login_Parent" in self.login_url:
+            await self.select_student(first_name)
+        self.logger.info("portal.navigation.gradebook_started")
+        await self.page.get_by_role("listitem").filter(
+            has_text="Grade Book"
+        ).click()
+        await self.page.wait_for_load_state(
+            state="domcontentloaded", timeout=30000
+        )
 
 
 
@@ -99,29 +102,6 @@ class ParentVUE(PortalEngine):
                 break
         if not agu:
             raise RuntimeError(f"No dropdown student matched '{target}'")
-
-    async def fetch_grades(self) -> Dict[str, Any]:
-        try:
-            table_selector = "div.gb-class-header.gb-class-row"
-            title_selector = ".course-title"
-            pair_selector = "gb-class-row"
-            grade_selector = ".score"
-
-            return await grades_table_to_dict(
-                self.page,
-                table_selector,
-                title_selector,
-                grade_selector,
-                pair_selector=pair_selector,
-                should_truncate_before=True
-            )
-        except Exception as e:
-            self.logger.error(
-                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
-            )
-        finally:
-            pass
-        return {}
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(300)
