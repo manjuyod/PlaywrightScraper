@@ -718,7 +718,7 @@
             return () => window.removeEventListener("hashchange", syncTab);
         }, []);
         const actions = [
-            h(Button, { key: "back", href: data.backUrl, icon: "arrowLeft", variant: "outline" }, "Franchise"),
+            h(Button, { key: "back", href: data.backUrl, icon: "arrowLeft", variant: "outline" }, "Back"),
         ];
         if (student.portalUrl) {
             actions.push(

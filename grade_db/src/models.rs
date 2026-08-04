@@ -144,6 +144,9 @@ pub struct CrmStudent {
     pub portal1: Option<String>,
     pub p1username: Option<String>,
     pub p1password: Option<String>,
+    pub portal2: Option<String>,
+    pub p2username: Option<String>,
+    pub p2password: Option<String>,
 }
 
 impl CrmStudent {
@@ -161,9 +164,6 @@ impl CrmStudent {
 #[derive(Debug, Clone, Default)]
 pub struct StudentGradeState {
     pub crmstudentid: i64,
-    pub portal2: Option<String>,
-    pub p2username: Option<String>,
-    pub p2password: Option<String>,
     pub portal: Option<String>,
     pub track_agenda: bool,
     pub auth_type: Option<String>,
@@ -214,9 +214,9 @@ pub fn merge_runner_student(crm: &CrmStudent, state: Option<&StudentGradeState>)
         portal1: crm.portal1.clone(),
         p1username: crm.p1username.clone(),
         p1password: crm.p1password.clone(),
-        portal2: state.and_then(|row| row.portal2.clone()),
-        p2username: state.and_then(|row| row.p2username.clone()),
-        p2password: state.and_then(|row| row.p2password.clone()),
+        portal2: crm.portal2.clone(),
+        p2username: crm.p2username.clone(),
+        p2password: crm.p2password.clone(),
         portal: state.and_then(|row| row.portal.clone()),
         track_agenda: state.is_some_and(|row| row.track_agenda),
         auth_type: state.and_then(|row| row.auth_type.clone()),

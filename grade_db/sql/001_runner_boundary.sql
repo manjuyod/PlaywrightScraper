@@ -5,9 +5,6 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS students_grades_20262027 (
     uuid UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     crmstudentid BIGINT NOT NULL UNIQUE,
-    portal2 TEXT NULL,
-    p2username TEXT NULL,
-    p2password TEXT NULL,
     weeklydata JSONB NOT NULL DEFAULT '{}'::jsonb,
     weekly_agenda JSONB NOT NULL DEFAULT '{}'::jsonb,
     portal TEXT NULL,
@@ -23,9 +20,6 @@ CREATE TABLE IF NOT EXISTS students_grades_20262027 (
 
 ALTER TABLE students_grades_20262027
     ALTER COLUMN crmstudentid TYPE BIGINT USING crmstudentid::BIGINT,
-    ADD COLUMN IF NOT EXISTS portal2 TEXT NULL,
-    ADD COLUMN IF NOT EXISTS p2username TEXT NULL,
-    ADD COLUMN IF NOT EXISTS p2password TEXT NULL,
     ADD COLUMN IF NOT EXISTS weeklydata JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS weekly_agenda JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS portal TEXT NULL,
@@ -37,9 +31,6 @@ ALTER TABLE students_grades_20262027
     ADD COLUMN IF NOT EXISTS auth_answers JSONB NOT NULL DEFAULT '[]'::jsonb,
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
-
-ALTER TABLE students_grades_20262027
-    DROP CONSTRAINT IF EXISTS ck_students_grades_no_plaintext_alternate_credentials;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_grades_20262027_crmstudentid
     ON students_grades_20262027 (crmstudentid);

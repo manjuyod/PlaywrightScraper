@@ -2,10 +2,7 @@
 BEGIN;
 
 UPDATE students_grades_20262027
-SET portal2 = NULL,
-    p2username = NULL,
-    p2password = NULL,
-    portal = NULL,
+SET portal = NULL,
     track_agenda = FALSE,
     auth_type = NULL,
     auth_answers = '[]'::jsonb,

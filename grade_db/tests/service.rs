@@ -119,6 +119,9 @@ fn crm_student(id: i64, password: Option<&str>) -> CrmStudent {
         portal1: Some("https://portal.example/login".into()),
         p1username: Some(format!("user{id}")),
         p1password: password.map(str::to_owned),
+        portal2: None,
+        p2username: None,
+        p2password: None,
     }
 }
 

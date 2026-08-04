@@ -1,6 +1,6 @@
 # Student Grade Checker
 
-PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, and primary portal credentials. The local Windows `grade-db.exe` boundary reads CRM, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
+PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, and primary and secondary portal credentials. The local Windows `grade-db.exe` boundary reads CRM, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
 The Flask dashboard is a public, read-only operations view. It reads the runnable student boundary from CRM, reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
@@ -152,8 +152,10 @@ Database rollout is intentionally human-operated:
 
 1. Run and review [`grade_db/sql/000_inspect_boundary.sql`](grade_db/sql/000_inspect_boundary.sql). It selects only schema metadata and row counts.
 2. After review, apply [`grade_db/sql/001_runner_boundary.sql`](grade_db/sql/001_runner_boundary.sql). It is forward-only and does not drop tables or data.
-3. Use the templates in `grade_db/sql/operations/` to set or clear portal2, agenda, and GPS fields on existing CRM-created rows.
-4. Run `grade-db.exe doctor`, then pilot one student, one franchise, and agenda collection before enabling scheduled batches.
+3. Deploy the CRM-backed `grade-db.exe`, run `grade-db.exe doctor`, and require `crm_secondary_schema=true` before removing any Neon columns.
+4. Apply [`grade_db/sql/002_drop_neon_secondary_portal.sql`](grade_db/sql/002_drop_neon_secondary_portal.sql) to existing Neon databases, then rerun `doctor`.
+5. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override, agenda tracking, and GPS fields. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
+6. Pilot one student, one franchise, and agenda collection before enabling scheduled batches.
 
 `grade-db.exe` exposes only `job start`, `job heartbeat`, `result post`, `job complete`, `job fail`, and read-only `doctor`. It has no listener, arbitrary SQL command, scheduler, or migration command.
 

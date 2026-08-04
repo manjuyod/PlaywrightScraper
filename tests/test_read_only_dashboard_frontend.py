@@ -50,6 +50,20 @@ def test_franchise_and_student_headers_omit_overview_actions() -> None:
         assert '"Overview"' not in page
 
 
+def test_student_header_back_action_uses_generic_label() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    student_page = javascript.split("function StudentPage", 1)[1].split(
+        "function App", 1
+    )[0]
+
+    assert 'href: data.backUrl' in student_page
+    assert 'icon: "arrowLeft"' in student_page
+    assert '"Back"' in student_page
+    assert '"Franchise"' not in student_page
+
+
 def test_franchise_students_render_as_a_read_only_table() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
