@@ -1,6 +1,6 @@
 # grade-db
 
-`grade-db.exe` is the local Windows database boundary for the Playwright runners. It reads primary and secondary portal credentials from CRM through a read-only SQL Server account and owns leased job/result/state transactions in Neon. JSON is accepted on stdin and emitted on stdout; sanitized diagnostic codes go to stderr.
+`grade-db.exe` is the local Windows database boundary for the Playwright runners. Through a read-only SQL Server account, it reads runnable students whose CRM `IsTrail` value is `Active` and whose primary portal credentials are complete, together with their optional secondary portal credentials. It owns leased job/result/state transactions in Neon. JSON is accepted on stdin and emitted on stdout; sanitized diagnostic codes go to stderr.
 
 ## Build
 
