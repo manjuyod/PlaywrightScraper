@@ -50,13 +50,31 @@ def test_boundary_migration_creates_only_runner_owned_tables_without_backfill() 
     assert "lease_expires_at timestamptz" in sql
     assert "idempotency_key uuid" in sql
     assert "applied boolean" in sql
+    for crm_owned_column in ("portal2", "p2username", "p2password"):
+        assert crm_owned_column not in sql
+
+
+def test_secondary_portal_drop_migration_removes_only_crm_owned_columns() -> None:
+    sql = _sql("002_drop_neon_secondary_portal.sql")
+
+    assert "begin;" in sql
+    assert "commit;" in sql
+    assert "alter table students_grades_20262027" in sql
+    assert "drop constraint if exists ck_students_grades_no_plaintext_alternate_credentials" in sql
+    for crm_owned_column in ("portal2", "p2username", "p2password"):
+        assert f"drop column if exists {crm_owned_column}" in sql
+    for retained_column in ("portal", "track_agenda", "auth_type", "auth_answers"):
+        assert not re.search(
+            rf"drop column if exists {retained_column}\s*[,;]",
+            sql,
+        )
 
 
 def test_boundary_migration_relaxes_only_known_defunct_constraints() -> None:
     sql = _sql("001_runner_boundary.sql")
 
     assert "drop constraint if exists ck_grade_scrape_jobs_active_target_worker_id" in sql
-    assert "drop constraint if exists ck_students_grades_no_plaintext_alternate_credentials" in sql
+    assert "ck_students_grades_no_plaintext_alternate_credentials" not in sql
     assert "drop index if exists uq_grade_scrape_jobs_active" in sql
     assert "drop column" not in sql
     assert "retired_legacy_job" in sql
@@ -82,6 +100,8 @@ def test_human_runner_configuration_sql_only_updates_existing_state() -> None:
         assert "delete" not in sql
         assert "begin;" in sql
         assert "commit;" in sql
+        for crm_owned_column in ("portal2", "p2username", "p2password"):
+            assert crm_owned_column not in sql
 
 
 def test_rust_boundary_has_no_http_or_api_security_stack() -> None:

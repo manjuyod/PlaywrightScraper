@@ -14,7 +14,7 @@ def _student(
     student_id: int,
     *,
     franchise_id: int = 57,
-    grade: int = 10,
+    grade: object = 10,
     status: str = "synced",
 ) -> dashboard_data.DashboardStudent:
     return dashboard_data.merge_student_rows(
@@ -70,7 +70,11 @@ def _create_client(monkeypatch, *, environment: str = "dev"):
     routes = importlib.import_module("ui.routes")
     app_module.app.config.update(TESTING=True)
 
-    students = [_student(101, grade=7), _student(102, grade=10)]
+    students = [
+        _student(101, grade="7th"),
+        _student(102, grade="10th"),
+        _student(103, grade="college"),
+    ]
     monkeypatch.setattr(routes.dashboard, "load_students", lambda **_kwargs: students)
     monkeypatch.setattr(routes.dashboard, "load_jobs", lambda limit=20: [_job()])
     monkeypatch.setattr(
@@ -108,8 +112,8 @@ def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert page_data["page"] == "home"
-    assert page_data["countAll"] == 2
-    assert page_data["countSynced"] == 2
+    assert page_data["countAll"] == 3
+    assert page_data["countSynced"] == 3
     assert page_data["franchises"][0]["id"] == 57
     assert page_data["jobs"] == [_job()]
     assert "Set-Cookie" not in response.headers
@@ -168,21 +172,39 @@ def test_franchise_filter_uses_crm_grade_and_crmstudentid(monkeypatch) -> None:
     assert "password" not in response.get_data(as_text=True).lower()
 
 
-def test_dev_franchise_page_does_not_expose_home_url(monkeypatch) -> None:
+def test_franchise_middle_school_filter_uses_ordinal_crm_grade(monkeypatch) -> None:
     client, _routes = _create_client(monkeypatch)
 
-    page_data = _page_data(client.get("/franchise/57"))
+    page_data = _page_data(
+        client.get("/franchise/57?grade_filter=middle_school")
+    )
 
-    assert "homeUrl" not in page_data
+    assert page_data["gradeFilter"] == "middle_school"
+    assert [student["id"] for student in page_data["students"]] == [101]
 
 
-def test_dev_student_page_keeps_home_url(monkeypatch) -> None:
+def test_franchise_all_and_invalid_filters_keep_unknown_grades(monkeypatch) -> None:
     client, _routes = _create_client(monkeypatch)
 
-    page_data = _page_data(client.get("/franchise/57/student/101"))
+    all_data = _page_data(client.get("/franchise/57?grade_filter=all"))
+    invalid_data = _page_data(client.get("/franchise/57?grade_filter=unsupported"))
 
-    assert page_data["homeUrl"] == "/"
-    assert page_data["backUrl"] == "/franchise/57"
+    assert [student["id"] for student in all_data["students"]] == [101, 102, 103]
+    assert invalid_data["gradeFilter"] == "all"
+    assert [student["id"] for student in invalid_data["students"]] == [101, 102, 103]
+
+
+def test_dev_franchise_and_student_pages_do_not_expose_overview_navigation(
+    monkeypatch,
+) -> None:
+    client, _routes = _create_client(monkeypatch)
+
+    franchise_data = _page_data(client.get("/franchise/57"))
+    student_data = _page_data(client.get("/franchise/57/student/101"))
+
+    assert "homeUrl" not in franchise_data
+    assert "homeUrl" not in student_data
+    assert student_data["backUrl"] == "/franchise/57"
 
 
 def test_student_route_returns_404_when_not_currently_runnable(monkeypatch) -> None:

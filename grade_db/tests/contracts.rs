@@ -15,6 +15,9 @@ fn crm_student() -> CrmStudent {
         portal1: Some("https://portal.example/login".into()),
         p1username: Some("ada".into()),
         p1password: Some("secret".into()),
+        portal2: Some("https://agenda.example/login".into()),
+        p2username: Some("agenda-user".into()),
+        p2password: Some("agenda-secret".into()),
     }
 }
 
@@ -35,12 +38,19 @@ fn crm_eligibility_requires_all_three_nonblank_portal_fields() {
 }
 
 #[test]
-fn runner_context_merges_crm_identity_with_neon_owned_configuration() {
+fn crm_secondary_portal_is_optional_for_primary_eligibility() {
+    let mut student = crm_student();
+    student.portal2 = None;
+    student.p2username = None;
+    student.p2password = None;
+
+    assert!(student.is_grade_portal_eligible());
+}
+
+#[test]
+fn runner_context_merges_crm_owned_portals_with_neon_owned_configuration() {
     let state = StudentGradeState {
         crmstudentid: 42,
-        portal2: Some("https://agenda.example/login".into()),
-        p2username: Some("agenda-user".into()),
-        p2password: Some("agenda-secret".into()),
         portal: Some("canvas".into()),
         track_agenda: true,
         auth_type: Some("gps_pictograph".into()),

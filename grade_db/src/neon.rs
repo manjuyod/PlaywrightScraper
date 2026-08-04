@@ -21,9 +21,6 @@ SELECT NOT EXISTS (
     FROM (
         VALUES
             ('students_grades_20262027', 'crmstudentid'),
-            ('students_grades_20262027', 'portal2'),
-            ('students_grades_20262027', 'p2username'),
-            ('students_grades_20262027', 'p2password'),
             ('students_grades_20262027', 'weeklydata'),
             ('students_grades_20262027', 'weekly_agenda'),
             ('students_grades_20262027', 'portal'),
@@ -72,7 +69,7 @@ SELECT value FROM unnest($1::bigint[]) AS value
 ON CONFLICT (crmstudentid) DO NOTHING
 "#;
     pub const STATES_BY_IDS: &str = r#"
-SELECT crmstudentid, portal2, p2username, p2password, portal,
+SELECT crmstudentid, portal,
        COALESCE(track_agenda, false) AS track_agenda,
        auth_type, COALESCE(auth_answers, '[]'::jsonb) AS auth_answers,
        status, passwordgood
@@ -312,9 +309,6 @@ impl NeonGateway for PostgresNeonGateway {
                     crmstudentid,
                     StudentGradeState {
                         crmstudentid,
-                        portal2: row.try_get("portal2").map_err(neon_error)?,
-                        p2username: row.try_get("p2username").map_err(neon_error)?,
-                        p2password: row.try_get("p2password").map_err(neon_error)?,
                         portal: row.try_get("portal").map_err(neon_error)?,
                         track_agenda: row.try_get("track_agenda").map_err(neon_error)?,
                         auth_type: row.try_get("auth_type").map_err(neon_error)?,

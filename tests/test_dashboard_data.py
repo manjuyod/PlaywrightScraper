@@ -8,15 +8,43 @@ import pytest
 from ui import dashboard_data
 
 
-def _crm_student(student_id: int, *, franchise_id: int = 57) -> dict:
+def _crm_student(
+    student_id: int, *, franchise_id: int = 57, grade: object = 10
+) -> dict:
     return {
         "crmstudentid": student_id,
         "franchiseid": franchise_id,
         "firstname": "Ada",
         "lastname": f"Student {student_id}",
-        "grade": 10,
+        "grade": grade,
         "portal_url": "https://grades.example.test/login",
     }
+
+
+@pytest.mark.parametrize(
+    ("raw_grade", "expected"),
+    [
+        (7, 7),
+        ("10", 10),
+        ("6th", 6),
+        ("7th", 7),
+        ("10th", 10),
+        ("12TH", 12),
+        (True, None),
+        (None, None),
+        ("", None),
+        ("college", None),
+        ("10th Grade", None),
+    ],
+)
+def test_merge_normalizes_supported_crm_grade_levels(
+    raw_grade: object, expected: int | None
+) -> None:
+    student = dashboard_data.merge_student_rows(
+        [_crm_student(101, grade=raw_grade)], []
+    )[0]
+
+    assert student.grade_level == expected
 
 
 def test_crm_query_checks_credentials_without_selecting_them() -> None:

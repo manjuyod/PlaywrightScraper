@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from enum import StrEnum
@@ -7,7 +8,8 @@ import requests
 from requests.exceptions import RequestException
 from dotenv import load_dotenv
 
-_DOTENV_LOADED = False
+_dotenv_loaded = False
+logger = logging.getLogger("scraper.notifications")
 
 
 def _find_env_path() -> Path | None:
@@ -19,13 +21,13 @@ def _find_env_path() -> Path | None:
 
 
 def _ensure_dotenv_loaded() -> None:
-    global _DOTENV_LOADED
-    if _DOTENV_LOADED:
+    global _dotenv_loaded
+    if _dotenv_loaded:
         return
     env_path = _find_env_path()
     if env_path is not None:
-        load_dotenv(env_path)
-    _DOTENV_LOADED = True
+        _ = load_dotenv(env_path)
+    _dotenv_loaded = True
 
 class Severity(StrEnum):
     Info = '[INFO]'
@@ -60,7 +62,7 @@ def send_notification_to_slack(
     webhook_url = webhook_url or os.getenv('SLACK_WEBHOOK_URL')
     if not webhook_url:
         # raise ValueError('Slack Webhook Environment Variable DNE')
-        print("[notif] SLACK_WEBHOOK_URL not set; skipping Slack notification", flush=True)
+        logger.warning("notification.slack.not_configured")
         return 0
 
     payload = {
@@ -70,8 +72,15 @@ def send_notification_to_slack(
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.post(webhook_url, json=payload, timeout=timeout_seconds)
-        except RequestException as e:
-            print(f"[notif] Slack request failed (attempt {attempt}/{max_attempts}): {e}", flush=True)
+        except RequestException as exc:
+            logger.warning(
+                "notification.slack.request_failed",
+                extra={
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "exception_type": type(exc).__name__,
+                },
+            )
             if attempt < max_attempts:
                 time.sleep(retry_wait_seconds)
                 continue
@@ -79,7 +88,14 @@ def send_notification_to_slack(
 
         if response.status_code == TOO_MANY_REQUESTS_ERR_CODE:
             retry_after = _parse_retry_after(response.headers.get("Retry-After"), retry_wait_seconds)
-            print(f"[notif] Slack rate limited; retrying in {retry_after}s (attempt {attempt}/{max_attempts})", flush=True)
+            logger.warning(
+                "notification.slack.rate_limited",
+                extra={
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "retry_after_seconds": retry_after,
+                },
+            )
             if attempt < max_attempts:
                 time.sleep(retry_after)
                 continue
@@ -89,11 +105,14 @@ def send_notification_to_slack(
             response.raise_for_status()  # Raise an exception for HTTP errors (4xx or 5xx)
         except RequestException:
             status = response.status_code
-            details = (response.text or "").strip()
-            if details:
-                details = details[:200] + ("..." if len(details) > 200 else "")
-                details = f" | {details}"
-            print(f"[notif] Slack HTTP {status} (attempt {attempt}/{max_attempts}){details}", flush=True)
+            logger.warning(
+                "notification.slack.http_failed",
+                extra={
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "status_code": status,
+                },
+            )
             if 400 <= status < 500:
                 return None
             if attempt < max_attempts:
@@ -101,8 +120,8 @@ def send_notification_to_slack(
                 continue
             return None
 
-        print("Slack notification sent", flush=True)
+        logger.info("notification.slack.sent")
         return response.status_code
 
 if __name__ == "__main__":
-    send_notification_to_slack(Severity.Info, 'This is a test message')
+    _ = send_notification_to_slack(Severity.Info, 'This is a test message')

@@ -1,6 +1,6 @@
 # grade-db
 
-`grade-db.exe` is the local Windows database boundary for the Playwright runners. It reads runnable students whose CRM `IsTrail` value is `Active` and whose primary portal credentials are complete through a read-only SQL Server account, and it owns leased job/result/state transactions in Neon. JSON is accepted on stdin and emitted on stdout; sanitized diagnostic codes go to stderr.
+`grade-db.exe` is the local Windows database boundary for the Playwright runners. Through a read-only SQL Server account, it reads runnable students whose CRM `IsTrail` value is `Active` and whose primary portal credentials are complete, together with their optional secondary portal credentials. It owns leased job/result/state transactions in Neon. JSON is accepted on stdin and emitted on stdout; sanitized diagnostic codes go to stderr.
 
 ## Build
 
@@ -39,7 +39,8 @@ Python additionally supports `GRADE_DB_CLI_PATH`. Otherwise it checks target-spe
 Agents do not execute these files:
 
 - `sql/000_inspect_boundary.sql`: read-only schema/constraint/count inspection for human review.
-- `sql/001_runner_boundary.sql`: idempotent forward migration for fresh or partially applied defunct schemas; no legacy student backfill and no data/table drops.
-- `sql/operations/`: human-run updates for portal2, agenda, and GPS configuration on rows that already exist.
+- `sql/001_runner_boundary.sql`: idempotent forward migration for fresh or partially applied defunct schemas; secondary credentials are never created in Neon.
+- `sql/002_drop_neon_secondary_portal.sql`: transactional cleanup for existing Neon databases after the CRM-backed executable is deployed and verified.
+- `sql/operations/`: human-run updates for Neon-owned portal override, agenda, and GPS configuration on rows that already exist.
 
-After human review and migration, run `doctor`, then pilot a single student, a single franchise, and an agenda job.
+The separate CRM frontend owns `dbo.tblStudentGradePortalSecondary`. Deploy the new executable, require `doctor` to report `crm_secondary_schema=true`, apply the cleanup migration, rerun `doctor`, then pilot a single student, a single franchise, and an agenda job.

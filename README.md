@@ -1,6 +1,6 @@
 # Student Grade Checker
 
-PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
+PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary and secondary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
 The Flask dashboard is a public, read-only operations view. It uses the same runnable-student definition (`IsTrail = 'Active'` plus complete primary portal credentials), reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
@@ -16,7 +16,7 @@ Routes:
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
 - `/api/jobs` returns shaped, read-only job progress only in dev mode and is polled by the overview every 15 seconds.
 
-Outside dev mode, franchise and student pages are available only through their direct URLs; the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
+Franchise and student pages never provide navigation to the overview. Outside dev mode, those pages are available only through their direct URLs and the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
 
 ## Local Dashboard Run
 
@@ -110,6 +110,14 @@ Optional:
 - `PYTHON_ENV=dev` enables the dashboard overview and jobs API and affects runner notification behavior. When unset or set to any other value, `/` and `/api/jobs` return 403 while direct franchise and student URLs remain available.
 - `SLACK_WEBHOOK_URL` enables Slack notifications.
 - `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
+- `LOG_LEVEL` sets the runner and portal log level (default `INFO`).
+- `LOG_FORMAT=text` controls readable terminal output (the default); set `LOG_FORMAT=json` when a console log collector expects JSON.
+- `LOG_DIRECTORY` sets the rotating JSONL directory (default: `logs/`). `LOG_FILE` can override the complete file path.
+- `LOG_MAX_BYTES` controls rotation size (default: 10 MiB), and `LOG_BACKUP_COUNT` controls retained rotated files (default: 10).
+- `LOG_FILE_ENABLED=0` disables persistent JSONL logging when an external collector already provides durable storage.
+- `LOG_INCLUDE_TRACEBACKS=1` includes tracebacks on fatal runner events. It is off by default so exception messages cannot accidentally expose portal data.
+
+Portal logs use stable event names and include the portal key and CRM student record ID as context. They report counts and controlled outcome codes, not credentials, student names, grade values, authentication answers, page HTML, or full URLs. A terminal runner failure sends a critical Slack notification containing only its controlled failure code and exception type.
 
 ## Scraper Runs
 
@@ -144,8 +152,10 @@ Database rollout is intentionally human-operated:
 
 1. Run and review [`grade_db/sql/000_inspect_boundary.sql`](grade_db/sql/000_inspect_boundary.sql). It selects only schema metadata and row counts.
 2. After review, apply [`grade_db/sql/001_runner_boundary.sql`](grade_db/sql/001_runner_boundary.sql). It is forward-only and does not drop tables or data.
-3. Use the templates in `grade_db/sql/operations/` to set or clear portal2, agenda, and GPS fields on existing CRM-created rows.
-4. Run `grade-db.exe doctor`, then pilot one student, one franchise, and agenda collection before enabling scheduled batches.
+3. Deploy the CRM-backed `grade-db.exe`, run `grade-db.exe doctor`, and require `crm_secondary_schema=true` before removing any Neon columns.
+4. Apply [`grade_db/sql/002_drop_neon_secondary_portal.sql`](grade_db/sql/002_drop_neon_secondary_portal.sql) to existing Neon databases, then rerun `doctor`.
+5. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override, agenda tracking, and GPS fields. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
+6. Pilot one student, one franchise, and agenda collection before enabling scheduled batches.
 
 `grade-db.exe` exposes only `job start`, `job heartbeat`, `result post`, `job complete`, `job fail`, and read-only `doctor`. It has no listener, arbitrary SQL command, scheduler, or migration command.
 
@@ -161,9 +171,113 @@ $env:TEST_FRANCHISE_ID = "19"; uv run pytest -q --run-integration
 
 Portal engines live in `scraper/portals/`.
 
-To add or update a portal:
+### To add a portal:
 
-1. Implement the portal module under `scraper/portals/`.
-2. Register the portal key in `scraper/portals/__init__.py`.
-3. Make sure `scraper/portals/utils.py` can infer the portal key from the stored portal URL.
-4. Add or update fixtures/tests when the parsing behavior changes.
+Portal modules are discovered automatically. A typical portal declares everything
+needed for registration and the shared login flow beside its engine:
+
+```python
+from scraper.portals import (
+    GradeTableConfig,
+    PortalEngine,
+    UniversalLoginConfig,
+)
+
+
+class ExamplePortal(PortalEngine):
+    portal_key = "example"
+    url_patterns = ("grades.example.org", "/example/login")
+    login_config = UniversalLoginConfig(
+        username_selector="#username",
+        password_selector="#password",
+        microsoft_sso=True,
+    )
+    grade_table_config = GradeTableConfig(
+        table_selector=".course",
+        title_selector=".course-title",
+        grade_selector=".current-grade",
+    )
+```
+
+Adding this module under `scraper/portals/` is sufficient; do not edit a central
+portal list. URL detection is case-insensitive and selects the longest matching
+declared pattern.
+
+Override `validate_login()` to recognize portal-specific rejection states and
+`after_login(first_name)` for student selection, secondary authentication, or
+post-login navigation. Set `alternate_sso=True` and override
+`alternate_sso_login()` for a nonstandard SSO fallback. Override `login()` only
+when the universal flow cannot represent the portal.
+
+`fetch_grades()` always returns a `dict[str, float]` mapping normalized course
+names to percentages. Use `GradeTableConfig` when the shared table parser fits;
+override `fetch_grades()` for custom layouts. The runner adds the outer
+`parsed_grades` result field.
+
+Each registered portal receives `self.logger`. Log stable events, counts, and
+controlled states only---never credentials, student data, grade values, page HTML,
+or full URLs. Add fixture-backed tests whenever login declarations or parsing
+behavior changes.
+
+### To update/fix a portal:
+
+Make targeted changes.
+
+Test that the changes worked by running the portal test:
+
+```bash
+bash scraper/workflows/test_portal.py --portal {portal_key}
+```
+
+Add the --grades flag if you need to test grade parsing as well.
+
+### Live portal diagnostics
+
+The explicit live diagnostic does not access CRM or Neon and does not persist grades
+or login outcomes. It reads only an operator-provided, Git-ignored account manifest;
+dedicated test accounts are strongly preferred. By default, success means `login()`
+completed and grade fetching is not attempted. Without `--portal`, it tests one
+random configured account for every registered portal. With `--portal`, it
+concurrently tests up to five configured accounts for that portal (or every
+available account when fewer exist). Pass `--grades` to continue through grade
+fetching after a successful login.
+
+Create `config/students.portal-test.json` with owner-only permissions. This path is
+already covered by `.gitignore`'s `config/students.*` rule:
+
+```json
+[
+  {
+    "test_id": 1001,
+    "portal": "powerschool",
+    "login_url": "https://school.example/login",
+    "id": "dedicated-test-user",
+    "password": "dedicated-test-password"
+  }
+]
+```
+
+```bash
+chmod 600 config/students.portal-test.json
+export PORTAL_TEST_ACCOUNTS_FILE=config/students.portal-test.json
+```
+
+`test_id` is only a non-secret correlation value for diagnostic logs; it does not
+need to be a CRM student ID. On Windows, restrict the file's NTFS ACL to the account
+that runs the diagnostic.
+
+```powershell
+uv run python -m scraper.workflows.test_portal
+uv run python -m scraper.workflows.test_portal --portal powerschool
+uv run python -m scraper.workflows.test_portal --portal powerschool --seed 19 --headless
+uv run python -m scraper.workflows.test_portal --portal powerschool --grades
+```
+
+Runner events are retained as JSON lines in `logs/scraper.jsonl`; explicit portal
+diagnostics use `logs/portal-tests.jsonl`. Both rotate automatically. Terminal
+output remains human-readable unless `LOG_FORMAT=json` is explicitly selected.
+For example, query failed PowerSchool diagnostic events with:
+
+```bash
+jq 'select(.portal == "powerschool" and .level == "ERROR")' logs/portal-tests.jsonl
+```

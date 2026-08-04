@@ -162,6 +162,7 @@ def test_heartbeat_failure_sets_the_stop_scheduling_signal(monkeypatch) -> None:
 
 def test_fatal_boundary_failure_marks_the_job_failed_and_propagates(monkeypatch) -> None:
     failed = []
+    notifications = []
 
     class Client:
         def start_job(self, **_kwargs):
@@ -195,11 +196,47 @@ def test_fatal_boundary_failure_marks_the_job_failed_and_propagates(monkeypatch)
     async def process(*_args, **_kwargs):
         return "neon_unavailable"
 
+    async def notify(severity, message):
+        notifications.append((severity, message))
+
     monkeypatch.setattr(runner, "GradeDbClient", Client)
     monkeypatch.setattr(runner, "async_playwright", PlaywrightContext)
     monkeypatch.setattr(runner, "_process_grade_students", process)
+    monkeypatch.setattr(runner, "_send_slack_notification", notify)
 
     with pytest.raises(RuntimeError, match="neon_unavailable"):
         asyncio.run(runner.main(franchise_id=19))
 
     assert failed[0]["code"] == "neon_unavailable"
+    assert notifications == [
+        (
+            runner.Severity.Crit,
+            "Grade scraping stopped because of a fatal error.\n"
+            "Failure code: neon_unavailable\n"
+            "Exception type: RunnerFatalError",
+        )
+    ]
+
+
+def test_startup_failure_sends_sanitized_fatal_notification(monkeypatch) -> None:
+    notifications = []
+
+    class Client:
+        def start_job(self, **_kwargs):
+            raise RuntimeError("database error containing primary-secret")
+
+    async def notify(severity, message):
+        notifications.append((severity, message))
+
+    monkeypatch.setattr(runner, "GradeDbClient", Client)
+    monkeypatch.setattr(runner, "_send_slack_notification", notify)
+
+    with pytest.raises(RuntimeError, match="primary-secret"):
+        asyncio.run(runner.main(franchise_id=19))
+
+    assert len(notifications) == 1
+    severity, message = notifications[0]
+    assert severity is runner.Severity.Crit
+    assert "unhandled_exception" in message
+    assert "RuntimeError" in message
+    assert "primary-secret" not in message

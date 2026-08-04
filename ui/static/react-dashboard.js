@@ -718,13 +718,8 @@
             return () => window.removeEventListener("hashchange", syncTab);
         }, []);
         const actions = [
-            h(Button, { key: "back", href: data.backUrl, icon: "arrowLeft", variant: "outline" }, "Franchise"),
+            h(Button, { key: "back", href: data.backUrl, icon: "arrowLeft", variant: "outline" }, "Back"),
         ];
-        if (data.homeUrl) {
-            actions.push(
-                h(Button, { key: "home", href: data.homeUrl, icon: "home", variant: "outline" }, "Overview"),
-            );
-        }
         if (student.portalUrl) {
             actions.push(
                 h(

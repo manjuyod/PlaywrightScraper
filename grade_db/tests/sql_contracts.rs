@@ -21,6 +21,14 @@ fn doctor_schema_check_is_read_only_and_checks_required_columns() {
     for mutation in ["insert ", "update ", "delete ", "alter ", "drop "] {
         assert!(!query.contains(mutation));
     }
+    for crm_owned_column in ["portal2", "p2username", "p2password"] {
+        assert!(!query.contains(crm_owned_column));
+    }
+
+    let states = sql::STATES_BY_IDS.to_ascii_lowercase();
+    for crm_owned_column in ["portal2", "p2username", "p2password"] {
+        assert!(!states.contains(crm_owned_column));
+    }
 }
 
 #[test]

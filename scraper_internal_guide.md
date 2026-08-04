@@ -23,10 +23,17 @@ PlaywrightScraper/
 └── pyproject.toml
 ```
 
+Portal engines are self-describing and automatically discovered. Their class
+metadata owns the portal key, URL-detection patterns, universal-login selectors,
+and optional shared grade-table selectors. Portal-specific behavior belongs in
+login validation/post-login hooks or a focused method override. Grade engines
+return a normalized `dict[str, float]`; the runner owns the surrounding result
+payload and database boundary.
+
 ## High-Level Flow
 
 1. `scraper.runner` or `scraper.agenda` starts a leased job through `grade-db.exe`.
-2. Rust selects CRM students whose `GradePortalURL`, `GradePortalUser`, and `GradePortalPwd` are all trimmed and nonblank, then merges Neon-owned runner configuration.
+2. Rust selects CRM students whose `GradePortalURL`, `GradePortalUser`, and `GradePortalPwd` are all trimmed and nonblank, left-joins optional secondary credentials from `dbo.tblStudentGradePortalSecondary`, then merges the remaining Neon-owned runner configuration.
 3. Python uses Playwright to collect one student at a time and posts each result immediately.
 4. Rust rechecks CRM eligibility and atomically records the audit result and canonical `students_grades_20262027` update in Neon.
 5. The dashboard independently selects the runnable CRM roster, batch-reads canonical Neon state, and merges strictly by `crmstudentid`.

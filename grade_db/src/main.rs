@@ -108,6 +108,7 @@ async fn doctor() -> Result<Value, AppError> {
     let config = AppConfig::from_env().map_err(|_| AppError::Config)?;
     let crm = SqlServerCrmGateway::new(config.crm);
     let crm_ok = crm.ping().await.is_ok();
+    let crm_secondary_schema_ok = crm.secondary_schema_ready().await.is_ok();
     let (neon_ok, schema_ok) = match PostgresNeonGateway::connect(
         &config.neon_database_url,
         config.runner_id,
@@ -121,15 +122,30 @@ async fn doctor() -> Result<Value, AppError> {
         ),
         Err(_) => (false, false),
     };
-    Ok(json!({
-        "ok": crm_ok && neon_ok && schema_ok,
+    Ok(doctor_response(
+        crm_ok,
+        crm_secondary_schema_ok,
+        neon_ok,
+        schema_ok,
+    ))
+}
+
+fn doctor_response(
+    crm_ok: bool,
+    crm_secondary_schema_ok: bool,
+    neon_ok: bool,
+    schema_ok: bool,
+) -> Value {
+    json!({
+        "ok": crm_ok && crm_secondary_schema_ok && neon_ok && schema_ok,
         "checks": {
             "configuration": true,
             "crm_read_only": crm_ok,
+            "crm_secondary_schema": crm_secondary_schema_ok,
             "neon_read_only": neon_ok,
             "schema": schema_ok,
         }
-    }))
+    })
 }
 
 fn read_stdin_json<T: DeserializeOwned>() -> Result<T, AppError> {
@@ -148,5 +164,21 @@ fn write_stdout(value: &Value) {
     match serde_json::to_string(value) {
         Ok(encoded) => println!("{encoded}"),
         Err(_) => println!("{{\"ok\":false,\"error\":\"internal_error\"}}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::doctor_response;
+
+    #[test]
+    fn doctor_requires_and_reports_the_crm_secondary_schema() {
+        let ready = doctor_response(true, true, true, true);
+        assert_eq!(ready["ok"], true);
+        assert_eq!(ready["checks"]["crm_secondary_schema"], true);
+
+        let missing_secondary = doctor_response(true, false, true, true);
+        assert_eq!(missing_secondary["ok"], false);
+        assert_eq!(missing_secondary["checks"]["crm_secondary_schema"], false);
     }
 }

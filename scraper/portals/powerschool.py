@@ -1,36 +1,25 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
 from bs4 import BeautifulSoup
 import re
+from typing_extensions import override
 
-from scraper.portals.base import PortalEngine
-from scraper.portals import register_portal
+from scraper.portals.base import PortalEngine, UniversalLoginConfig
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from .utils import canonicalize_course_title, universal_login_flow, wait_after_nav
+from .utils import canonicalize_course_title, canonicalize_grade, wait_after_nav
 DASHES = r"[\u2010-\u2015]"  # hyphen–emdash range
 
-@register_portal("powerschool")
 class PowerSchool(PortalEngine):
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(Exception),
+    portal_key = "powerschool"
+    url_patterns = ("powerschool",)
+    login_config = UniversalLoginConfig(
+        username_selector="#fieldAccount",
+        password_selector="#fieldPassword",
+        microsoft_sso=True,
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        username_selector = "#fieldAccount"
-        password_selector = "#fieldPassword"
 
-        await universal_login_flow(
-            self.page,
-            self.login_url,
-            self.sid,
-            self.pw,
-            username_selector,
-            password_selector,
-            microsoft_callback=self.microsoft_login
-        )
-
+    async def after_login(self, first_name: str | None) -> None:
+        _ = first_name
         await wait_after_nav(self.page, wait_after_load=3000)
 
     @retry(
@@ -38,22 +27,26 @@ class PowerSchool(PortalEngine):
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
-        # grab full HTML
+    @override
+    async def fetch_grades(self) -> dict[str, float]:
+        self.logger.info("portal.fetch.started")
         html = await self.page.content()
         parsed = self._parse_gradebook(html)
-        print(parsed)
-        return {"parsed_grades": parsed}
+        self.logger.info(
+            "portal.fetch.completed", extra={"course_count": len(parsed)}
+        )
+        return parsed
 
     @staticmethod
-    def _parse_gradebook(html: str) -> Dict[str, Any]:
+    def _parse_gradebook(html: str) -> dict[str, float]:
         """
         Parse PowerSchool LTS table rows into { course_name: value }.
         Prefers the last <a class="bold">…</a> in each row (current term).
-        Percentage → float, else letter.  N/A → "".
+        Numeric and letter grades are normalized to percentages; unavailable
+        grades are omitted.
         """
         soup = BeautifulSoup(html, "html.parser")
-        results: Dict[str, Any] = {}
+        results: dict[str, float] = {}
         table_selector = "tr[id^=ccid_]"
         # Select each student row by id starting with ccid_
         table = soup.select(table_selector)
@@ -76,8 +69,12 @@ class PowerSchool(PortalEngine):
                 if title in grades_text: # there may not be a grade here, bail
                     break
                 if len(grades) == 2:
-                    m = re.search(r"\d+(?:\.\d+)?", grades[1])  # handles 87 / 87.5 / 87%
-                    grade = float(m.group(0)) if m else ("" if grades[0].upper() in ("N/A", "-", "") else grades[0])
+                    m = re.search(r"\d+(?:\.\d+)?", grades[1])
+                    grade = (
+                        float(m.group(0))
+                        if m
+                        else canonicalize_grade(grades[0])
+                    )
                     break
             if grade:
                 results[title] = grade

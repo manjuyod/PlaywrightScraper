@@ -1,67 +1,50 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Dict
+from bs4.element import Tag
 
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from .base import PortalEngine
-from . import register_portal  # helper we'll create in __init__.py
+from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import (
     canonicalize_course_title,
     canonicalize_grade,
     exists,
-    universal_login_flow,
     wait_after_nav,
 )
 
-@register_portal("student_connection")
 class StudentConnection(PortalEngine):
     """Portal scraper for Student Connection."""
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=3, max=10),
-        retry=retry_if_exception_type(PlaywrightTimeout),
-        reraise=True,
+    portal_key = "student_connection"
+    url_patterns = ("studentconnect",)
+    login_config = UniversalLoginConfig(
+        username_selector="input[name='Pin']",
+        password_selector="input[name='Password']",
     )
-    async def login(self, first_name: Optional[str] = None) -> None:
-        """Authenticate the user on the StudentConnection portal."""
-        username_selector = "input[name='Pin']"
-        password_selector = "input[name='Password']"
+
+    async def validate_login(self) -> None:
         try:
-            await universal_login_flow(
-                self.page,
-                self.login_url,
-                self.sid,
-                self.pw,
-                username_selector,
-                password_selector,
+            rejected = await exists(
+                self.page.get_by_text("Login Not Found", exact=False)
             )
+            await self.raise_login_error_if(rejected)
+        except PlaywrightTimeout:
+            return
 
-            try:
-                login_not_found = await exists(self.page.get_by_text("Login Not Found", exact=False))
-                print("Login found? ", not login_not_found)
-                await self.raise_login_error_if(login_not_found)
-            except PlaywrightTimeout: # not a failed login if this times out
-                pass
-            # Wait until the URL contains 'PortalMainPage' indicating successful login, then wait for network idle
-            await wait_after_nav(self.page, pattern=lambda url: "PortalMainPage" in url, wait_after_load=2000)
-
-
-
-
-        except Exception:
-            raise
+    async def after_login(self, first_name: str | None) -> None:
+        _ = first_name
+        await wait_after_nav(
+            self.page,
+            pattern=lambda url: "PortalMainPage" in url,
+            wait_after_load=2000,
+        )
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=3, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> Dict[str, Any]:
-        """
-        Scrape the Pulse table on PortalMainPage and return:
-        {"parsed_grades": {"COURSE NAME": 93.4, ...}}
-        """
+    async def fetch_grades(self) -> GradeMap:
+        """Scrape the Pulse table into a normalized course-to-grade mapping."""
         try:
             pulse = True  # default to using the pulse table
             # parsed: None | Dict[str, Any] = None
@@ -80,37 +63,50 @@ class StudentConnection(PortalEngine):
                 else:
                     pulse = False
             except Exception as e:
-                print(e)
+                self.logger.warning(
+                    "portal.fetch.pulse_failed",
+                    extra={"exception_type": type(e).__name__},
+                )
                 pass  # Not fatal—continue and rely on table presence
 
             if pulse:
                 parsed = await self.collect_from_pulse()
             else:
-                print('no pulse, fallback to assignments table')
+                self.logger.info("portal.fetch.assignments_fallback")
                 parsed = await self.collect_from_assignments()
 
             # if not parsed:
                 # html = await self.page.content()
-                # print("Parsed 0 rows. First 4k of HTML follows:")
-                # print(html[:4000])
-            print(f"[SC] Grades parsed: {parsed}")
-            return {"parsed_grades": parsed}
+            self.logger.info(
+                "portal.fetch.completed", extra={"course_count": len(parsed)}
+            )
+            return parsed
         except Exception as e:
-            print(e)
+            self.logger.error(
+                "portal.fetch.failed", extra={"exception_type": type(e).__name__}
+            )
             raise
-        finally:
-            pass
 # HELPERS
     async def collect_from_assignments(self) -> Dict[str, Any]:
         soup = await self.get_soup()
         assignments = soup.find('tr', id='trSP1_Assignments')
+        if not isinstance(assignments, Tag):
+            self.logger.warning("portal.parse.assignments_missing")
+            return {}
         courses_table = assignments.find('div', id='SP_Assignments')
+        if not isinstance(courses_table, Tag):
+            self.logger.warning("portal.parse.assignments_table_missing")
+            return {}
         courses = courses_table.find_all('table')
         parsed: Dict[str, Any] = {}
         for course in courses:
+            if not isinstance(course, Tag):
+                continue
             # title
-            course_name = course.find('caption') # get course name from the caption
-            course_name = course_name.text.strip()
+            caption = course.find('caption') # get course name from the caption
+            if not isinstance(caption, Tag):
+                continue
+            course_name = caption.get_text(strip=True)
             # title formatting
             try:
                 course_name = course_name[:course_name.index('(')]
@@ -119,8 +115,13 @@ class StudentConnection(PortalEngine):
             if "Per" in course_name:
                 course_name = course_name[9:]
             # grade
-            course.find('td').find('b').decompose() # get rid of the extra text in this element
-            grade = course.find('td').text.strip() # LIKE [A, 98] or [A]
+            grade_cell = course.find('td')
+            if not isinstance(grade_cell, Tag):
+                continue
+            extra_label = grade_cell.find('b')
+            if isinstance(extra_label, Tag):
+                extra_label.decompose() # get rid of the extra text in this element
+            grade = grade_cell.get_text(strip=True) # LIKE [A, 98] or [A]
             grade_content = grade.split('(')
             letter_grade_idx = 0
             percent_grade_idx = 1
@@ -130,11 +131,10 @@ class StudentConnection(PortalEngine):
                 grade = grade_content[percent_grade_idx]
 
             percent_grade = canonicalize_grade(grade)
-            print(grade_content)
-            print(course_name, percent_grade)
             truncate_on = ": "
             course_name = canonicalize_course_title(course_name, truncate_on=truncate_on, truncate_before=True)
-            parsed[course_name] = percent_grade
+            if percent_grade is not None:
+                parsed[course_name] = percent_grade
         return parsed
 
     async def collect_from_pulse(self):
@@ -164,9 +164,7 @@ class StudentConnection(PortalEngine):
                 timeout=4_000,
             )
         except PlaywrightTimeout:
-            html = await self.page.content()
-            print("Pulse table had no rows. Dumping snippet for debug…")
-            print(html[:4000])
+            self.logger.warning("portal.parse.pulse_rows_missing")
             return {}
 
         # Map the header indices so we don’t rely on column order.
@@ -192,15 +190,16 @@ class StudentConnection(PortalEngine):
         idx_letter = col_idx("CurrentGrade")
 
         if idx_class is None or (idx_pct is None and idx_letter is None):
-            html = await self.page.content()
-            print("Missing expected headers. Headers seen:", header_texts)
-            print(html[:4000])
+            self.logger.warning(
+                "portal.parse.pulse_headers_missing",
+                extra={"header_count": len(header_texts)},
+            )
             return {}
 
         # Extract rows
         rows = self.page.locator("#SP-Pulse tbody tr")
         n = await rows.count()
-        parsed: Dict[str, Any] = {}
+        parsed: GradeMap = {}
 
         for r in range(n):
             cells = rows.nth(r).locator("td")
@@ -215,7 +214,10 @@ class StudentConnection(PortalEngine):
                     text = await cells.nth(j).text_content()
                     return (text or "").strip()
                 except Exception as e:
-                    print(e)
+                    self.logger.warning(
+                        "portal.parse.row_skipped",
+                        extra={"exception_type": type(e).__name__},
+                    )
                     return ""
 
             course = (await safe_text(idx_class)).upper()
@@ -232,7 +234,7 @@ class StudentConnection(PortalEngine):
 
             truncate_on = ": "
             course = canonicalize_course_title(course, truncate_on=truncate_on, truncate_before=True)
-            if course:
+            if course and grade is not None:
                 parsed[course] = grade
 
         return parsed

@@ -12,6 +12,14 @@ type SqlClient = Client<Compat<TcpStream>>;
 
 pub mod sql {
     pub const PING: &str = "SELECT 1";
+    pub const SECONDARY_SCHEMA_READY: &str = r#"
+SELECT TOP (0)
+    secondary.StudentID,
+    secondary.URL2,
+    secondary.URL2Username,
+    secondary.URL2Password
+FROM dbo.tblStudentGradePortalSecondary AS secondary
+"#;
 
     pub const LIST_STUDENTS: &str = r#"
 SELECT
@@ -22,8 +30,13 @@ SELECT
     s.Grade,
     s.GradePortalURL,
     s.GradePortalUser,
-    s.GradePortalPwd
+    s.GradePortalPwd,
+    secondary.URL2,
+    secondary.URL2Username,
+    secondary.URL2Password
 FROM dbo.tblStudents AS s
+LEFT JOIN dbo.tblStudentGradePortalSecondary AS secondary
+    ON secondary.StudentID = s.Id
 WHERE (@P1 IS NULL OR s.FranchiseID = @P1)
   AND (@P2 IS NULL OR s.Id = @P2)
   AND s.IsTrail = 'Active'
@@ -38,6 +51,18 @@ pub struct SqlServerCrmGateway {
 impl SqlServerCrmGateway {
     pub fn new(config: CrmConfig) -> Self {
         Self { config }
+    }
+
+    pub async fn secondary_schema_ready(&self) -> Result<(), AppError> {
+        let mut client = self.connect().await?;
+        client
+            .simple_query(sql::SECONDARY_SCHEMA_READY)
+            .await
+            .map_err(|_| AppError::Dependency("crm_unavailable"))?
+            .into_results()
+            .await
+            .map_err(|_| AppError::Dependency("crm_unavailable"))?;
+        Ok(())
     }
 
     async fn connect(&self) -> Result<SqlClient, AppError> {
@@ -109,6 +134,9 @@ fn row_to_student(row: &Row) -> Result<CrmStudent, AppError> {
         portal1: optional_string_at(row, 5),
         p1username: optional_string_at(row, 6),
         p1password: optional_string_at(row, 7),
+        portal2: optional_string_at(row, 8),
+        p2username: optional_string_at(row, 9),
+        p2password: optional_string_at(row, 10),
     })
 }
 
@@ -131,7 +159,27 @@ fn optional_string_at(row: &Row, index: usize) -> Option<String> {
     row.try_get::<&str, _>(index)
         .ok()
         .flatten()
+        .and_then(|value| normalize_optional_string(Some(value)))
+}
+
+fn normalize_optional_string(value: Option<&str>) -> Option<String> {
+    value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_optional_string;
+
+    #[test]
+    fn optional_crm_values_trim_nonblank_text_and_discard_blanks() {
+        assert_eq!(normalize_optional_string(None), None);
+        assert_eq!(normalize_optional_string(Some(" \t ")), None);
+        assert_eq!(
+            normalize_optional_string(Some("  secondary-user  ")),
+            Some("secondary-user".to_owned())
+        );
+    }
 }
