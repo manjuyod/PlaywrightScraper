@@ -157,6 +157,7 @@ def login():
 @app.get("/franchise/<int:franchise_id>")
 def franchise_view(franchise_id: int):
     grade_filter = _normalize_grade_filter(request.args.get("grade_filter"))
+    franchise_name = dashboard.load_franchise_name(franchise_id)
     students = dashboard.load_students(franchise_id=franchise_id)
     visible_students = _filter_students_by_grade(students, grade_filter)
     filters = [
@@ -180,6 +181,7 @@ def franchise_view(franchise_id: int):
         "title": f"Franchise {franchise_id}",
         "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
         "franchiseId": franchise_id,
+        "franchiseName": franchise_name,
         "gradeFilter": grade_filter,
         "filters": filters,
         "students": [_student_card(student) for student in visible_students],

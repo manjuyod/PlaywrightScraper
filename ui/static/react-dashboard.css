@@ -90,7 +90,6 @@ summary:focus-visible {
 }
 
 .tc-header-squares,
-.tc-header-square,
 .tc-header-scanline {
     position: absolute;
     display: block;
@@ -105,35 +104,6 @@ summary:focus-visible {
     opacity: 0.34;
     -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
     mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
-}
-
-.tc-header-square {
-    width: 42px;
-    height: 42px;
-    border: 1px solid rgba(244, 131, 61, 0.62);
-    background: rgba(244, 131, 61, 0.16);
-    box-shadow:
-        inset 0 0 18px rgba(244, 131, 61, 0.18),
-        0 0 24px rgba(244, 131, 61, 0.22);
-}
-
-.tc-header-square--one {
-    top: 18px;
-    left: 18%;
-}
-
-.tc-header-square--two {
-    right: 16%;
-    bottom: 14px;
-    border-color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.09);
-}
-
-.tc-header-square--three {
-    top: 48%;
-    right: 34%;
-    width: 30px;
-    height: 30px;
 }
 
 .tc-header-scanline {
@@ -947,19 +917,6 @@ summary {
     }
 }
 
-@keyframes tc-header-square-pulse {
-    0%,
-    100% {
-        opacity: 0.36;
-        transform: translate3d(0, 0, 0) scale(1);
-    }
-
-    50% {
-        opacity: 0.86;
-        transform: translate3d(0, -4px, 0) scale(1.05);
-    }
-}
-
 @keyframes tc-header-scanline {
     0%,
     100% {
@@ -1039,18 +996,6 @@ summary {
 
     .tc-header-squares {
         animation: tc-header-squares-drift 18s linear infinite;
-    }
-
-    .tc-header-square {
-        animation: tc-header-square-pulse 5.4s ease-in-out infinite;
-    }
-
-    .tc-header-square--two {
-        animation-delay: 700ms;
-    }
-
-    .tc-header-square--three {
-        animation-delay: 1300ms;
     }
 
     .tc-header-scanline {

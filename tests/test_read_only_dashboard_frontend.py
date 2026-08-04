@@ -50,6 +50,37 @@ def test_franchise_and_student_headers_omit_overview_actions() -> None:
         assert '"Overview"' not in page
 
 
+def test_franchise_cover_uses_the_name_from_page_data() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    franchise_page = javascript.split("function FranchisePage", 1)[1].split(
+        "function GradeHistory", 1
+    )[0]
+
+    assert "title: data.franchiseName" in franchise_page
+    assert "`Franchise ${data.franchiseId}`" not in franchise_page
+
+
+def test_header_ambient_texture_omits_floating_square_overlays() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
+        encoding="utf-8"
+    )
+    header = javascript.split("function Header", 1)[1].split(
+        "function Shell", 1
+    )[0]
+
+    assert 'className: "tc-header-squares"' in header
+    assert 'className: "tc-header-scanline"' in header
+    assert 'className: "tc-header-square ' not in header
+    assert ".tc-header-square {" not in css
+    assert ".tc-header-square--" not in css
+    assert "tc-header-square-pulse" not in css
+
+
 def test_student_header_back_action_uses_generic_label() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"

@@ -268,6 +268,88 @@ def test_crm_reader_uses_read_intent_and_parameterized_scope(monkeypatch) -> Non
     assert connection.closed is True
 
 
+@pytest.mark.parametrize(
+    ("raw_name", "expected"),
+    [
+        ("Tutoring Club of Gilbert", "Tutoring Club of Gilbert"),
+        ("Tutoring Club OF Gilbert", "Tutoring Club OF Gilbert"),
+        ("East - Tutoring Club of Gilbert", "East - Tutoring Club of Gilbert"),
+        ("Gilbert", "Tutoring Club of Gilbert"),
+        ("  Gilbert  ", "Tutoring Club of Gilbert"),
+        ("", "Franchise 57"),
+        ("   ", "Franchise 57"),
+        (None, "Franchise 57"),
+    ],
+)
+def test_load_franchise_name_normalizes_the_cover_label(
+    monkeypatch, raw_name: object, expected: str
+) -> None:
+    def read_name(franchise_id: int) -> object:
+        assert franchise_id == 57
+        return raw_name
+
+    monkeypatch.setattr(dashboard_data, "read_crm_franchise_name", read_name)
+
+    assert dashboard_data.load_franchise_name(57) == expected
+
+
+class _FakeFranchiseCursor:
+    def __init__(self, row: tuple[object, ...] | None) -> None:
+        self.row = row
+        self.executed: tuple[str, tuple[Any, ...]] | None = None
+        self.closed = False
+
+    def execute(self, sql: str, *params: Any) -> None:
+        self.executed = (sql, params)
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        return self.row
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeFranchiseConnection:
+    def __init__(self, row: tuple[object, ...] | None) -> None:
+        self.cursor_value = _FakeFranchiseCursor(row)
+        self.closed = False
+
+    def cursor(self) -> _FakeFranchiseCursor:
+        return self.cursor_value
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_crm_franchise_name_reader_is_parameterized_and_read_only(monkeypatch) -> None:
+    monkeypatch.setenv("CRMSrvAddress", "crm.example.test")
+    monkeypatch.setenv("CRMSrvDb", "CRM")
+    monkeypatch.setenv("CRMSrvUs", "reader")
+    monkeypatch.setenv("CRMSrvPs", "secret-value")
+    connection = _FakeFranchiseConnection((" Gilbert ",))
+    captured: dict[str, Any] = {}
+
+    def connect(
+        connection_string: str, *, timeout: int
+    ) -> _FakeFranchiseConnection:
+        captured["connection_string"] = connection_string
+        captured["timeout"] = timeout
+        return connection
+
+    name = dashboard_data.read_crm_franchise_name(57, connect=connect)
+
+    assert name == "Gilbert"
+    assert "ApplicationIntent=ReadOnly" in captured["connection_string"]
+    assert captured["timeout"] == 10
+    assert connection.cursor_value.executed is not None
+    sql, params = connection.cursor_value.executed
+    assert "from dbo.tblfranchies" in sql.lower()
+    assert "franchiesname" in sql.lower()
+    assert params == (57,)
+    assert connection.cursor_value.closed is True
+    assert connection.closed is True
+
+
 class _FakeMappings:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows

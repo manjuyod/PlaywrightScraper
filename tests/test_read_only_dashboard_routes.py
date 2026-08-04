@@ -79,6 +79,11 @@ def _create_client(monkeypatch, *, environment: str = "dev"):
     monkeypatch.setattr(routes.dashboard, "load_jobs", lambda limit=20: [_job()])
     monkeypatch.setattr(
         routes.dashboard,
+        "load_franchise_name",
+        lambda franchise_id: "Tutoring Club of Gilbert",
+    )
+    monkeypatch.setattr(
+        routes.dashboard,
         "load_student",
         lambda franchise_id, crmstudentid: next(
             (
@@ -170,6 +175,15 @@ def test_franchise_filter_uses_crm_grade_and_crmstudentid(monkeypatch) -> None:
     assert "altPortalUrl" not in page_data["students"][0]
     assert "username" not in response.get_data(as_text=True).lower()
     assert "password" not in response.get_data(as_text=True).lower()
+
+
+def test_franchise_page_payload_exposes_the_cover_name_only(monkeypatch) -> None:
+    client, _routes = _create_client(monkeypatch)
+
+    page_data = _page_data(client.get("/franchise/57"))
+
+    assert page_data["franchiseName"] == "Tutoring Club of Gilbert"
+    assert page_data["title"] == "Franchise 57"
 
 
 def test_franchise_middle_school_filter_uses_ordinal_crm_grade(monkeypatch) -> None:

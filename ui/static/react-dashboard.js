@@ -143,8 +143,6 @@
                 "div",
                 { className: "tc-header-ambient", "aria-hidden": "true" },
                 h("span", { className: "tc-header-squares" }),
-                h("span", { className: "tc-header-square tc-header-square--one" }),
-                h("span", { className: "tc-header-square tc-header-square--two" }),
                 h("span", { className: "tc-header-scanline" }),
             ),
             h(
@@ -584,7 +582,7 @@
                 wide: true,
                 header: h(Header, {
                     data,
-                    title: `Franchise ${data.franchiseId}`,
+                    title: data.franchiseName,
                     subtitle: `${(data.students || []).length} runnable students · read-only`,
                 }),
             },

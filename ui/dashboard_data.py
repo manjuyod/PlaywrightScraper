@@ -34,6 +34,14 @@ ORDER BY s.FranchiseID, s.LastName, s.FirstName, s.Id
 """
 
 
+CRM_FRANCHISE_NAME_SQL = """
+SELECT
+    f.FranchiesName AS franchise_name
+FROM dbo.tblFranchies AS f
+WHERE f.ID = ?
+"""
+
+
 NEON_STATES_SQL = """
 SELECT
     crmstudentid,
@@ -174,6 +182,46 @@ def read_crm_students(
             cursor.close()
         if connection is not None:
             connection.close()
+
+
+def read_crm_franchise_name(
+    franchise_id: int,
+    *,
+    connect: Any = None,
+) -> str | None:
+    connector = connect or pyodbc.connect
+    connection = None
+    cursor = None
+    try:
+        connection = connector(_crm_connection_string(), timeout=10)
+        cursor = connection.cursor()
+        cursor.execute(CRM_FRANCHISE_NAME_SQL, franchise_id)
+        row = cursor.fetchone()
+        if row is None or not row or not isinstance(row[0], str):
+            return None
+        return row[0].strip()
+    except DashboardDataError:
+        raise
+    except Exception:
+        raise DashboardDataError("dashboard_data_unavailable") from None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None:
+            connection.close()
+
+
+def _format_franchise_name(raw_name: object, franchise_id: int) -> str:
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
+    if not name:
+        return f"Franchise {franchise_id}"
+    if "tutoring club of" in name.casefold():
+        return name
+    return f"Tutoring Club of {name}"
+
+
+def load_franchise_name(franchise_id: int) -> str:
+    return _format_franchise_name(read_crm_franchise_name(franchise_id), franchise_id)
 
 
 def _read_neon(
