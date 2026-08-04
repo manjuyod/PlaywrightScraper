@@ -16,7 +16,7 @@ Routes:
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
 - `/api/jobs` returns shaped, read-only job progress only in dev mode and is polled by the overview every 15 seconds.
 
-Outside dev mode, franchise and student pages are available only through their direct URLs; the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
+Franchise and student pages never provide navigation to the overview. Outside dev mode, those pages are available only through their direct URLs and the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
 
 ## Local Dashboard Run
 

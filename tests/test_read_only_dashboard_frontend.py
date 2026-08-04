@@ -18,7 +18,6 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
     assert 'data.page === "home"' in javascript
     assert 'data.page === "franchise"' in javascript
     assert 'data.page === "student"' in javascript
-    assert "if (data.homeUrl)" in javascript
     for retired in (
         "LoginPage",
         "LogoutForm",
@@ -33,6 +32,22 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
         "edit_student",
     ):
         assert retired not in javascript
+
+
+def test_franchise_and_student_headers_omit_overview_actions() -> None:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    franchise_page = javascript.split("function FranchisePage", 1)[1].split(
+        "function GradeHistory", 1
+    )[0]
+    student_page = javascript.split("function StudentPage", 1)[1].split(
+        "function App", 1
+    )[0]
+
+    for page in (franchise_page, student_page):
+        assert "data.homeUrl" not in page
+        assert '"Overview"' not in page
 
 
 def test_franchise_students_render_as_a_read_only_table() -> None:

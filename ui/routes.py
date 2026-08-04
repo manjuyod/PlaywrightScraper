@@ -184,8 +184,6 @@ def franchise_view(franchise_id: int):
         "filters": filters,
         "students": [_student_card(student) for student in visible_students],
     }
-    if _is_dev_mode():
-        page_data["homeUrl"] = url_for("index")
     return _render_dashboard(page_data)
 
 
@@ -201,8 +199,6 @@ def student_view(franchise_id: int, crmstudentid: int):
         "backUrl": url_for("franchise_view", franchise_id=franchise_id),
         "student": _student_detail(student),
     }
-    if _is_dev_mode():
-        page_data["homeUrl"] = url_for("index")
     return _render_dashboard(page_data)
 
 

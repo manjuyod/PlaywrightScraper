@@ -93,6 +93,7 @@ ORDER BY
 
 
 _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
+_GRADE_LEVEL = re.compile(r"^(\d{1,2})(?:st|nd|rd|th)?$", re.IGNORECASE)
 _KNOWN_STATUSES = {"never", "synced", "error"}
 
 
@@ -289,6 +290,17 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def _grade_level_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    match = _GRADE_LEVEL.fullmatch(value.strip())
+    return int(match.group(1)) if match is not None else None
+
+
 def _safe_status(value: Any) -> str:
     candidate = str(value or "never").strip().lower()
     return candidate if candidate in _KNOWN_STATUSES else "never"
@@ -333,7 +345,7 @@ def merge_student_rows(
             franchiseid=franchiseid,
             first_name=str(crm_row.get("firstname") or "").strip(),
             last_name=str(crm_row.get("lastname") or "").strip(),
-            grade_level=_optional_int(crm_row.get("grade")),
+            grade_level=_grade_level_int(crm_row.get("grade")),
             portal_url=_safe_http_url(crm_row.get("portal_url")),
             grades=_json_object(state.get("weeklydata")),
             agenda=_json_object(state.get("weekly_agenda")),
