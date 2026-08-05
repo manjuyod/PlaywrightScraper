@@ -212,6 +212,30 @@
         return "slate";
     }
 
+    function fuzzyNameMatch(student, query) {
+        const normalize = (value) =>
+            String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        const name = normalize(`${student.firstName || ""} ${student.lastName || ""}`);
+        const terms = normalize(query).split(/\s+/).filter(Boolean);
+
+        return terms.every((term) => {
+            if (name.includes(term)) {
+                return true;
+            }
+            let termIndex = 0;
+            for (const character of name) {
+                if (character === term[termIndex]) {
+                    termIndex += 1;
+                }
+            }
+            return termIndex === term.length;
+        });
+    }
+
     function studentTabFromHash(hash) {
         return hash === "#heatmap" ? "heatmap" : "report";
     }
@@ -580,6 +604,13 @@
     }
 
     function FranchisePage({ data }) {
+        const [searchQuery, setSearchQuery] = useState("");
+        const students = data.students || [];
+        const visibleStudents = useMemo(
+            () => students.filter((student) => fuzzyNameMatch(student, searchQuery)),
+            [students, searchQuery],
+        );
+
         return h(
             Shell,
             {
@@ -591,23 +622,46 @@
                 }),
             },
             h(
-                "nav",
-                { className: "mb-5 flex flex-wrap gap-2", "aria-label": "Grade filters" },
-                (data.filters || []).map((filter) =>
+                "div",
+                { className: "mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" },
+                h(
+                    "nav",
+                    { className: "flex flex-wrap gap-2", "aria-label": "Grade filters" },
+                    (data.filters || []).map((filter) =>
+                        h(
+                            Button,
+                            {
+                                key: filter.value,
+                                href: filter.url,
+                                variant: data.gradeFilter === filter.value ? "orange" : "outline",
+                            },
+                            filter.label,
+                        ),
+                    ),
+                ),
+                h(
+                    "label",
+                    { className: "tc-search-field w-full lg:max-w-sm" },
+                    h("span", { className: "tc-search-field__label" }, "Search students"),
                     h(
-                        Button,
+                        "input",
                         {
-                            key: filter.value,
-                            href: filter.url,
-                            variant: data.gradeFilter === filter.value ? "orange" : "outline",
+                            type: "search",
+                            className: "tc-input",
+                            value: searchQuery,
+                            placeholder: "Search by student name…",
+                            onChange: (event) => setSearchQuery(event.target.value),
                         },
-                        filter.label,
                     ),
                 ),
             ),
-            data.students && data.students.length
-                ? h(StudentTable, { students: data.students })
-                : h(Card, { className: "p-8 text-center text-slate-600" }, "No runnable students match this filter."),
+            visibleStudents.length
+                ? h(StudentTable, { students: visibleStudents })
+                : h(
+                      Card,
+                      { className: "p-8 text-center text-slate-600" },
+                      searchQuery ? "No students match this search." : "No runnable students match this filter.",
+                  ),
         );
     }
 
