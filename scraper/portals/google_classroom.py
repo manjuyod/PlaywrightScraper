@@ -4,11 +4,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from datetime import datetime, date, time
 # from bs4 import BeautifulSoup
 
-from scraper.portals.base import GradeMap, PortalEngine, PlaywrightTimeout
+from scraper.portals.base import GradeMap, AgendaItem, PortalEngine, PlaywrightTimeout
 from scraper.portals import get_portal
 from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_from_url
-
-AgendaItem = tuple[str, str, str | None]
 
 class GoogleClassroom(PortalEngine):
     portal_key = "google_classroom"

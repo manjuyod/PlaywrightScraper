@@ -12,14 +12,11 @@ from bs4 import BeautifulSoup, Tag
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import TimeoutError
 
-from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
+from .base import GradeMap, AgendaItem, LoginError, PortalEngine, PlaywrightTimeout
 from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
 
 
 # --------------------- utilities ---------------------
-
-AgendaItem = tuple[str, str, str | None]
-
 
 class TermContext(TypedDict):
     fall_year: int

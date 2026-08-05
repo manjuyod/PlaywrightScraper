@@ -9,7 +9,7 @@ from typing import ClassVar, Literal, cast
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 from tenacity import (
-    retry,
+    retry, 
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -21,7 +21,7 @@ class LoginError(Exception):
 
 
 GradeMap = dict[str, float]
-
+AgendaItem = tuple[str, str, str | None]
 
 @dataclass(frozen=True)
 class UniversalLoginConfig:
@@ -181,7 +181,7 @@ class PortalEngine:
 
     async def get_agenda(
         self, get: Literal["upcoming", "missing"]
-    ) -> dict[str, object]:
+    ) -> dict[str, list[AgendaItem]]:
         _ = get
         raise NotImplementedError
 
