@@ -387,11 +387,15 @@
             grades.map((grade) =>
                 h(
                     "div",
-                    { key: grade.course, className: "flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2" },
-                    h("span", { className: "truncate text-sm font-semibold text-slate-700" }, grade.course),
+                    { key: grade.course, className: "flex min-w-0 items-center gap-3 rounded-md bg-slate-50 px-3 py-2" },
                     h(
                         "span",
-                        { className: "font-mono text-sm font-bold text-slate-900" },
+                        { className: "min-w-0 flex-1 truncate text-sm font-semibold text-slate-700", title: grade.course },
+                        grade.course,
+                    ),
+                    h(
+                        "span",
+                        { className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900" },
                         `${Number(grade.grade).toFixed(1)}${grade.change ? ` ${grade.change}` : ""}`,
                     ),
                 ),
