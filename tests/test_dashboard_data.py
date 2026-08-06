@@ -107,6 +107,83 @@ def test_merge_uses_crmstudentid_and_keeps_missing_state_displayable() -> None:
     assert not hasattr(students[0], "portal2")
 
 
+@pytest.mark.parametrize(
+    ("raw_course", "expected"),
+    [
+        ("1: ENGLISH 8", "ENGLISH 8"),
+        (" 3 : SPANISH IB ", "SPANISH IB"),
+        ("12:  ADVANCED CHOIR", "ADVANCED CHOIR"),
+        ("HISTORY 8-A", "HISTORY 8-A"),
+        ("101 ALGEBRA", "101 ALGEBRA"),
+        ("1:", "1:"),
+    ],
+)
+def test_display_course_name_removes_only_a_leading_period_prefix(
+    raw_course: str, expected: str
+) -> None:
+    assert dashboard_data._display_course_name(raw_course) == expected
+
+
+def _course_label_report() -> dashboard_data.DashboardStudent:
+    return dashboard_data.merge_student_rows(
+        [_crm_student(101)],
+        [
+            {
+                "crmstudentid": 101,
+                "weeklydata": {
+                    "2026-07-06": {
+                        "7: ALGEBRA": 70.0,
+                        "2: BIOLOGY": 90.0,
+                        "4: CHEMISTRY": 98.0,
+                        "9: ZOOLOGY": 91.0,
+                    },
+                    "2026-07-13": {
+                        "9: ZOOLOGY": 91.0,
+                        "1: ALGEBRA": 72.0,
+                        "2: BIOLOGY": 88.0,
+                        "4: CHEMISTRY": 99.0,
+                    },
+                },
+            }
+        ],
+    )[0]
+
+
+def test_student_report_alphabetizes_cleaned_recent_course_labels() -> None:
+    report = _course_label_report()
+
+    assert [grade.course for grade in report.grades_snapshot] == [
+        "ALGEBRA",
+        "BIOLOGY",
+        "CHEMISTRY",
+        "ZOOLOGY",
+    ]
+
+
+def test_student_report_keeps_low_and_high_grades_ordered_by_score() -> None:
+    report = _course_label_report()
+
+    assert [(grade.course, grade.grade) for grade in report.low_grades] == [
+        ("ALGEBRA", 72.0),
+        ("BIOLOGY", 88.0),
+        ("ZOOLOGY", 91.0),
+    ]
+    assert [(grade.course, grade.grade) for grade in report.high_grades] == [
+        ("ZOOLOGY", 91.0),
+        ("CHEMISTRY", 99.0),
+    ]
+
+
+def test_student_report_matches_changes_with_raw_course_names() -> None:
+    report = _course_label_report()
+    by_course = {grade.course: grade for grade in report.grades_snapshot}
+
+    assert by_course["ALGEBRA"].change is None
+    assert by_course["BIOLOGY"].change == "-"
+    assert by_course["CHEMISTRY"].change == "+"
+    assert by_course["ZOOLOGY"].change is None
+
+
 def test_student_report_compares_courses_by_name_in_date_order() -> None:
     student = dashboard_data.merge_student_rows(
         [_crm_student(101)],

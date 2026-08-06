@@ -103,6 +103,7 @@ ORDER BY
 
 _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 _GRADE_LEVEL = re.compile(r"^(\d{1,2})(?:st|nd|rd|th)?$", re.IGNORECASE)
+_COURSE_PERIOD_PREFIX = re.compile(r"^\s*\d+\s*:\s*")
 _KNOWN_STATUSES = {"never", "synced", "error"}
 
 
@@ -420,6 +421,12 @@ def _numeric_grades(raw: Mapping[str, Any]) -> dict[str, float]:
     return grades
 
 
+def _display_course_name(course: str) -> str:
+    original = course.strip()
+    cleaned = _COURSE_PERIOD_PREFIX.sub("", original).strip()
+    return cleaned or original
+
+
 def build_student_report(student: DashboardStudent) -> DashboardStudent:
     dated_grades = [
         (str(week), _numeric_grades(grades))
@@ -434,18 +441,23 @@ def build_student_report(student: DashboardStudent) -> DashboardStudent:
     current = dated_grades[-1][1]
     previous = dated_grades[-2][1] if len(dated_grades) > 1 else {}
     snapshot = tuple(
-        CourseGrade(
-            course=course,
-            grade=grade,
-            change=(
-                "+"
-                if course in previous and grade > previous[course]
-                else "-"
-                if course in previous and grade < previous[course]
-                else None
+        sorted(
+            (
+                CourseGrade(
+                    course=_display_course_name(course),
+                    grade=grade,
+                    change=(
+                        "+"
+                        if course in previous and grade > previous[course]
+                        else "-"
+                        if course in previous and grade < previous[course]
+                        else None
+                    ),
+                )
+                for course, grade in current.items()
             ),
+            key=lambda item: item.course.casefold(),
         )
-        for course, grade in current.items()
     )
     sorted_grades = tuple(sorted(snapshot, key=lambda item: item.grade))
     minimum = sorted_grades[0].grade

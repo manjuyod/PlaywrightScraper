@@ -212,6 +212,93 @@
         return "slate";
     }
 
+    function fuzzyNameMatch(student, query) {
+        const normalize = (value) =>
+            String(value || "")
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .trim();
+        const name = normalize(`${student.firstName || ""} ${student.lastName || ""}`);
+        const terms = normalize(query).split(/\s+/).filter(Boolean);
+
+        return terms.every((term) => {
+            if (name.includes(term)) {
+                return true;
+            }
+            let termIndex = 0;
+            for (const character of name) {
+                if (character === term[termIndex]) {
+                    termIndex += 1;
+                }
+            }
+            return termIndex === term.length;
+        });
+    }
+
+    const STANDING_RANK = Object.freeze({
+        Unknown: 0,
+        Poor: 1,
+        Fair: 2,
+        Good: 3,
+    });
+    const STUDENT_NAME_COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+
+    function compareStudentNames(left, right) {
+        const firstNameComparison = STUDENT_NAME_COLLATOR.compare(
+            String(left.firstName || ""),
+            String(right.firstName || ""),
+        );
+        if (firstNameComparison) {
+            return firstNameComparison;
+        }
+
+        const lastNameComparison = STUDENT_NAME_COLLATOR.compare(
+            String(left.lastName || ""),
+            String(right.lastName || ""),
+        );
+        if (lastNameComparison) {
+            return lastNameComparison;
+        }
+
+        return Number(left.id) - Number(right.id);
+    }
+
+    function studentStandingRank(student) {
+        const standing = student.standing || "Unknown";
+        return Object.prototype.hasOwnProperty.call(STANDING_RANK, standing)
+            ? STANDING_RANK[standing]
+            : STANDING_RANK.Unknown;
+    }
+
+    function compareStudents(left, right, sortConfig) {
+        const comparison =
+            sortConfig.key === "name"
+                ? compareStudentNames(left, right)
+                : sortConfig.key === "standing"
+                  ? studentStandingRank(left) - studentStandingRank(right)
+                  : 0;
+        return sortConfig.direction === "desc" ? -comparison : comparison;
+    }
+
+    function filterAndSortStudents(students, searchQuery, sortConfig) {
+        const filteredStudents = students.filter((student) => fuzzyNameMatch(student, searchQuery));
+        if (!sortConfig.key) {
+            return filteredStudents;
+        }
+        return [...filteredStudents].sort((left, right) => compareStudents(left, right, sortConfig));
+    }
+
+    function nextSortConfig(current, columnKey) {
+        if (current.key !== columnKey) {
+            return { key: columnKey, direction: "asc" };
+        }
+        return {
+            key: columnKey,
+            direction: current.direction === "asc" ? "desc" : "asc",
+        };
+    }
+
     function studentTabFromHash(hash) {
         return hash === "#heatmap" ? "heatmap" : "report";
     }
@@ -387,11 +474,15 @@
             grades.map((grade) =>
                 h(
                     "div",
-                    { key: grade.course, className: "flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2" },
-                    h("span", { className: "truncate text-sm font-semibold text-slate-700" }, grade.course),
+                    { key: grade.course, className: "flex min-w-0 items-center gap-3 rounded-md bg-slate-50 px-3 py-2" },
                     h(
                         "span",
-                        { className: "font-mono text-sm font-bold text-slate-900" },
+                        { className: "min-w-0 flex-1 truncate text-sm font-semibold text-slate-700", title: grade.course },
+                        grade.course,
+                    ),
+                    h(
+                        "span",
+                        { className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900" },
                         `${Number(grade.grade).toFixed(1)}${grade.change ? ` ${grade.change}` : ""}`,
                     ),
                 ),
@@ -446,7 +537,35 @@
         );
     }
 
-    function StudentTable({ students }) {
+    function SortableHeading({ label, columnKey, sortConfig, onSort, className }) {
+        const isActive = sortConfig.key === columnKey;
+        const activeDirection = isActive ? sortConfig.direction : null;
+        const marker = !isActive ? "↕" : activeDirection === "asc" ? "↑" : "↓";
+        const nextDirection = activeDirection === "asc" ? "descending" : "ascending";
+        const headingProps = { className };
+        if (isActive) {
+            headingProps["aria-sort"] = activeDirection === "asc" ? "ascending" : "descending";
+        }
+
+        return h(
+            "th",
+            headingProps,
+            h(
+                "button",
+                {
+                    type: "button",
+                    className:
+                        "tc-focus-ring flex w-full cursor-pointer items-center gap-2 rounded-sm bg-transparent text-left text-inherit",
+                    onClick: () => onSort(columnKey),
+                    "aria-label": `Sort ${label} ${nextDirection}`,
+                },
+                h("span", null, label),
+                h("span", { className: "text-sm leading-none", "aria-hidden": "true" }, marker),
+            ),
+        );
+    }
+
+    function StudentTable({ students, sortConfig, onSort }) {
         const headingClass =
             "bg-brand-blue px-4 py-3 text-left text-xs font-extrabold uppercase tracking-normal text-white";
         const cellClass = "px-4 py-4 align-top";
@@ -466,12 +585,24 @@
                         h(
                             "tr",
                             null,
-                            h("th", { className: headingClass }, "Student"),
+                            h(SortableHeading, {
+                                label: "Student",
+                                columnKey: "name",
+                                sortConfig,
+                                onSort,
+                                className: headingClass,
+                            }),
                             h("th", { className: headingClass }, "Primary Portal"),
                             h("th", { className: headingClass }, "Recent Grades"),
                             h("th", { className: headingClass }, "Low Grades"),
                             h("th", { className: headingClass }, "High Grades"),
-                            h("th", { className: headingClass }, "Standing"),
+                            h(SortableHeading, {
+                                label: "Standing",
+                                columnKey: "standing",
+                                sortConfig,
+                                onSort,
+                                className: headingClass,
+                            }),
                             h("th", { className: headingClass }, "Status"),
                             h("th", { className: headingClass }, "Last Update"),
                             h("th", { className: headingClass }, "Actions"),
@@ -576,6 +707,17 @@
     }
 
     function FranchisePage({ data }) {
+        const [searchQuery, setSearchQuery] = useState("");
+        const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
+        const students = data.students || [];
+        const visibleStudents = useMemo(
+            () => filterAndSortStudents(students, searchQuery, sortConfig),
+            [students, searchQuery, sortConfig],
+        );
+        const handleSort = (columnKey) => {
+            setSortConfig((current) => nextSortConfig(current, columnKey));
+        };
+
         return h(
             Shell,
             {
@@ -587,23 +729,50 @@
                 }),
             },
             h(
-                "nav",
-                { className: "mb-5 flex flex-wrap gap-2", "aria-label": "Grade filters" },
-                (data.filters || []).map((filter) =>
+                "div",
+                { className: "mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between" },
+                h(
+                    "nav",
+                    { className: "flex flex-wrap gap-2", "aria-label": "Grade filters" },
+                    (data.filters || []).map((filter) =>
+                        h(
+                            Button,
+                            {
+                                key: filter.value,
+                                href: filter.url,
+                                variant: data.gradeFilter === filter.value ? "orange" : "outline",
+                            },
+                            filter.label,
+                        ),
+                    ),
+                ),
+                h(
+                    "label",
+                    { className: "tc-search-field w-full lg:max-w-sm" },
+                    h("span", { className: "tc-search-field__label" }, "Search students"),
                     h(
-                        Button,
+                        "input",
                         {
-                            key: filter.value,
-                            href: filter.url,
-                            variant: data.gradeFilter === filter.value ? "orange" : "outline",
+                            type: "search",
+                            className: "tc-input",
+                            value: searchQuery,
+                            placeholder: "Search by student name…",
+                            onChange: (event) => setSearchQuery(event.target.value),
                         },
-                        filter.label,
                     ),
                 ),
             ),
-            data.students && data.students.length
-                ? h(StudentTable, { students: data.students })
-                : h(Card, { className: "p-8 text-center text-slate-600" }, "No runnable students match this filter."),
+            visibleStudents.length
+                ? h(StudentTable, {
+                      students: visibleStudents,
+                      sortConfig,
+                      onSort: handleSort,
+                  })
+                : h(
+                      Card,
+                      { className: "p-8 text-center text-slate-600" },
+                      searchQuery ? "No students match this search." : "No runnable students match this filter.",
+                  ),
         );
     }
 
@@ -665,7 +834,11 @@
                     h(
                         "tr",
                         null,
-                        h("th", { scope: "col" }, "Course"),
+                        h(
+                            "th",
+                            { scope: "col" },
+                            h("span", { className: "tc-heatmap-course-label" }, "Course"),
+                        ),
                         weeks.map((week) => h("th", { key: week, scope: "col" }, week)),
                     ),
                 ),
@@ -676,7 +849,11 @@
                         h(
                             "tr",
                             { key: course },
-                            h("th", { scope: "row" }, course),
+                            h(
+                                "th",
+                                { scope: "row", title: course },
+                                h("span", { className: "tc-heatmap-course-label" }, course),
+                            ),
                             weeks.map((week) => {
                                 const value = history[week] && history[week][course];
                                 return h(
