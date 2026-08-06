@@ -44,7 +44,8 @@ The inner label is important because maximum widths on native table cells are no
 
 - Target all cells after the first column independently from Course.
 - Use a 58px minimum width on regular screens and restore the existing 48px mobile minimum.
-- Retain `width: 1%`, one-line content, and 8px horizontal padding so each generated column can grow if its own header or grade requires more space.
+- Leave generated grade widths on automatic table layout, with one-line content and 8px horizontal padding, so those columns absorb spare table width instead of stretching Course.
+- Reserve `width: 1%` for the Course column; applying it to every generated column causes desktop spare width to be distributed back into Course.
 - Do not impose Course's 100px minimum on grade columns.
 
 ### Table and scrolling

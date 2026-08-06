@@ -723,7 +723,11 @@
                     h(
                         "tr",
                         null,
-                        h("th", { scope: "col" }, "Course"),
+                        h(
+                            "th",
+                            { scope: "col" },
+                            h("span", { className: "tc-heatmap-course-label" }, "Course"),
+                        ),
                         weeks.map((week) => h("th", { key: week, scope: "col" }, week)),
                     ),
                 ),
@@ -734,7 +738,11 @@
                         h(
                             "tr",
                             { key: course },
-                            h("th", { scope: "row" }, course),
+                            h(
+                                "th",
+                                { scope: "row", title: course },
+                                h("span", { className: "tc-heatmap-course-label" }, course),
+                            ),
                             weeks.map((week) => {
                                 const value = history[week] && history[week][course];
                                 return h(

@@ -112,6 +112,56 @@ def test_franchise_students_render_as_a_read_only_table() -> None:
     assert "data.students.map((student) => h(StudentCard" not in javascript
 
 
+def test_heatmap_course_column_is_bounded_and_adaptive() -> None:
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
+        encoding="utf-8"
+    )
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    column_selector = ".tc-heatmap-table th:first-child {"
+    label_selector = ".tc-heatmap-course-label {"
+
+    assert column_selector in css
+    assert label_selector in css
+
+    course_column = css.split(column_selector, 1)[1].split("}", 1)[0]
+    course_label = css.split(label_selector, 1)[1].split("}", 1)[0]
+
+    assert "min-width: 100px;" in course_column
+    assert "width: 1%;" in course_column
+    assert "padding-inline: 8px;" in course_column
+    assert "display: block;" in course_label
+    assert "max-width: 244px;" in course_label
+    assert "overflow: hidden;" in course_label
+    assert "text-overflow: ellipsis;" in course_label
+    assert "white-space: nowrap;" in course_label
+    assert 'className: "tc-heatmap-course-label"' in javascript
+    assert "title: course" in javascript
+
+
+def test_heatmap_grade_columns_are_individually_compact() -> None:
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
+        encoding="utf-8"
+    )
+    selector = ".tc-heatmap-table tr > :not(:first-child) {"
+
+    assert selector in css
+
+    grade_columns = css.split(selector, 1)[1].split("}", 1)[0]
+    mobile_css = css.split("@media (max-width: 760px) {", 1)[1]
+
+    assert selector in mobile_css
+
+    mobile_grade_columns = mobile_css.split(selector, 1)[1].split("}", 1)[0]
+
+    assert "min-width: 58px;" in grade_columns
+    assert "width: 1%;" not in grade_columns
+    assert "white-space: nowrap;" in grade_columns
+    assert "padding-inline: 8px;" in grade_columns
+    assert "min-width: 48px;" in mobile_grade_columns
+
+
 def test_flask_web_path_does_not_import_legacy_writes_or_executor() -> None:
     routes = (ROOT / "ui" / "routes.py").read_text(encoding="utf-8")
     app = (ROOT / "ui" / "app.py").read_text(encoding="utf-8")
