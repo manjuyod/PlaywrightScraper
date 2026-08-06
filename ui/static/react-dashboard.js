@@ -236,6 +236,69 @@
         });
     }
 
+    const STANDING_RANK = Object.freeze({
+        Unknown: 0,
+        Poor: 1,
+        Fair: 2,
+        Good: 3,
+    });
+    const STUDENT_NAME_COLLATOR = new Intl.Collator("en", { sensitivity: "base" });
+
+    function compareStudentNames(left, right) {
+        const firstNameComparison = STUDENT_NAME_COLLATOR.compare(
+            String(left.firstName || ""),
+            String(right.firstName || ""),
+        );
+        if (firstNameComparison) {
+            return firstNameComparison;
+        }
+
+        const lastNameComparison = STUDENT_NAME_COLLATOR.compare(
+            String(left.lastName || ""),
+            String(right.lastName || ""),
+        );
+        if (lastNameComparison) {
+            return lastNameComparison;
+        }
+
+        return Number(left.id) - Number(right.id);
+    }
+
+    function studentStandingRank(student) {
+        const standing = student.standing || "Unknown";
+        return Object.prototype.hasOwnProperty.call(STANDING_RANK, standing)
+            ? STANDING_RANK[standing]
+            : STANDING_RANK.Unknown;
+    }
+
+    function compareStudents(left, right, sortConfig) {
+        const comparison =
+            sortConfig.key === "name"
+                ? compareStudentNames(left, right)
+                : sortConfig.key === "standing"
+                  ? studentStandingRank(left) - studentStandingRank(right)
+                  : 0;
+        return sortConfig.direction === "desc" ? -comparison : comparison;
+    }
+
+    function filterAndSortStudents(students, searchQuery, sortConfig) {
+        const filteredStudents = students.filter((student) => fuzzyNameMatch(student, searchQuery));
+        if (!sortConfig.key) {
+            return filteredStudents;
+        }
+        return [...filteredStudents].sort((left, right) => compareStudents(left, right, sortConfig));
+    }
+
+    function nextSortConfig(current, columnKey) {
+        if (current.key !== columnKey) {
+            return { key: columnKey, direction: "asc" };
+        }
+        return {
+            key: columnKey,
+            direction: current.direction === "asc" ? "desc" : "asc",
+        };
+    }
+
     function studentTabFromHash(hash) {
         return hash === "#heatmap" ? "heatmap" : "report";
     }
@@ -474,7 +537,35 @@
         );
     }
 
-    function StudentTable({ students }) {
+    function SortableHeading({ label, columnKey, sortConfig, onSort, className }) {
+        const isActive = sortConfig.key === columnKey;
+        const activeDirection = isActive ? sortConfig.direction : null;
+        const marker = !isActive ? "↕" : activeDirection === "asc" ? "↑" : "↓";
+        const nextDirection = activeDirection === "asc" ? "descending" : "ascending";
+        const headingProps = { className };
+        if (isActive) {
+            headingProps["aria-sort"] = activeDirection === "asc" ? "ascending" : "descending";
+        }
+
+        return h(
+            "th",
+            headingProps,
+            h(
+                "button",
+                {
+                    type: "button",
+                    className:
+                        "tc-focus-ring flex w-full cursor-pointer items-center gap-2 rounded-sm bg-transparent text-left text-inherit",
+                    onClick: () => onSort(columnKey),
+                    "aria-label": `Sort ${label} ${nextDirection}`,
+                },
+                h("span", null, label),
+                h("span", { className: "text-sm leading-none", "aria-hidden": "true" }, marker),
+            ),
+        );
+    }
+
+    function StudentTable({ students, sortConfig, onSort }) {
         const headingClass =
             "bg-brand-blue px-4 py-3 text-left text-xs font-extrabold uppercase tracking-normal text-white";
         const cellClass = "px-4 py-4 align-top";
@@ -494,12 +585,24 @@
                         h(
                             "tr",
                             null,
-                            h("th", { className: headingClass }, "Student"),
+                            h(SortableHeading, {
+                                label: "Student",
+                                columnKey: "name",
+                                sortConfig,
+                                onSort,
+                                className: headingClass,
+                            }),
                             h("th", { className: headingClass }, "Primary Portal"),
                             h("th", { className: headingClass }, "Recent Grades"),
                             h("th", { className: headingClass }, "Low Grades"),
                             h("th", { className: headingClass }, "High Grades"),
-                            h("th", { className: headingClass }, "Standing"),
+                            h(SortableHeading, {
+                                label: "Standing",
+                                columnKey: "standing",
+                                sortConfig,
+                                onSort,
+                                className: headingClass,
+                            }),
                             h("th", { className: headingClass }, "Status"),
                             h("th", { className: headingClass }, "Last Update"),
                             h("th", { className: headingClass }, "Actions"),
@@ -605,11 +708,15 @@
 
     function FranchisePage({ data }) {
         const [searchQuery, setSearchQuery] = useState("");
+        const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
         const students = data.students || [];
         const visibleStudents = useMemo(
-            () => students.filter((student) => fuzzyNameMatch(student, searchQuery)),
-            [students, searchQuery],
+            () => filterAndSortStudents(students, searchQuery, sortConfig),
+            [students, searchQuery, sortConfig],
         );
+        const handleSort = (columnKey) => {
+            setSortConfig((current) => nextSortConfig(current, columnKey));
+        };
 
         return h(
             Shell,
@@ -656,7 +763,11 @@
                 ),
             ),
             visibleStudents.length
-                ? h(StudentTable, { students: visibleStudents })
+                ? h(StudentTable, {
+                      students: visibleStudents,
+                      sortConfig,
+                      onSort: handleSort,
+                  })
                 : h(
                       Card,
                       { className: "p-8 text-center text-slate-600" },
