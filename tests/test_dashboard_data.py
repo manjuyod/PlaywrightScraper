@@ -107,6 +107,23 @@ def test_merge_uses_crmstudentid_and_keeps_missing_state_displayable() -> None:
     assert not hasattr(students[0], "portal2")
 
 
+@pytest.mark.parametrize(
+    ("raw_course", "expected"),
+    [
+        ("1: ENGLISH 8", "ENGLISH 8"),
+        (" 3 : SPANISH IB ", "SPANISH IB"),
+        ("12:  ADVANCED CHOIR", "ADVANCED CHOIR"),
+        ("HISTORY 8-A", "HISTORY 8-A"),
+        ("101 ALGEBRA", "101 ALGEBRA"),
+        ("1:", "1:"),
+    ],
+)
+def test_display_course_name_removes_only_a_leading_period_prefix(
+    raw_course: str, expected: str
+) -> None:
+    assert dashboard_data._display_course_name(raw_course) == expected
+
+
 def test_student_report_compares_courses_by_name_in_date_order() -> None:
     student = dashboard_data.merge_student_rows(
         [_crm_student(101)],
