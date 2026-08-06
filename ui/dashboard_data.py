@@ -441,18 +441,23 @@ def build_student_report(student: DashboardStudent) -> DashboardStudent:
     current = dated_grades[-1][1]
     previous = dated_grades[-2][1] if len(dated_grades) > 1 else {}
     snapshot = tuple(
-        CourseGrade(
-            course=course,
-            grade=grade,
-            change=(
-                "+"
-                if course in previous and grade > previous[course]
-                else "-"
-                if course in previous and grade < previous[course]
-                else None
+        sorted(
+            (
+                CourseGrade(
+                    course=_display_course_name(course),
+                    grade=grade,
+                    change=(
+                        "+"
+                        if course in previous and grade > previous[course]
+                        else "-"
+                        if course in previous and grade < previous[course]
+                        else None
+                    ),
+                )
+                for course, grade in current.items()
             ),
+            key=lambda item: item.course.casefold(),
         )
-        for course, grade in current.items()
     )
     sorted_grades = tuple(sorted(snapshot, key=lambda item: item.grade))
     minimum = sorted_grades[0].grade
