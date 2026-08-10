@@ -226,7 +226,7 @@ Make targeted changes.
 Test that the changes worked by running the portal test:
 
 ```bash
-bash scraper/workflows/test_portal.py --portal {portal_key}
+uv run python -m scraper.workflows.test_portal --portal {portal_key}
 ```
 
 Add the --grades flag if you need to test grade parsing as well.
