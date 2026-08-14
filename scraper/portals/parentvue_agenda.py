@@ -84,17 +84,29 @@ def _is_missing(row: Tag) -> bool:
 
 
 def _is_hidden(element: Tag) -> bool:
-    if element.has_attr("hidden") or element.get("aria-hidden") == "true":
-        return True
-    style = element.get("style")
-    if not isinstance(style, str):
-        return False
-    declarations = {
-        name.strip().casefold(): value.strip().casefold()
-        for declaration in style.split(";") if ":" in declaration
-        for name, value in [declaration.split(":", 1)]
-    }
-    return declarations.get("display") == "none" or declarations.get("visibility") == "hidden"
+    current: Tag | None = element
+    while isinstance(current, Tag):
+        aria_hidden = current.get("aria-hidden")
+        if current.has_attr("hidden") or (
+            isinstance(aria_hidden, str)
+            and aria_hidden.strip().casefold() == "true"
+        ):
+            return True
+        style = current.get("style")
+        if isinstance(style, str):
+            declarations = {
+                name.strip().casefold(): value.strip().casefold()
+                for declaration in style.split(";") if ":" in declaration
+                for name, value in [declaration.split(":", 1)]
+            }
+            if (
+                declarations.get("display") == "none"
+                or declarations.get("visibility") == "hidden"
+            ):
+                return True
+        parent = current.parent
+        current = parent if isinstance(parent, Tag) else None
+    return False
 
 
 def _assignment_rows(soup: BeautifulSoup) -> list[Tag]:
@@ -123,6 +135,8 @@ def parse_parentvue_agenda(html: str) -> list[AgendaRecord]:
 
     records: list[AgendaRecord] = []
     for row in rows:
+        if _is_hidden(row):
+            continue
         title = _text(row.select_one('.assignment-title, .assignment-name, [data-label="Assignment"]'))
         due_element = row.select_one('time[datetime], .due-date, [data-label="Due Date"]')
         raw_due = due_element.get("datetime") if isinstance(due_element, Tag) else None

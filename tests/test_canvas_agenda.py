@@ -7,10 +7,15 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+from scraper import agenda
 from scraper.agenda_contract import normalize_agenda
 from scraper.portals import canvas
 from scraper.portals.canvas import CanvasEngine
-from scraper.portals.canvas_agenda import CanvasAgendaError, collect_canvas_agenda
+from scraper.portals.canvas_agenda import (
+    CanvasAgendaError,
+    _canvas_timezone,
+    collect_canvas_agenda,
+)
 
 
 COURSES_PAGE_1 = [{"id": 11, "name": "English 11"}]
@@ -170,6 +175,64 @@ def test_omits_planner_assignments_outside_the_inclusive_local_window() -> None:
     assert [record["title"] for record in records] == ["Starts today", "Ends on final day"]
 
 
+@pytest.mark.parametrize("endpoint", ["courses", "missing", "planner"])
+def test_mixed_canvas_payloads_skip_non_object_rows_and_keep_valid_siblings(
+    endpoint: str,
+) -> None:
+    """Would fail if one row-local API defect rejects valid sibling assignments."""
+    origin = "https://canvas.example"
+    courses = f"{origin}/api/v1/courses?per_page=100&enrollment_state=active"
+    missing = f"{origin}/api/v1/users/self/missing_submissions?per_page=100"
+    planner = (
+        f"{origin}/api/v1/planner/items?per_page=100"
+        "&start_date=2026-08-13T00%3A00%3A00-07%3A00"
+        "&end_date=2027-08-13T00%3A00%3A00-07%3A00"
+    )
+    payloads: dict[str, list[object]] = {
+        "courses": [{"id": 11, "name": "English 11"}],
+        "missing": [
+            {
+                "id": 801,
+                "course_id": 11,
+                "name": "Valid missing",
+                "due_at": "2026-08-13T07:00:00Z",
+            }
+        ],
+        "planner": [
+            {
+                "plannable_type": "assignment",
+                "course_id": 11,
+                "plannable": {
+                    "id": 802,
+                    "title": "Valid due",
+                    "due_at": "2026-08-13T07:00:00Z",
+                },
+            }
+        ],
+    }
+    payloads[endpoint].insert(0, "malformed-row")
+    request = FakeRequest(
+        {
+            courses: FakeResponse(payloads["courses"]),
+            missing: FakeResponse(payloads["missing"]),
+            planner: FakeResponse(payloads["planner"]),
+        }
+    )
+
+    records = asyncio.run(
+        collect_canvas_agenda(
+            FakePage(request),
+            origin,
+            today=date(2026, 8, 13),
+        )
+    )
+
+    assert [record["title"] for record in records] == [
+        "Valid missing",
+        "Valid due",
+    ]
+
+
 @pytest.mark.parametrize("payload", [None, {"not": "a list"}])
 def test_rejects_malformed_top_level_payload_without_response_content(payload: object) -> None:
     """Would fail if a bad API payload leaks data or is silently treated as empty."""
@@ -211,3 +274,80 @@ def test_canvas_engine_delegates_agenda_collection_once(monkeypatch: pytest.Monk
 
     assert asyncio.run(CanvasEngine(page, "Student.P1Username", "password", "https://canvas.example/login/canvas").get_agenda()) == expected
     assert received == [(page, "https://canvas.example")]
+
+
+def test_invalid_canvas_timezone_name_falls_back_to_utc() -> None:
+    """Would fail if an unusable account timezone can abort collection."""
+    timezone = asyncio.run(
+        _canvas_timezone(FakePage(FakeRequest({}), timezone="Invalid/Canvas-Zone"))
+    )
+
+    assert timezone.key == "UTC"
+
+
+def test_canvas_timezone_evaluation_failure_reaches_controlled_slot_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a page/runtime error is mistaken for an invalid timezone."""
+
+    class RuntimeFailurePage:
+        def __init__(self, context: object) -> None:
+            self.context = context
+            self.close_calls = 0
+
+        async def evaluate(self, _expression: str) -> str:
+            raise RuntimeError("execution context destroyed")
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class RuntimeFailureContext:
+        def __init__(self) -> None:
+            self.request = FakeRequest({})
+            self.page = RuntimeFailurePage(self)
+            self.close_calls = 0
+
+        def set_default_timeout(self, _timeout: int) -> None:
+            pass
+
+        def set_default_navigation_timeout(self, _timeout: int) -> None:
+            pass
+
+        async def new_page(self) -> RuntimeFailurePage:
+            return self.page
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class RuntimeFailureBrowser:
+        def __init__(self) -> None:
+            self.context = RuntimeFailureContext()
+
+        async def new_context(self) -> RuntimeFailureContext:
+            return self.context
+
+    class Engine(CanvasEngine):
+        async def login(self, first_name: str | None = None) -> None:
+            pass
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    browser = RuntimeFailureBrowser()
+    student = {
+        "student_name": "Fixture Student",
+        "login_url": "https://canvas.example/login",
+        "id": "fixture-user",
+        "password": "fixture-password",
+        "alt_login_url": None,
+        "alt_id": None,
+        "alt_password": None,
+    }
+
+    with pytest.raises(
+        agenda.AgendaSlotCollectionError,
+        match="^agenda1_canvas_failed$",
+    ):
+        asyncio.run(agenda.fetch_agenda(browser, student))
+
+    assert browser.context.request.urls == []
+    assert browser.context.page.close_calls == 1
+    assert browser.context.close_calls == 1

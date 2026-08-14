@@ -84,6 +84,18 @@ collapsed by stable source identity (with missing taking precedence over due),
 but rows are never deduplicated, merged, or reordered across `agenda1` and
 `agenda2`.
 
+The Rust result boundary recursively counts every JSON object, array, and
+primitive value and accepts at most 1,000 nodes. Normalization therefore caps
+each slot's `weeks` subtree at 497 nodes. The maximum bundle is
+`1 + 2 * (1 slot object + 1 portal value + 497 weeks nodes) = 999` nodes.
+The cap is applied separately to both slots, so a large `agenda1` cannot reduce
+the capacity available to `agenda2`. Rows are retained from the already
+canonical order (week, case-insensitive class, missing before due, then
+date/time/title), and no empty class or week scaffolding is emitted when its
+first row cannot fit. This is bounded current-state storage: a sufficiently
+large portal response is deterministically truncated rather than rejected by
+the database boundary.
+
 The runner starts workers only for configured agenda-capable slots and uses
 separate browser pages. It posts one `agenda_success` bundle only after every
 started worker succeeds. If any such worker fails during login, request,

@@ -158,6 +158,16 @@ by the portal-provided class name, with `missing` and `due` arrays in each
 class bucket. A row visible in both slots remains in both slots; there is no
 cross-slot deduplication or reordering.
 
+Storage is intentionally bounded by the unchanged Rust result validator. Each
+slot's normalized `weeks` subtree is capped independently at 497 recursively
+counted JSON values, so the complete two-slot bundle is at most 999 values
+against the 1,000-value boundary. When a slot exceeds that capacity, it keeps
+the deterministic canonical prefix: weeks in ascending order, classes in
+case-insensitive order, missing rows before due rows, and rows ordered by due
+date, time, and title. A week or class is included only when at least one of
+its rows fits. Capacity is never borrowed across slots, and bounding does not
+deduplicate or reorder work between `agenda1` and `agenda2`.
+
 Canvas, ParentVUE, and Google Classroom are the currently supported agenda
 collectors, and each returns missing plus upcoming/due work in the same run.
 An unconfigured, unsupported, or parserless portal is a valid blank slot:

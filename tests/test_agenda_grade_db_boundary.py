@@ -9,6 +9,14 @@ from scraper.db_cli import GradeDbUnavailable
 from scraper.runner import _new_progress
 
 
+def _json_value_nodes(value: object) -> int:
+    if isinstance(value, dict):
+        return 1 + sum(_json_value_nodes(item) for item in value.values())
+    if isinstance(value, list):
+        return 1 + sum(_json_value_nodes(item) for item in value)
+    return 1
+
+
 def _student(student_id: int) -> dict:
     return {
         "db_id": student_id,
@@ -178,6 +186,46 @@ def test_two_canvas_slots_use_distinct_pages_and_keep_duplicate_assignments(
         {"student_name": "Student 7"},
     ]
     assert all(page.close_calls == 1 for page in browser.pages)
+
+
+def test_two_slots_are_independently_bounded_below_rust_result_limit(
+    monkeypatch,
+) -> None:
+    """Would fail if one busy slot can overflow or consume the other slot's budget."""
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            return [
+                {
+                    "sourceId": f"assignment-{index:03d}",
+                    "course": "Busy Course",
+                    "title": f"Work {index:03d}",
+                    "dueDate": "2026-08-16",
+                    "dueTime": None,
+                    "status": "due",
+                }
+                for index in range(124)
+            ]
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+
+    bundle, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), _student(7)))
+
+    for slot in ("agenda1", "agenda2"):
+        rows = bundle[slot]["weeks"]["2026-08-10"]["Busy Course"]["due"]
+        assert len(rows) == 123
+        assert rows[0]["title"] == "Work 000"
+        assert rows[-1]["title"] == "Work 122"
+    assert bundle["agenda1"]["weeks"] == bundle["agenda2"]["weeks"]
+    assert _json_value_nodes(bundle) == 999
 
 
 def test_concurrent_same_origin_slots_use_isolated_contexts(monkeypatch) -> None:

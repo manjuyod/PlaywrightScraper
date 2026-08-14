@@ -32,6 +32,12 @@ class AgendaBuckets(TypedDict):
 AgendaWeeks = dict[str, dict[str, AgendaBuckets]]
 
 
+# Rust accepts at most 1,000 recursively counted JSON values. Capping each
+# independently normalized weeks subtree here makes the largest bundle
+# 1 + 2 * (1 slot object + 1 portal value + 497 weeks values) = 999 nodes.
+MAX_AGENDA_WEEKS_NODES = 497
+
+
 _PORTAL_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -65,6 +71,41 @@ def _display_text(value: object) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.split())[:500]
+
+
+def _json_value_nodes(value: object) -> int:
+    """Count JSON values exactly as the unchanged Rust result validator does."""
+    if isinstance(value, Mapping):
+        return 1 + sum(_json_value_nodes(item) for item in value.values())
+    if isinstance(value, list):
+        return 1 + sum(_json_value_nodes(item) for item in value)
+    return 1
+
+
+def _bounded_weeks(weeks: AgendaWeeks) -> AgendaWeeks:
+    """Retain the canonical prefix that fits one slot's independent budget."""
+    retained: AgendaWeeks = {}
+    retained_nodes = 1  # The root weeks object itself.
+    for week, courses in weeks.items():
+        for course, buckets in courses.items():
+            for status in ("missing", "due"):
+                for item in buckets[status]:
+                    has_week = week in retained
+                    has_course = has_week and course in retained[week]
+                    added_nodes = _json_value_nodes(item)
+                    if not has_week:
+                        added_nodes += 1  # The week object.
+                    if not has_course:
+                        added_nodes += 3  # Course object plus both status arrays.
+                    if retained_nodes + added_nodes > MAX_AGENDA_WEEKS_NODES:
+                        return retained
+                    if not has_week:
+                        retained[week] = {}
+                    if not has_course:
+                        retained[week][course] = {"missing": [], "due": []}
+                    retained[week][course][status].append(item)
+                    retained_nodes += added_nodes
+    return retained
 
 
 def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
@@ -142,4 +183,4 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
                 )
                 for status in ("missing", "due")
             }
-    return ordered
+    return _bounded_weeks(ordered)

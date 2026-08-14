@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from playwright.async_api import Page
 
@@ -60,9 +60,9 @@ async def _fetch_pages(page: Page, origin: str, url: str) -> list[dict[str, Any]
             if not response.ok:
                 raise CanvasAgendaError()
             payload = await response.json()
-            if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+            if not isinstance(payload, list):
                 raise CanvasAgendaError()
-            results.extend(payload)
+            results.extend(row for row in payload if isinstance(row, dict))
             next_url = _next_url(response.headers.get("link"))
         except CanvasAgendaError:
             raise
@@ -78,12 +78,14 @@ async def _fetch_pages(page: Page, origin: str, url: str) -> list[dict[str, Any]
 
 
 async def _canvas_timezone(page: Page) -> ZoneInfo:
+    name = await page.evaluate(
+        "window.ENV && window.ENV.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone"
+    )
+    if not isinstance(name, str):
+        return ZoneInfo("UTC")
     try:
-        name = await page.evaluate(
-            "window.ENV && window.ENV.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone"
-        )
-        return ZoneInfo(name) if isinstance(name, str) else ZoneInfo("UTC")
-    except Exception:
+        return ZoneInfo(name)
+    except (ValueError, ZoneInfoNotFoundError):
         return ZoneInfo("UTC")
 
 

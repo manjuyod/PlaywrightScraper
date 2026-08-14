@@ -88,6 +88,50 @@ def test_hidden_missing_markers_do_not_override_upcoming_status() -> None:
         assert parse_parentvue_agenda(html)[0]["status"] == "due"
 
 
+def test_hidden_ancestor_missing_marker_does_not_override_upcoming_status() -> None:
+    """Would fail if visibility is checked only on the Missing marker itself."""
+    html = '''<section><h2>Upcoming Assignments</h2>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Primary source</span>
+        <time datetime="2026-08-19">08/19/2026</time>
+        <span aria-hidden=" TRUE "><span class="status">Missing</span></span>
+      </div></section>'''
+
+    assert parse_parentvue_agenda(html)[0]["status"] == "due"
+
+
+def test_hidden_assignment_rows_and_hidden_ancestors_are_omitted() -> None:
+    """Would fail if stale responsive rows remain actionable agenda records."""
+    html = '''<section><h2>Upcoming Assignments</h2>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Visible work</span>
+        <time datetime="2026-08-19">08/19/2026</time>
+      </div>
+      <div class="assignment-row" data-course-title="History" hidden>
+        <span class="assignment-title">Hidden attribute</span>
+        <time datetime="2026-08-20">08/20/2026</time>
+      </div>
+      <div class="assignment-row" data-course-title="History" aria-hidden=" TRUE ">
+        <span class="assignment-title">Aria hidden</span>
+        <time datetime="2026-08-21">08/21/2026</time>
+      </div>
+      <div class="assignment-row" data-course-title="History" style=" DISPLAY : NONE ">
+        <span class="assignment-title">Display hidden</span>
+        <time datetime="2026-08-22">08/22/2026</time>
+      </div>
+      <div style=" visibility : HIDDEN ">
+        <div class="assignment-row" data-course-title="History">
+          <span class="assignment-title">Hidden ancestor</span>
+          <time datetime="2026-08-23">08/23/2026</time>
+        </div>
+      </div>
+    </section>'''
+
+    records = parse_parentvue_agenda(html)
+
+    assert [record["title"] for record in records] == ["Visible work"]
+
+
 def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming() -> None:
     """Would fail if ParentVUE source identities cannot deduplicate status overlap."""
     records = parse_parentvue_agenda(FIXTURE.read_text(encoding="utf-8"))
