@@ -39,6 +39,61 @@ payload and database boundary.
 5. The dashboard independently selects the runnable CRM roster, batch-reads canonical Neon state, and merges strictly by `crmstudentid`.
 6. In dev mode, the overview reads `grade_scrape_jobs` and polls `/api/jobs` every 15 seconds. It cannot start, heartbeat, complete, or fail jobs.
 
+## Agenda Collection Contract
+
+`scraper.agenda` preserves the two CRM credential positions as fixed agenda
+slots: Portal 1 is always `agenda1`, and Portal 2 is always `agenda2`. It never
+sorts or otherwise reassigns slots based on portal type. A successful result
+replaces `weekly_agenda` as one nested snapshot:
+
+```json
+{
+  "agenda1": {
+    "portal": "canvas",
+    "weeks": {
+      "2026-08-10": {
+        "Example class": {
+          "missing": [],
+          "due": [{"title": "Example work", "dueDate": "2026-08-14", "dueTime": null}]
+        }
+      }
+    }
+  },
+  "agenda2": {"portal": null, "weeks": {}}
+}
+```
+
+The only top-level agenda keys are `agenda1` and `agenda2`. `portal` is a safe
+lowercase registry key or `null`; it is not a portal URL. `weeks` is always an
+object. Week keys are canonical ISO Monday dates calculated from each usable
+assignment due date. Class buckets always contain `missing` and `due` arrays.
+Rows contain the title, normalized due date, and normalized local time (or
+`null`); undated work is omitted because it cannot be placed in a week.
+
+Canvas, ParentVUE, and Google Classroom are agenda-capable. Each collector
+returns both missing and upcoming/due work in one invocation; the agenda CLI
+does not select a single status. Other configured portals retain their detected
+slot and produce `weeks: {}` until an agenda parser is available. Missing
+credentials, unsupported portals, and parserless portals are intentional blank
+slots, not collection failures. A capable collector that completes with no
+dated assignments is likewise a successful blank slot.
+
+Within a slot, normalized rows are grouped by Monday week and class, with
+missing and due status buckets. Identical rows from the same portal may be
+collapsed by stable source identity (with missing taking precedence over due),
+but rows are never deduplicated, merged, or reordered across `agenda1` and
+`agenda2`.
+
+The runner starts workers only for configured agenda-capable slots and uses
+separate browser pages. It posts one `agenda_success` bundle only after every
+started worker succeeds. If any such worker fails during login, request,
+parsing, or normalization, it posts a controlled failure rather than a partial
+bundle; the database boundary leaves the prior stored snapshot in place.
+
+The snapshot must never include credentials, portal URLs, student identifiers,
+cookies, tokens, session values, or raw portal responses. Logs and controlled
+failure outcomes likewise contain only safe codes and aggregate context.
+
 ## Dashboard Architecture
 
 `ui.wsgi` imports the Flask app and registers `ui.routes`. The web application is intentionally public and contains no application authentication, sessions, CSRF state, forms, or write routes.
@@ -101,6 +156,16 @@ uv run python -m scraper.runner --franchise-id 57
 uv run python -m scraper.runner --franchise-id 57 --student-id 123
 uv run python -m scraper.agenda --franchise-id 57
 ```
+
+For UI-only agenda verification, use the fixture-backed preview:
+
+```bash
+uv run python tests/support/student_agenda_preview.py --port 8765
+```
+
+It binds only to localhost and serves fictional data. It never imports
+dashboard routes, opens a database, or uses live data; do not replace its
+fixture with authorized student information.
 
 Replit/nginx uses `ui/start.sh`: Gunicorn binds the private upstream at `127.0.0.1:3000`, and nginx exposes port `8080`.
 
