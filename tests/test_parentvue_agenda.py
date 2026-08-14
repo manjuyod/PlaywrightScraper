@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from scraper.agenda_contract import normalize_agenda
+from scraper.portals.parentvue import ParentVUE
+from scraper.portals.parentvue_agenda import parse_parentvue_agenda
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "parentvue_gradebook_agenda.html"
+
+
+def test_parses_missing_and_upcoming_gradebook_assignments() -> None:
+    """Would fail if ParentVUE misses semantic rows, dates, or stable identities."""
+    records = parse_parentvue_agenda(FIXTURE.read_text(encoding="utf-8"))
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Linear review",
+            "dueDate": "2026-08-11",
+            "dueTime": None,
+            "status": "missing",
+            "sourceId": "parentvue:pv-41",
+        },
+        {
+            "course": "English 11",
+            "title": "Reading response",
+            "dueDate": "2026-08-16",
+            "dueTime": "23:59",
+            "status": "due",
+            "sourceId": "parentvue:pv-52",
+        },
+    ]
+
+
+def test_empty_recognized_upcoming_section_returns_no_records() -> None:
+    """Would fail if an empty Grade Book section is treated as a parse failure."""
+    assert parse_parentvue_agenda(
+        '<section><h2>Upcoming Assignments</h2></section>'
+    ) == []
+
+
+def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming() -> None:
+    """Would fail if ParentVUE source identities cannot deduplicate status overlap."""
+    records = parse_parentvue_agenda(FIXTURE.read_text(encoding="utf-8"))
+    records.append({
+        "course": "Algebra II",
+        "title": "Linear review",
+        "dueDate": "2026-08-11",
+        "dueTime": None,
+        "status": "due",
+        "sourceId": "parentvue:pv-41",
+    })
+
+    assert normalize_agenda(records)["2026-08-10"]["Algebra II"] == {
+        "missing": [{"title": "Linear review", "dueDate": "2026-08-11", "dueTime": None}],
+        "due": [],
+    }
+
+
+class FakePage:
+    def __init__(self, html: str) -> None:
+        self.html = html
+        self.content_calls = 0
+
+    async def content(self) -> str:
+        self.content_calls += 1
+        return self.html
+
+
+def test_engine_collects_current_authenticated_gradebook_html() -> None:
+    """Would fail if agenda collection makes a separate request instead of parsing the page."""
+    page = FakePage(FIXTURE.read_text(encoding="utf-8"))
+
+    records = asyncio.run(
+        ParentVUE(page, "student", "password", "https://parentvue.example/Login_Parent_PXP.aspx").get_agenda()
+    )
+
+    assert page.content_calls == 1
+    assert records[0]["sourceId"] == "parentvue:pv-41"
+    assert ParentVUE.agenda_capable is True
+
+
+class FakeGradebookLink:
+    def __init__(self, page: "FakeNavigationPage") -> None:
+        self.page = page
+
+    async def click(self) -> None:
+        self.page.clicked_visible_gradebook = True
+
+
+class FakeGradebookLocator:
+    def __init__(self, page: "FakeNavigationPage") -> None:
+        self.first = FakeGradebookLink(page)
+
+
+class FakeNavigationPage:
+    def __init__(self) -> None:
+        self.clicked_visible_gradebook = False
+        self.selector: str | None = None
+
+    def locator(self, selector: str) -> FakeGradebookLocator:
+        self.selector = selector
+        return FakeGradebookLocator(self)
+
+    async def wait_for_load_state(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    async def wait_for_timeout(self, _milliseconds: int) -> None:
+        pass
+
+
+def test_after_login_selects_visible_href_specific_gradebook_link() -> None:
+    """Would fail if navigation can click the hidden duplicate Grade Book label."""
+    page = FakeNavigationPage()
+    portal = ParentVUE(page, "student", "password", "https://parentvue.example/Login_Student_PXP.aspx")
+
+    asyncio.run(portal.after_login(None))
+
+    assert page.clicked_visible_gradebook
+    assert page.selector == 'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'

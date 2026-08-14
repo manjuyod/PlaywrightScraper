@@ -6,12 +6,15 @@ from scraper.portals.base import (
     PortalEngine,
     UniversalLoginConfig,
 )
+from scraper.agenda_contract import AgendaRecord
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from .parentvue_agenda import parse_parentvue_agenda
 from .utils import wait_after_nav
 
 class ParentVUE(PortalEngine):
     portal_key = "parentvue"
     url_patterns = ("parentvue", "Login_Parent", "Login_Student")
+    agenda_capable = True
     login_config = UniversalLoginConfig(
         username_selector="#ctl00_MainContent_username",
         password_selector="#ctl00_MainContent_password",
@@ -34,9 +37,10 @@ class ParentVUE(PortalEngine):
         if "Login_Parent" in self.login_url:
             await self.select_student(first_name)
         self.logger.info("portal.navigation.gradebook_started")
-        await self.page.get_by_role("listitem").filter(
-            has_text="Grade Book"
-        ).click()
+        gradebook_link = self.page.locator(
+            'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
+        ).first
+        await gradebook_link.click()
         await self.page.wait_for_load_state(
             state="domcontentloaded", timeout=30000
         )
@@ -105,3 +109,6 @@ class ParentVUE(PortalEngine):
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(300)
+
+    async def get_agenda(self) -> list[AgendaRecord]:
+        return parse_parentvue_agenda(await self.page.content())
