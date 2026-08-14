@@ -898,7 +898,7 @@
                 h(
                     "span",
                     { className: "shrink-0 text-xs font-bold text-slate-500" },
-                    `${classGroup.count} assignments`,
+                    `${classGroup.count} ${classGroup.count === 1 ? "assignment" : "assignments"}`,
                 ),
             ),
             h(
@@ -975,7 +975,7 @@
             h(
                 "div",
                 {
-                    className: "tc-report-card__scroll tc-scrollbar mt-4 grid content-start gap-4 pr-2",
+                    className: "tc-report-card__scroll tc-scrollbar tc-focus-ring mt-4 grid content-start gap-4 rounded-md pr-2",
                     tabIndex: 0,
                     "aria-label": `${heading} assignments`,
                 },
@@ -1140,7 +1140,7 @@
                               h(
                                   "div",
                                   {
-                                      className: "tc-report-card__scroll tc-scrollbar mt-4 pr-2",
+                                      className: "tc-report-card__scroll tc-scrollbar tc-focus-ring mt-4 rounded-md pr-2",
                                       tabIndex: 0,
                                       "aria-label": "Grade history",
                                   },

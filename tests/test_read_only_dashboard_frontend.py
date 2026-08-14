@@ -259,6 +259,50 @@ console.log(JSON.stringify({
     assert "scrape" not in result["pageText"].lower()
 
 
+def test_agenda_class_uses_singular_assignment_count_copy() -> None:
+    result = _run_student_page_scenario(
+        """
+if (!hooks.AgendaClass) {
+    throw new Error("AgendaClass is not implemented");
+}
+const tree = hooks.AgendaClass({
+    classGroup: {
+        name: "Fictional Seminar",
+        count: 1,
+        assignments: [
+            { status: "due", title: "Reading notes", dueDate: "2026-08-16", dueDisplay: "Aug 16" },
+        ],
+    },
+});
+function find(node, type) {
+    if (!node || typeof node !== "object") return null;
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            const match = find(child, type);
+            if (match) return match;
+        }
+        return null;
+    }
+    if (node.type === type) return node;
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+        const match = find(child, type);
+        if (match) return match;
+    }
+    return null;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+console.log(JSON.stringify({ summary: textOf(find(tree, "summary")) }));
+"""
+    )
+
+    assert result == {"summary": "Fictional Seminar1 assignment"}
+
+
 def test_student_page_preserves_legacy_agenda_and_heatmap_branches() -> None:
     legacy = _run_student_page_scenario(
         """

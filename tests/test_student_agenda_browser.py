@@ -83,6 +83,47 @@ def _scroll_metrics(page: Page, selector: str, index: int = 0) -> dict[str, int]
     )
 
 
+def _focus_outline(page: Page, selector: str, index: int = 0) -> dict[str, object]:
+    region = page.locator(selector).nth(index)
+    region.focus()
+    return region.evaluate(
+        r"""element => {
+            const style = getComputedStyle(element);
+            const channels = Array.from(style.outlineColor.matchAll(/[\d.]+/g), match => Number(match[0]));
+            const box = element.getBoundingClientRect();
+            const parentBox = element.parentElement.getBoundingClientRect();
+            return {
+                style: style.outlineStyle,
+                width: Number.parseFloat(style.outlineWidth),
+                offset: Number.parseFloat(style.outlineOffset),
+                channels,
+                visibleWithinCard: box.left - 5 >= parentBox.left && box.right + 5 <= parentBox.right,
+            };
+        }"""
+    )
+
+
+def test_report_scroll_regions_use_the_existing_visible_focus_treatment(
+    browser_page: Page,
+    preview_url: str,
+) -> None:
+    page = browser_page
+    page.goto(preview_url, wait_until="networkidle")
+
+    selectors = [
+        ('[aria-label="Grade history"]', 0),
+        (".tc-agenda-card .tc-report-card__scroll", 0),
+        (".tc-agenda-card .tc-report-card__scroll", 1),
+    ]
+    for selector, index in selectors:
+        outline = _focus_outline(page, selector, index)
+        assert outline["style"] == "solid"
+        assert outline["width"] >= 3
+        assert outline["offset"] >= 2
+        assert outline["channels"][:3] == [244, 131, 61]
+        assert outline["visibleWithinCard"] is True
+
+
 def test_student_report_cards_are_equal_height_and_scroll_independently(
     browser_page: Page,
     preview_url: str,
