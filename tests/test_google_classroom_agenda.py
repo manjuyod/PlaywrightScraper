@@ -31,6 +31,23 @@ MISSING_HTML = """
 </ul>
 """
 
+MIXED_DUE_HTML = """
+<ul>
+  <li><a href="/c/123/a/stream-10/details">Details</a>
+    <div data-course-id="123" data-stream-item-id="stream-10">
+      <div class="y9bEQb"><p>Practice set</p><p class="tWeh6">Algebra II</p></div>
+      <p class="pOf0gc">Due Aug 18</p>
+    </div>
+  </li>
+  <li><a href="/c/123/a/stream-11/details">Details</a>
+    <div data-course-id="123" data-stream-item-id="stream-11">
+      <div class="y9bEQb"><p>Lab notes</p><p class="tWeh6">Algebra II</p></div>
+      <p class="pOf0gc">Due sometime soon</p>
+    </div>
+  </li>
+</ul>
+"""
+
 
 class FakeControl:
     def __init__(self, page: "FakePage", name: str) -> None:
@@ -90,6 +107,24 @@ def test_parser_normalizes_sanitized_assigned_and_missing_records() -> None:
             "dueTime": None,
             "status": "due",
         },
+    ]
+
+
+def test_parser_omits_only_card_with_unusable_due_text() -> None:
+    """Would fail if one row-level date error aborts the complete document parse."""
+    records = google_classroom._parse_classroom_agenda(
+        MIXED_DUE_HTML, "due", reference=datetime(2026, 8, 13, 12, 0)
+    )
+
+    assert records == [
+        {
+            "sourceId": "google_classroom:stream-10",
+            "course": "Algebra II",
+            "title": "Practice set",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+        }
     ]
 
 

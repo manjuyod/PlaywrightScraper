@@ -45,7 +45,10 @@ def _parse_classroom_agenda(
         if not title or not course or not due or not source_id:
             continue
 
-        due_date, due_time = reconcile_day_time(due, reference=reference)
+        try:
+            due_date, due_time = reconcile_day_time(due, reference=reference)
+        except ValueError:
+            continue
         records.append(
             {
                 "sourceId": f"google_classroom:{source_id}",

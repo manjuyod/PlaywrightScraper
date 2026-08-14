@@ -25,22 +25,62 @@ def _student(student_id: int) -> dict:
 
 
 class FakePage:
-    def __init__(self, number: int) -> None:
+    def __init__(self, number: int, context: "FakeContext") -> None:
         self.number = number
-        self.closed = False
+        self.context = context
+        self.close_calls = 0
+
+    @property
+    def closed(self) -> bool:
+        return self.close_calls > 0
 
     async def close(self) -> None:
-        self.closed = True
+        self.close_calls += 1
 
 
 class FakeContext:
-    def __init__(self) -> None:
+    def __init__(self, browser: "FakeBrowser", number: int) -> None:
+        self.browser = browser
+        self.number = number
         self.pages: list[FakePage] = []
+        self.close_calls = 0
+        self.default_timeout: int | None = None
+        self.default_navigation_timeout: int | None = None
+        self.identity: str | None = None
+
+    def set_default_timeout(self, timeout: int) -> None:
+        self.default_timeout = timeout
+
+    def set_default_navigation_timeout(self, timeout: int) -> None:
+        self.default_navigation_timeout = timeout
 
     async def new_page(self) -> FakePage:
-        page = FakePage(len(self.pages) + 1)
+        page = FakePage(len(self.browser.pages) + 1, self)
         self.pages.append(page)
         return page
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+class FakeBrowser:
+    def __init__(self) -> None:
+        self.contexts: list[FakeContext] = []
+        self._legacy_context: FakeContext | None = None
+
+    @property
+    def pages(self) -> list[FakePage]:
+        return [page for context in self.contexts for page in context.pages]
+
+    async def new_context(self) -> FakeContext:
+        context = FakeContext(self, len(self.contexts) + 1)
+        self.contexts.append(context)
+        return context
+
+    async def new_page(self) -> FakePage:
+        if self._legacy_context is None:
+            self._legacy_context = await self.new_context()
+        return await self._legacy_context.new_page()
 
 
 def test_resolve_agenda_slots_preserves_source_order_over_legacy_portal() -> None:
@@ -108,9 +148,9 @@ def test_two_canvas_slots_use_distinct_pages_and_keep_duplicate_assignments(
     monkeypatch.setattr(agenda, "get_portal", lambda portal: Engine)
     student = _student(7)
     student["alt_login_url"] = "https://district.instructure.com/login"
-    context = FakeContext()
+    browser = FakeBrowser()
 
-    bundle, returned_student = asyncio.run(agenda.fetch_agenda(context, student))
+    bundle, returned_student = asyncio.run(agenda.fetch_agenda(browser, student))
 
     assert returned_student is student
     assert bundle["agenda1"]["weeks"] == bundle["agenda2"]["weeks"]
@@ -137,7 +177,104 @@ def test_two_canvas_slots_use_distinct_pages_and_keep_duplicate_assignments(
         {"student_name": "Student 7"},
         {"student_name": "Student 7"},
     ]
-    assert all(page.closed for page in context.pages)
+    assert all(page.close_calls == 1 for page in browser.pages)
+
+
+def test_concurrent_same_origin_slots_use_isolated_contexts(monkeypatch) -> None:
+    """Would fail if same-origin slot logins can overwrite shared context state."""
+    ready = asyncio.Event()
+    arrivals: list[str] = []
+    observed: dict[str, str | None] = {}
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, page, username, *_args, **_kwargs):
+            self.page = page
+            self.username = username
+
+        async def login(self, first_name=None):
+            self.page.context.identity = self.username
+            arrivals.append(self.username)
+            if len(arrivals) == 2:
+                ready.set()
+            await ready.wait()
+
+        async def get_agenda(self):
+            observed[self.username] = self.page.context.identity
+            return []
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    student = _student(7)
+    student["alt_login_url"] = "https://canvas.example/alternate-login"
+    browser = FakeBrowser()
+
+    asyncio.run(agenda.fetch_agenda(browser, student))
+
+    assert observed == {"user-7": "user-7", "alt-user-7": "alt-user-7"}
+    assert len(browser.contexts) == 2
+    assert all(context.default_timeout == 5_000 for context in browser.contexts)
+    assert all(
+        context.default_navigation_timeout == 5_000
+        for context in browser.contexts
+    )
+    assert all(context.close_calls == 1 for context in browser.contexts)
+    assert all(page.close_calls == 1 for page in browser.pages)
+
+
+def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> None:
+    """Would fail if concurrent students share cookies or local-storage identity."""
+    ready = asyncio.Event()
+    arrivals: list[str] = []
+    observed: dict[str, str | None] = {}
+    posts: list[dict] = []
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, page, username, *_args, **_kwargs):
+            self.page = page
+            self.username = username
+
+        async def login(self, first_name=None):
+            self.page.context.identity = self.username
+            arrivals.append(self.username)
+            if len(arrivals) == 2:
+                ready.set()
+            await ready.wait()
+
+        async def get_agenda(self):
+            observed[self.username] = self.page.context.identity
+            return []
+
+    class Client:
+        def post_result(self, **kwargs):
+            posts.append(kwargs)
+            return {"applied": True, "duplicate": False}
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    students = [_student(7), _student(8)]
+    for student in students:
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+    browser = FakeBrowser()
+
+    failure = asyncio.run(
+        agenda._collect_and_post_agendas(
+            Client(),
+            {"job_id": "job", "lease_token": "lease"},
+            browser,
+            students,
+            _new_progress(2),
+            asyncio.Event(),
+        )
+    )
+
+    assert failure is None
+    assert len(posts) == 2
+    assert observed == {"user-7": "user-7", "user-8": "user-8"}
+    assert len(browser.contexts) == 2
+    assert all(context.close_calls == 1 for context in browser.contexts)
+    assert all(page.close_calls == 1 for page in browser.pages)
 
 
 @pytest.mark.parametrize(
@@ -187,7 +324,7 @@ def test_capable_portals_dispatch_from_either_slot(
     else:
         student.update(alt_login_url=url, alt_id="alt-user", alt_password="alt-pass")
 
-    bundle, _ = asyncio.run(agenda.fetch_agenda(FakeContext(), student))
+    bundle, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), student))
 
     assert constructed == [portal]
     assert bundle[f"agenda{slot_number}"] == {"portal": portal, "weeks": {}}
@@ -199,15 +336,16 @@ def test_unsupported_and_unidentified_slots_remain_in_empty_bundle() -> None:
         login_url="https://district.powerschool.example/login",
         alt_login_url="https://unknown.example/login",
     )
-    context = FakeContext()
+    browser = FakeBrowser()
 
-    bundle, _ = asyncio.run(agenda.fetch_agenda(context, student))
+    bundle, _ = asyncio.run(agenda.fetch_agenda(browser, student))
 
     assert bundle == {
         "agenda1": {"portal": "powerschool", "weeks": {}},
         "agenda2": {"portal": None, "weeks": {}},
     }
-    assert context.pages == []
+    assert browser.contexts == []
+    assert browser.pages == []
 
 
 def test_no_worker_slots_post_exactly_one_empty_success() -> None:
@@ -223,7 +361,7 @@ def test_no_worker_slots_post_exactly_one_empty_success() -> None:
         "agenda1": {"portal": "powerschool", "weeks": {}},
         "agenda2": {"portal": None, "weeks": {}},
     }
-    context = FakeContext()
+    browser = FakeBrowser()
 
     class Client:
         def post_result(self, **kwargs):
@@ -235,7 +373,7 @@ def test_no_worker_slots_post_exactly_one_empty_success() -> None:
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
-            context,
+            browser,
             [student],
             progress,
             asyncio.Event(),
@@ -248,7 +386,8 @@ def test_no_worker_slots_post_exactly_one_empty_success() -> None:
         "kind": "agenda_success",
         "weekly_agenda": empty_bundle,
     }
-    assert context.pages == []
+    assert browser.contexts == []
+    assert browser.pages == []
     assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
 
 
@@ -305,13 +444,13 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
             "https://parentvue.example/Login_Parent_PXP.aspx?value=sentinel-query"
         ),
     )
-    context = FakeContext()
+    browser = FakeBrowser()
 
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
-            context,
+            browser,
             [student],
             _new_progress(1),
             asyncio.Event(),
@@ -325,10 +464,123 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
         "code": "agenda2_parentvue_failed",
         "passwordgood": None,
     }
-    assert len(context.pages) == 2
-    assert all(page.closed for page in context.pages)
+    assert len(browser.pages) == 2
+    assert all(page.close_calls == 1 for page in browser.pages)
+    assert len(browser.contexts) == 2
+    assert all(context.close_calls == 1 for context in browser.contexts)
     exposed = repr(agenda.resolve_agenda_slots(student)) + str(posts) + caplog.text
     assert all(sentinel not in exposed for sentinel in sentinels)
+
+
+def test_neon_failure_closes_started_slot_contexts_and_pages_once(monkeypatch) -> None:
+    """Would fail if database cancellation leaks a started slot session."""
+    pending_started = asyncio.Event()
+    pending_cancelled = asyncio.Event()
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, _page, username, *_args, **_kwargs):
+            self.username = username
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            if self.username == "user-7":
+                await pending_started.wait()
+                return []
+            pending_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                pending_cancelled.set()
+                raise
+
+    class Client:
+        def post_result(self, **_kwargs):
+            raise GradeDbUnavailable("safe")
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    students = [_student(7), _student(8)]
+    for student in students:
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+    browser = FakeBrowser()
+
+    failure = asyncio.run(
+        agenda._collect_and_post_agendas(
+            Client(),
+            {"job_id": "job", "lease_token": "lease"},
+            browser,
+            students,
+            _new_progress(2),
+            asyncio.Event(),
+        )
+    )
+
+    assert failure == "neon_unavailable"
+    assert pending_cancelled.is_set()
+    assert len(browser.contexts) == 2
+    assert all(context.close_calls == 1 for context in browser.contexts)
+    assert all(page.close_calls == 1 for page in browser.pages)
+
+
+def test_lease_failure_closes_started_slot_context_and_page_once(monkeypatch) -> None:
+    """Would fail if lease cancellation leaks a started slot session."""
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    async def scenario(browser: FakeBrowser) -> str | None:
+        lease_failed = asyncio.Event()
+
+        async def fail_lease() -> None:
+            await started.wait()
+            lease_failed.set()
+
+        lease_task = asyncio.create_task(fail_lease())
+        result = await agenda._collect_and_post_agendas(
+            object(),
+            {"job_id": "job", "lease_token": "lease"},
+            browser,
+            [
+                {
+                    **_student(7),
+                    "alt_login_url": None,
+                    "alt_id": None,
+                    "alt_password": None,
+                }
+            ],
+            _new_progress(1),
+            lease_failed,
+        )
+        await lease_task
+        return result
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    browser = FakeBrowser()
+
+    assert asyncio.run(scenario(browser)) == "lease_renewal_failed"
+    assert cancelled.is_set()
+    assert len(browser.contexts) == 1
+    assert browser.contexts[0].close_calls == 1
+    assert browser.pages[0].close_calls == 1
 
 
 def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:

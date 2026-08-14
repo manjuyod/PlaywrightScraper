@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
 from dotenv import load_dotenv
-from playwright.async_api import BrowserContext, async_playwright
+from playwright.async_api import Browser, async_playwright
 
 from scraper.agenda_contract import (
     AgendaBundle,
@@ -78,14 +78,18 @@ def resolve_agenda_slots(
 
 
 async def _collect_slot(
-    ctx: BrowserContext,
+    browser: Browser,
     student: Mapping[str, object],
     slot: AgendaSlot,
 ) -> AgendaWeeks:
     if not slot.portal or not slot.login_url or not slot.username or not slot.password:
         raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
-    page = await ctx.new_page()
+    context = await browser.new_context()
+    page = None
     try:
+        context.set_default_timeout(5_000)
+        context.set_default_navigation_timeout(5_000)
+        page = await context.new_page()
         engine = get_portal(slot.portal)
         scraper = engine(
             page,
@@ -98,11 +102,15 @@ async def _collect_slot(
         records = await scraper.get_agenda()
         return normalize_agenda(records)
     finally:
-        await page.close()
+        try:
+            if page is not None:
+                await page.close()
+        finally:
+            await context.close()
 
 
 async def fetch_agenda(
-    ctx: BrowserContext,
+    browser: Browser,
     student: dict[str, Any],
 ) -> tuple[AgendaBundle, dict[str, Any]]:
     slots = resolve_agenda_slots(student)
@@ -119,7 +127,9 @@ async def fetch_agenda(
         engine = get_portal(slot.portal)
         if not engine.agenda_capable:
             continue
-        workers.append((slot, asyncio.create_task(_collect_slot(ctx, student, slot))))
+        workers.append(
+            (slot, asyncio.create_task(_collect_slot(browser, student, slot)))
+        )
 
     results = await asyncio.gather(
         *(task for _, task in workers),
@@ -144,7 +154,7 @@ async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
 async def _collect_and_post_agendas(
     client: GradeDbClient,
     session: Mapping[str, Any],
-    context: BrowserContext,
+    browser: Browser,
     students: list[dict[str, Any]],
     progress: dict[str, int],
     lease_failed: asyncio.Event,
@@ -153,7 +163,7 @@ async def _collect_and_post_agendas(
     if lease_failed.is_set():
         return "lease_renewal_failed"
     tasks = {
-        asyncio.create_task(fetch_agenda(context, student)): student
+        asyncio.create_task(fetch_agenda(browser, student)): student
         for student in students
     }
     pending = set(tasks)
@@ -254,20 +264,16 @@ async def main(
                 headless=False,
                 args=["--disable-blink-features=AutomationControlled"],
             )
-            context = await browser.new_context()
-            context.set_default_timeout(5_000)
-            context.set_default_navigation_timeout(5_000)
             try:
                 failure_code = await _collect_and_post_agendas(
                     client,
                     session,
-                    context,
+                    browser,
                     students,
                     progress,
                     lease_failed,
                 )
             finally:
-                await context.close()
                 await browser.close()
     except Exception:
         failure_code = failure_code or "agenda_runner_failed"
