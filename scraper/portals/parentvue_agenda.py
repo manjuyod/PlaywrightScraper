@@ -78,17 +78,37 @@ def _is_missing(row: Tag) -> bool:
     if isinstance(status, str) and status.strip().casefold() == "missing":
         return True
     return any(
-        (_text(marker) or "").casefold() == "missing"
+        not _is_hidden(marker) and (_text(marker) or "").casefold() == "missing"
         for marker in row.select(".status, [data-status]")
     )
 
 
+def _is_hidden(element: Tag) -> bool:
+    if element.has_attr("hidden") or element.get("aria-hidden") == "true":
+        return True
+    style = element.get("style")
+    if not isinstance(style, str):
+        return False
+    declarations = {
+        name.strip().casefold(): value.strip().casefold()
+        for declaration in style.split(";") if ":" in declaration
+        for name, value in [declaration.split(":", 1)]
+    }
+    return declarations.get("display") == "none" or declarations.get("visibility") == "hidden"
+
+
 def _assignment_rows(soup: BeautifulSoup) -> list[Tag]:
-    rows = list(soup.select(".assignment-row, .gb-assignment-row"))
-    rows.extend(
+    candidates = list(soup.select(".assignment-row, .gb-assignment-row"))
+    candidates.extend(
         row for row in soup.select("tr")
         if row.select_one('.assignment-title, .assignment-name, [data-label="Assignment"]')
     )
+    rows: list[Tag] = []
+    seen: set[int] = set()
+    for row in candidates:
+        if id(row) not in seen:
+            rows.append(row)
+            seen.add(id(row))
     return rows
 
 

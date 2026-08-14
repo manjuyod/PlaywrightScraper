@@ -5,7 +5,7 @@ from pathlib import Path
 
 from scraper.agenda_contract import normalize_agenda
 from scraper.portals.parentvue import ParentVUE
-from scraper.portals.parentvue_agenda import parse_parentvue_agenda
+from scraper.portals.parentvue_agenda import ParentVueAgendaError, parse_parentvue_agenda
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "parentvue_gradebook_agenda.html"
@@ -25,12 +25,36 @@ def test_parses_missing_and_upcoming_gradebook_assignments() -> None:
             "sourceId": "parentvue:pv-41",
         },
         {
+            "course": "Algebra II",
+            "title": "Alternate title",
+            "dueDate": "2026-08-12",
+            "dueTime": None,
+            "status": "missing",
+            "sourceId": "parentvue:pv-43",
+        },
+        {
             "course": "English 11",
             "title": "Reading response",
             "dueDate": "2026-08-16",
             "dueTime": "23:59",
             "status": "due",
             "sourceId": "parentvue:pv-52",
+        },
+        {
+            "course": "English 11",
+            "title": "Hidden marker stays due",
+            "dueDate": "2026-08-17",
+            "dueTime": None,
+            "status": "due",
+            "sourceId": "parentvue:pv-53",
+        },
+        {
+            "course": "Biology",
+            "title": "Cell lab",
+            "dueDate": "2026-08-18",
+            "dueTime": "07:05",
+            "status": "missing",
+            "sourceId": "parentvue:pv-61",
         },
     ]
 
@@ -40,6 +64,28 @@ def test_empty_recognized_upcoming_section_returns_no_records() -> None:
     assert parse_parentvue_agenda(
         '<section><h2>Upcoming Assignments</h2></section>'
     ) == []
+
+
+def test_raises_stable_error_for_unrecognizable_document() -> None:
+    """Would fail if unrelated HTML is accepted as a Grade Book document."""
+    try:
+        parse_parentvue_agenda("<main><p>Signed in</p></main>")
+    except ParentVueAgendaError as error:
+        assert str(error) == "parentvue_agenda_parse_failed"
+    else:
+        raise AssertionError("unrecognizable document did not raise")
+
+
+def test_hidden_missing_markers_do_not_override_upcoming_status() -> None:
+    """Would fail if hidden Missing labels make upcoming work appear missing."""
+    for hidden_attribute in ('hidden', 'aria-hidden="true"', 'style="display: none"', 'style="visibility:hidden"'):
+        html = f'''<section><h2>Upcoming Assignments</h2>
+          <div class="assignment-row" data-course-title="History">
+            <span class="assignment-title">Primary source</span>
+            <time datetime="2026-08-19">08/19/2026</time>
+            <span class="status" {hidden_attribute}>Missing</span>
+          </div></section>'''
+        assert parse_parentvue_agenda(html)[0]["status"] == "due"
 
 
 def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming() -> None:
@@ -54,9 +100,9 @@ def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming(
         "sourceId": "parentvue:pv-41",
     })
 
-    assert normalize_agenda(records)["2026-08-10"]["Algebra II"] == {
-        "missing": [{"title": "Linear review", "dueDate": "2026-08-11", "dueTime": None}],
-        "due": [],
+    assert normalize_agenda(records)["2026-08-10"]["Algebra II"]["due"] == []
+    assert normalize_agenda(records)["2026-08-10"]["Algebra II"]["missing"][0] == {
+        "title": "Linear review", "dueDate": "2026-08-11", "dueTime": None
     }
 
 
