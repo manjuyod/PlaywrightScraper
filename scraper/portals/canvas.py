@@ -5,15 +5,18 @@ import re
 from time import monotonic
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Literal, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 from urllib.parse import urlparse, urljoin
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import TimeoutError
 
-from .base import GradeMap, AgendaItem, LoginError, PortalEngine, PlaywrightTimeout
-from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
+from scraper.agenda_contract import AgendaRecord
+
+from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
+from .canvas_agenda import collect_canvas_agenda
+from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow
 
 
 # --------------------- utilities ---------------------
@@ -102,6 +105,7 @@ class CanvasEngine(PortalEngine):
 
     portal_key = "canvas"
     url_patterns = ("instructure.com", "canvas")
+    agenda_capable = True
 
     # ----------------- helpers -----------------
 
@@ -669,74 +673,5 @@ class CanvasEngine(PortalEngine):
 
         return out
 
-    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
-        await self.page.wait_for_load_state("domcontentloaded")
-
-        agenda: dict[str, list[AgendaItem]] = {}
-        await self.page.locator('[data-testid="dashboard-options-button"]').click()
-        await self.page.locator('[data-testid="list-view-menu-item"]').click()
-        await self.page.wait_for_timeout(1500)
-        soup = await self.get_soup()
-
-        try:
-            all_days = soup.find_all("div", attrs={"data-testid": "day"})
-
-            today_passed = False
-
-            for i, day_block in enumerate(all_days):
-                if i > 7:
-                    break
-                assert isinstance(day_block, Tag)
-                today_reached = today_passed
-                date_elem = day_block.select_one('[data-testid="today-date"]')
-
-                if not today_passed:
-                    if date_elem is not None:
-                        today_reached = True
-                    else:
-                        continue
-
-                assert today_reached
-
-                if today_passed:
-                    date_elem = day_block.select_one('[data-testid="not-today"]')
-                else:
-                    today_passed = True
-
-                assert date_elem is not None
-                date_text = date_elem.get_text(strip=True)
-                day, _ = reconcile_day_time(date_text, reference=datetime.now())
-                due_date = day.strftime("%m/%d/%Y")
-
-                assignments: list[AgendaItem] = []
-                class_groups = day_block.select("div.planner-grouping")
-
-                for course in class_groups:
-                    title_elem = course.select_one("span.Grouping-styles__title")
-                    class_title = title_elem.get_text(strip=True) if title_elem else None
-
-                    if class_title is None:
-                        continue
-
-                    assignment_items = course.select('div[data-testid="planner-item-raw"]')
-
-                    for assignment in assignment_items:
-                        a = assignment.select_one("a")
-                        if not a:
-                            continue
-
-                        title_span = a.select_one('span[aria-hidden="true"]')
-                        assignment_title = title_span.get_text(strip=True) if title_span else "Unknown Assignment"
-
-                        due_time_elem = assignment.select_one(".PlannerItem-styles__due span[aria-hidden='true']")
-                        due_time = due_time_elem.get_text(strip=True) if due_time_elem else None
-
-                        assignments.append((class_title, assignment_title, due_time))
-
-                if len(assignments) > 0:
-                    agenda[due_date] = assignments
-
-        except Exception:
-            pass
-        finally:
-            return agenda
+    async def get_agenda(self) -> list[AgendaRecord]:
+        return await collect_canvas_agenda(self.page, _origin(self.login_url))
