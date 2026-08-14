@@ -1009,17 +1009,21 @@ git commit -m "feat: project portal slot agendas"
 - Modify: `ui/static/react-dashboard.js`
 - Modify: `ui/static/react-dashboard.css`
 - Modify: `tests/test_read_only_dashboard_frontend.py`
+- Create: `tests/fixtures/student_agenda_page_data.json`
+- Create: `tests/support/student_agenda_preview.py`
+- Create: `tests/test_student_agenda_browser.py`
 
 **Interfaces:**
 - Consumes: `student.agendaSlots`, an ordered two-element presentation array, or legacy `student.agendaItems`.
 - Produces: `AgendaCard({ slot })`, `AgendaClass({ classGroup })`, and `LegacyAgendaCard({ items })`.
+- Produces: a localhost-only synthetic preview using the real template/assets and a Playwright behavior test that never reads CRM or Neon.
 - Preserves: `GradeHistory({ history })`, `GradeHeatmap({ history })`, the Report/Heatmap navigation, and existing Card/Badge/scrollbar assets.
 
 - [ ] **Step 1: Run impact analysis for the student React page**
 
 Run GitNexus upstream impact for `StudentPage` and `GradeHistory` in `ui/static/react-dashboard.js`. Report the risk/process results. If either is HIGH or CRITICAL, warn before editing.
 
-- [ ] **Step 2: Write failing component-tree and CSS contract tests**
+- [ ] **Step 2: Write failing component-tree and browser-behavior tests**
 
 Extend the existing Node harness injection to expose `StudentPage`, `AgendaCard`, and `AgendaClass`. Build a synthetic two-slot payload and recursively inspect the returned React element tree. Assert:
 
@@ -1032,36 +1036,19 @@ Extend the existing Node harness injection to expose `StudentPage`, `AgendaCard`
 - legacy `agendaItems` still render when `agendaSlots` is empty;
 - the Heatmap branch still renders `GradeHeatmap` unchanged.
 
-Add CSS assertions for these exact declarations:
+Create `student_agenda_page_data.json` with a fictional student, seven current classes, at least six grade-history weeks, Agenda 1 Canvas records with both statuses, and Agenda 2 ParentVUE records with more rows than fit in the bounded card. Do not use the authorized student's name, IDs, credentials, portal URLs, or assignment content.
 
-```css
-.tc-grade-row {
-    display: grid;
-    gap: 24px;
-}
+Create `tests/support/student_agenda_preview.py` as a standalone Flask app that loads only the synthetic page-data JSON and serves the real `ui/templates/dashboard.html`, `ui/static/react-dashboard.js`, and `ui/static/react-dashboard.css`. It must bind only `127.0.0.1`, accept an explicit `--port`, never import `ui.routes`, never create a database engine/connection, and never write a file.
 
-.tc-grade-card {
-    height: 26rem;
-}
+Create `tests/test_student_agenda_browser.py` using the real preview app and Playwright. At a 1440×1000 viewport, assert from bounding boxes and DOM properties that:
 
-.tc-agenda-card {
-    height: 32rem;
-}
+- Current Grades and Grade History have equal rendered heights and aligned top/bottom edges;
+- Grade History has `scrollHeight > clientHeight`, accepts a changed `scrollTop`, and its card heading does not move;
+- Agenda 1 and Agenda 2 have equal rendered heights and aligned top/bottom edges;
+- both agenda content regions have `scrollHeight > clientHeight`, and scrolling one does not change the other's `scrollTop`;
+- agenda headings and legends do not move when their content regions scroll.
 
-.tc-report-card {
-    display: flex;
-    min-height: 0;
-    flex-direction: column;
-}
-
-.tc-report-card__scroll {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-```
-
-Also assert the desktop media query creates two columns and the mobile rule uses one column without overriding either bounded height.
+At a 720×1000 viewport, assert the grade cards and agenda cards have the same left coordinate within one pixel, strictly increasing top coordinates, and the same bounded heights they had at desktop. Use real click and keyboard operations to open/close native class disclosures, assert the visible `M`/`DUE` text and accessible status labels, and switch Report → Heatmap → Report without losing the layout.
 
 - [ ] **Step 3: Run frontend tests and verify the old layout fails**
 
@@ -1069,10 +1056,10 @@ Run:
 
 ```bash
 node --check ui/static/react-dashboard.js
-uv run pytest tests/test_read_only_dashboard_frontend.py -q
+uv run pytest tests/test_read_only_dashboard_frontend.py tests/test_student_agenda_browser.py -q
 ```
 
-Expected: JavaScript syntax PASS before edits; pytest FAIL because the two-card structure and CSS contracts are absent.
+Expected: JavaScript syntax PASS before edits; pytest FAIL because the two-card structure, bounded scrolling, and responsive behavior are absent.
 
 - [ ] **Step 4: Implement reusable agenda components**
 
@@ -1207,7 +1194,7 @@ Run:
 
 ```bash
 node --check ui/static/react-dashboard.js
-uv run pytest tests/test_read_only_dashboard_frontend.py tests/test_template_javascript.py -q
+uv run pytest tests/test_read_only_dashboard_frontend.py tests/test_student_agenda_browser.py tests/test_template_javascript.py -q
 ```
 
 Expected: PASS.
@@ -1217,48 +1204,27 @@ Expected: PASS.
 Run GitNexus change detection, verify only StudentPage/GradeHistory presentation paths are affected and Heatmap remains untouched, then run:
 
 ```bash
-git add ui/static/react-dashboard.js ui/static/react-dashboard.css tests/test_read_only_dashboard_frontend.py
+git add ui/static/react-dashboard.js ui/static/react-dashboard.css tests/test_read_only_dashboard_frontend.py tests/test_student_agenda_browser.py tests/fixtures/student_agenda_page_data.json tests/support/student_agenda_preview.py
 git commit -m "feat: render dual portal agenda cards"
 ```
 
 ---
 
-### Task 8: Synthetic local Playwright preview and workflow documentation
+### Task 8: Agenda workflow documentation
 
 **Files:**
-- Create: `tests/fixtures/student_agenda_page_data.json`
-- Create: `tests/support/student_agenda_preview.py`
 - Modify: `README.md`
 - Modify: `scraper_internal_guide.md`
 
 **Interfaces:**
-- Produces: a localhost-only synthetic student report server that uses the real Flask template, React asset, and CSS without reading CRM or Neon.
+- Consumes: the synthetic student report preview created in Task 7.
 - Documents: one agenda run always collects both statuses for both capable credential slots.
 
-- [ ] **Step 1: Create a non-production fixture preview**
+- [ ] **Step 1: Update workflow documentation**
 
-Create `student_agenda_page_data.json` with a fictional student, seven current classes, at least six grade-history weeks, Agenda 1 Canvas records with both statuses, and Agenda 2 ParentVUE records with more rows than fit in 32rem. Do not use the authorized student's name, IDs, credentials, portal URLs, or assignment content.
+Document the stored `agenda1`/`agenda2` contract, slot identity, blank-slot semantics, supported collectors, atomic failure behavior, and the synthetic preview command `uv run python tests/support/student_agenda_preview.py --port 8765`. Remove documentation that suggests `--target upcoming` or `--target missing`; the agenda CLI now always collects both.
 
-Create `tests/support/student_agenda_preview.py` that:
-
-1. loads only the synthetic JSON fixture;
-2. creates a `DashboardStudent`/page payload in memory;
-3. monkeypatches `ui.routes.dashboard.load_student` and `load_franchise_name` before serving and never calls `get_engine()`, `read_neon_states()`, or `read_crm_students()`;
-4. binds only `127.0.0.1` on an explicitly supplied port;
-5. never creates a database engine, opens a database connection, or writes a file;
-6. terminates cleanly on Ctrl+C.
-
-The invocation must be:
-
-```bash
-uv run python tests/support/student_agenda_preview.py --port 8765
-```
-
-- [ ] **Step 2: Update workflow documentation**
-
-Document the stored `agenda1`/`agenda2` contract, slot identity, blank-slot semantics, supported collectors, atomic failure behavior, and fixture preview command. Remove documentation that suggests `--target upcoming` or `--target missing`; the agenda CLI now always collects both.
-
-- [ ] **Step 3: Run documentation and read-only safety checks**
+- [ ] **Step 2: Run documentation and read-only safety checks**
 
 Run:
 
@@ -1269,12 +1235,12 @@ rg -n "storage_state|--target|p1password|p2password|access_token|refresh_token" 
 
 Expected: pytest PASS; the search returns no fixture secret/token/storage-state usage and no obsolete agenda target documentation. Mentions that explicitly explain forbidden fields in security documentation are acceptable only when they contain no values.
 
-- [ ] **Step 4: Detect changes and commit preview/docs**
+- [ ] **Step 3: Detect changes and commit the documentation**
 
 Run GitNexus change detection, verify no production execution flow is changed by the fixture support and docs, then run:
 
 ```bash
-git add tests/fixtures/student_agenda_page_data.json tests/support/student_agenda_preview.py README.md scraper_internal_guide.md
+git add README.md scraper_internal_guide.md
 git commit -m "docs: explain portal slot agendas"
 ```
 
@@ -1296,7 +1262,7 @@ Run:
 ```bash
 uv run ruff check scraper/agenda.py scraper/agenda_contract.py scraper/portals/base.py scraper/portals/canvas.py scraper/portals/canvas_agenda.py scraper/portals/parentvue.py scraper/portals/parentvue_agenda.py scraper/portals/google_classroom.py ui/routes.py tests
 node --check ui/static/react-dashboard.js
-uv run pytest tests/test_agenda_contract.py tests/test_canvas_agenda.py tests/test_parentvue_agenda.py tests/test_google_classroom_agenda.py tests/test_agenda_grade_db_boundary.py tests/test_runner_grade_db_boundary.py tests/test_dashboard_data.py tests/test_read_only_dashboard_routes.py tests/test_read_only_dashboard_frontend.py tests/test_template_javascript.py tests/test_secret_redaction.py -q
+uv run pytest tests/test_agenda_contract.py tests/test_canvas_agenda.py tests/test_parentvue_agenda.py tests/test_google_classroom_agenda.py tests/test_agenda_grade_db_boundary.py tests/test_runner_grade_db_boundary.py tests/test_dashboard_data.py tests/test_read_only_dashboard_routes.py tests/test_read_only_dashboard_frontend.py tests/test_student_agenda_browser.py tests/test_template_javascript.py tests/test_secret_redaction.py -q
 ```
 
 Expected: all commands exit 0.
