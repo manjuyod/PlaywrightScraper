@@ -65,6 +65,63 @@ const hooks = window.__tcSortingTestHooks;
     return json.loads(completed.stdout)
 
 
+def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") -> object:
+    javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
+        encoding="utf-8"
+    )
+    marker = "    function App({ data }) {"
+    assert marker in javascript
+    test_hooks = """
+    window.__tcStudentPageTestHooks = {
+        StudentPage: typeof StudentPage === "function" ? StudentPage : null,
+        AgendaCard: typeof AgendaCard === "function" ? AgendaCard : null,
+        AgendaClass: typeof AgendaClass === "function" ? AgendaClass : null,
+    };
+    return;
+
+"""
+    instrumented = javascript.replace(marker, test_hooks + marker, 1)
+    harness = f"""
+global.window = {{
+    React: {{
+        useEffect: () => undefined,
+        useMemo: (factory) => factory(),
+        useState: (initial) => [initial, () => undefined],
+        createElement: (type, props, ...children) => {{
+            const componentProps = {{
+                ...(props || {{}}),
+                children: children.length <= 1 ? children[0] : children,
+            }};
+            if (typeof type === "function") {{
+                return type(componentProps);
+            }}
+            return {{ type, props: props || {{}}, children }};
+        }},
+    }},
+    ReactDOM: {{}},
+    location: {{ hash: {json.dumps(hash_value)} }},
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+}};
+global.document = {{
+    getElementById: (id) => (id === "tc-react-root" ? {{}} : null),
+}};
+eval({json.dumps(instrumented)});
+const hooks = window.__tcStudentPageTestHooks;
+{scenario}
+"""
+    completed = subprocess.run(
+        ["node", "-"],
+        input=harness,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout)
+
+
 def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
@@ -90,6 +147,190 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
         "edit_student",
     ):
         assert retired not in javascript
+
+
+def test_student_page_renders_two_ordered_portal_agenda_cards() -> None:
+    result = _run_student_page_scenario(
+        """
+if (!hooks.StudentPage || !hooks.AgendaCard || !hooks.AgendaClass) {
+    throw new Error("portal agenda components are not implemented");
+}
+const data = {
+    backUrl: "#back",
+    logoUrl: "/static/imgs/tc_logo.webp",
+    student: {
+        id: 77,
+        firstName: "Fictional",
+        lastName: "Learner",
+        gradeLevel: 11,
+        portalUrl: null,
+        status: "synced",
+        updatedAt: null,
+        gradesSnapshot: [],
+        grades: {},
+        agendaItems: [],
+        agendaSlots: [
+            { number: 1, portal: "canvas", portalLabel: "Canvas", weeks: [] },
+            {
+                number: 2,
+                portal: "parentvue",
+                portalLabel: "ParentVUE",
+                weeks: [
+                    {
+                        weekStart: "2026-08-10",
+                        label: "Week of Aug 10",
+                        classes: [
+                            {
+                                name: "Fictional Seminar",
+                                count: 2,
+                                assignments: [
+                                    { status: "missing", title: "Reflection draft", dueDate: "2026-08-11", dueDisplay: "Aug 11" },
+                                    { status: "due", title: "Reading notes", dueDate: "2026-08-16", dueDisplay: "Aug 16 · 23:59" },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+};
+const tree = hooks.StudentPage({ data });
+function collect(node, predicate, found = []) {
+    if (node === null || node === undefined || node === false) return found;
+    if (Array.isArray(node)) {
+        for (const child of node) collect(child, predicate, found);
+        return found;
+    }
+    if (typeof node === "object") {
+        if (predicate(node)) found.push(node);
+        for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+            collect(child, predicate, found);
+        }
+    }
+    return found;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+const agendaHeadings = collect(tree, (node) => node.type === "h2")
+    .map(textOf)
+    .filter((text) => text.startsWith("Agenda"));
+const scrollRegions = collect(tree, (node) => String(node.props?.["aria-label"] || "").endsWith(" assignments"));
+const details = collect(tree, (node) => node.type === "details");
+const summaries = collect(tree, (node) => node.type === "summary");
+const statusMarkers = collect(tree, (node) => node.props?.["aria-label"] === "Missing assignment" || node.props?.["aria-label"] === "Upcoming assignment");
+console.log(JSON.stringify({
+    agendaHeadings,
+    scrollRegions: scrollRegions.map((node) => ({ label: node.props["aria-label"], tabIndex: node.props.tabIndex, text: textOf(node) })),
+    detailCount: details.length,
+    summaryText: summaries.map(textOf),
+    statusMarkers: statusMarkers.map((node) => ({ label: node.props["aria-label"], text: textOf(node) })),
+    pageText: textOf(tree),
+}));
+"""
+    )
+
+    assert result["agendaHeadings"] == [
+        "Agenda 1 · Canvas",
+        "Agenda 2 · ParentVUE",
+    ]
+    assert result["scrollRegions"] == [
+        {"label": "Agenda 1 · Canvas assignments", "tabIndex": 0, "text": ""},
+        {
+            "label": "Agenda 2 · ParentVUE assignments",
+            "tabIndex": 0,
+            "text": (
+                "Week of Aug 10Fictional Seminar2 assignments"
+                "MReflection draftAug 11DUEReading notesAug 16 · 23:59"
+            ),
+        },
+    ]
+    assert result["detailCount"] == 1
+    assert result["summaryText"] == ["Fictional Seminar2 assignments"]
+    assert result["statusMarkers"] == [
+        {"label": "Missing assignment", "text": "M"},
+        {"label": "Upcoming assignment", "text": "DUE"},
+    ]
+    assert "No agenda" not in result["pageText"]
+    assert "scrape" not in result["pageText"].lower()
+
+
+def test_student_page_preserves_legacy_agenda_and_heatmap_branches() -> None:
+    legacy = _run_student_page_scenario(
+        """
+const tree = hooks.StudentPage({ data: {
+    backUrl: "#back",
+    logoUrl: "/static/imgs/tc_logo.webp",
+    student: {
+        id: 78,
+        firstName: "Legacy",
+        lastName: "Learner",
+        gradeLevel: 10,
+        portalUrl: null,
+        status: "synced",
+        updatedAt: null,
+        gradesSnapshot: [],
+        grades: {},
+        agendaSlots: [],
+        agendaItems: [{ dueDate: "2026-08-14", course: "Fictional Studies", title: "Archive response" }],
+    },
+} });
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+console.log(JSON.stringify({ text: textOf(tree) }));
+"""
+    )
+    heatmap = _run_student_page_scenario(
+        """
+const tree = hooks.StudentPage({ data: {
+    backUrl: "#back",
+    logoUrl: "/static/imgs/tc_logo.webp",
+    student: {
+        id: 79,
+        firstName: "Heatmap",
+        lastName: "Learner",
+        gradeLevel: 9,
+        portalUrl: null,
+        status: "synced",
+        updatedAt: null,
+        gradesSnapshot: [],
+        grades: { "2026-08-10": { "Fictional Studies": 91 } },
+        agendaSlots: [],
+        agendaItems: [],
+    },
+} });
+function collect(node, type, found = []) {
+    if (!node || typeof node !== "object") return found;
+    if (Array.isArray(node)) {
+        for (const child of node) collect(child, type, found);
+        return found;
+    }
+    if (node.type === type) found.push(node);
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) collect(child, type, found);
+    return found;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+console.log(JSON.stringify({ headings: collect(tree, "h2").map(textOf), tables: collect(tree, "table").length }));
+""",
+        hash_value="#heatmap",
+    )
+
+    assert "Agenda2026-08-14Archive responseFictional Studies" in legacy["text"]
+    assert legacy["text"].count("Agenda") == 1
+    assert heatmap == {"headings": ["Grade Heatmap"], "tables": 1}
 
 
 def test_franchise_and_student_headers_omit_overview_actions() -> None:

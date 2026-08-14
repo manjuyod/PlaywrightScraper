@@ -803,6 +803,87 @@ summary:focus-visible {
     border-radius: 999px;
 }
 
+.tc-grade-row,
+.tc-agenda-row {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.tc-report-card {
+    display: flex;
+    min-width: 0;
+    height: 430px;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tc-report-card__scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: rgba(68, 114, 196, 0.55) transparent;
+}
+
+.tc-agenda-class {
+    min-width: 0;
+    background: #ffffff;
+}
+
+.tc-agenda-class[open] {
+    border-color: rgba(68, 114, 196, 0.42);
+    box-shadow: var(--tc-shadow-soft);
+}
+
+.tc-agenda-class summary {
+    min-width: 0;
+}
+
+.tc-agenda-assignment {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: 0.5rem;
+    background: #f8fafc;
+    padding: 0.625rem 0.75rem;
+    color: var(--tc-text);
+    font-size: 0.875rem;
+}
+
+.tc-agenda-marker {
+    display: inline-flex;
+    min-width: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    padding: 0.125rem 0.35rem;
+    font-family: "Fira Code", Consolas, monospace;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1rem;
+}
+
+.tc-agenda-marker--missing {
+    background: #fee2e2;
+    color: var(--tc-red);
+}
+
+.tc-agenda-marker--due {
+    background: var(--tc-blue-soft);
+    color: var(--tc-blue-dark);
+}
+
+@media (min-width: 1280px) {
+    .tc-grade-row {
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    }
+
+    .tc-agenda-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .tc-modal-backdrop {
     background: rgba(15, 23, 42, 0.58);
     backdrop-filter: blur(4px);
