@@ -23,7 +23,6 @@ class LoginError(Exception):
 
 
 GradeMap = dict[str, float]
-AgendaItem = tuple[str, str, str | None]
 
 @dataclass(frozen=True)
 class UniversalLoginConfig:
