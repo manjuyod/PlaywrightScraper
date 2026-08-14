@@ -158,7 +158,8 @@ async def collect_canvas_agenda(
         )
         if record is None:
             continue
-        if date.fromisoformat(record["dueDate"]) > end_day:
+        due_day = date.fromisoformat(record["dueDate"])
+        if due_day < local_today or due_day > end_day:
             continue
         records.append(record)
     return records

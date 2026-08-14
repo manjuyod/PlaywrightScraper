@@ -129,14 +129,6 @@ def test_collects_paginated_local_time_agenda_and_preserves_assignment_identity(
             "sourceId": "canvas:assignment:701",
         },
         {
-            "course": "English 11",
-            "title": "Late reading",
-            "dueDate": "2026-08-10",
-            "dueTime": "23:30",
-            "status": "due",
-            "sourceId": "canvas:assignment:701",
-        },
-        {
             "course": "Algebra II",
             "title": "Practice set",
             "dueDate": "2026-08-18",
@@ -149,6 +141,33 @@ def test_collects_paginated_local_time_agenda_and_preserves_assignment_identity(
         {"title": "Late reading", "dueDate": "2026-08-10", "dueTime": "23:30"}
     ]
     assert CanvasEngine.agenda_capable is True
+
+
+def test_omits_planner_assignments_outside_the_inclusive_local_window() -> None:
+    """Would fail if due planner work before today or after the end date is returned."""
+    origin = "https://canvas.example"
+    courses = f"{origin}/api/v1/courses?per_page=100&enrollment_state=active"
+    missing = f"{origin}/api/v1/users/self/missing_submissions?per_page=100"
+    planner = (
+        f"{origin}/api/v1/planner/items?per_page=100"
+        "&start_date=2026-08-13T00%3A00%3A00-07%3A00"
+        "&end_date=2027-08-13T00%3A00%3A00-07%3A00"
+    )
+    planner_rows = [
+        {"plannable_type": "assignment", "course_id": 11, "plannable": {"id": 1, "title": "Before today", "due_at": "2026-08-13T06:59:00Z"}},
+        {"plannable_type": "assignment", "course_id": 11, "plannable": {"id": 2, "title": "Starts today", "due_at": "2026-08-13T07:00:00Z"}},
+        {"plannable_type": "assignment", "course_id": 11, "plannable": {"id": 3, "title": "Ends on final day", "due_at": "2027-08-13T07:00:00Z"}},
+        {"plannable_type": "assignment", "course_id": 11, "plannable": {"id": 4, "title": "After end day", "due_at": "2027-08-14T07:00:00Z"}},
+    ]
+    request = FakeRequest({
+        courses: FakeResponse(COURSES_PAGE_1),
+        missing: FakeResponse([]),
+        planner: FakeResponse(planner_rows),
+    })
+
+    records = asyncio.run(collect_canvas_agenda(FakePage(request), origin, today=date(2026, 8, 13)))
+
+    assert [record["title"] for record in records] == ["Starts today", "Ends on final day"]
 
 
 @pytest.mark.parametrize("payload", [None, {"not": "a list"}])
