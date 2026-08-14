@@ -107,16 +107,6 @@ def test_normalize_groups_by_monday_class_and_status_with_missing_winning() -> N
 
     assert normalize_agenda(records) == {
         "2026-08-10": {
-            "Algebra II": {
-                "missing": [],
-                "due": [
-                    {
-                        "title": "Practice set",
-                        "dueDate": "2026-08-18",
-                        "dueTime": None,
-                    }
-                ],
-            },
             "English 11": {
                 "missing": [
                     {
@@ -127,7 +117,19 @@ def test_normalize_groups_by_monday_class_and_status_with_missing_winning() -> N
                 ],
                 "due": [],
             },
-        }
+        },
+        "2026-08-17": {
+            "Algebra II": {
+                "missing": [],
+                "due": [
+                    {
+                        "title": "Practice set",
+                        "dueDate": "2026-08-18",
+                        "dueTime": None,
+                    }
+                ],
+            },
+        },
     }
 
 
