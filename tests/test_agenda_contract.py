@@ -73,3 +73,10 @@ def test_empty_bundle_always_retains_both_slot_identities() -> None:
         "agenda1": {"portal": "canvas", "weeks": {}},
         "agenda2": {"portal": None, "weeks": {}},
     }
+
+
+def test_empty_bundle_discards_noncanonical_portal_keys() -> None:
+    assert empty_agenda_bundle(["Canvas", "https://portal.example/canvas"]) == {
+        "agenda1": {"portal": None, "weeks": {}},
+        "agenda2": {"portal": None, "weeks": {}},
+    }

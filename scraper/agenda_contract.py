@@ -32,6 +32,9 @@ class AgendaBuckets(TypedDict):
 AgendaWeeks = dict[str, dict[str, AgendaBuckets]]
 
 
+_PORTAL_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
 class AgendaSlotSnapshot(TypedDict):
     portal: str | None
     weeks: AgendaWeeks
@@ -47,8 +50,8 @@ def monday_for(due_date: date) -> str:
 
 
 def empty_agenda_bundle(portals: Sequence[str | None]) -> AgendaBundle:
-    first = portals[0] if len(portals) > 0 else None
-    second = portals[1] if len(portals) > 1 else None
+    first = portals[0] if len(portals) > 0 and _PORTAL_KEY.fullmatch(portals[0] or "") else None
+    second = portals[1] if len(portals) > 1 and _PORTAL_KEY.fullmatch(portals[1] or "") else None
     return {
         "agenda1": {"portal": first, "weeks": {}},
         "agenda2": {"portal": second, "weeks": {}},
