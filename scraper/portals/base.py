@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
-from typing import ClassVar, Literal, cast
+from typing import ClassVar, cast
 
 from bs4 import BeautifulSoup
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
@@ -14,6 +14,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+from scraper.agenda_contract import AgendaRecord
 
 
 class LoginError(Exception):
@@ -70,6 +72,7 @@ class PortalEngine:
     url_patterns: ClassVar[tuple[str, ...]] = ()
     login_config: ClassVar[UniversalLoginConfig | None] = None
     grade_table_config: ClassVar[GradeTableConfig | None] = None
+    agenda_capable: ClassVar[bool] = False
 
     # Compatibility for portal code that historically raised self.LoginError.
     LoginError: ClassVar[type[LoginError]] = LoginError
@@ -179,10 +182,7 @@ class PortalEngine:
             use_soup=config.use_soup,
         )
 
-    async def get_agenda(
-        self, get: Literal["upcoming", "missing"]
-    ) -> dict[str, list[AgendaItem]]:
-        _ = get
+    async def get_agenda(self) -> list[AgendaRecord]:
         raise NotImplementedError
 
     async def wait(self, selector: str, timeout: int = 15_000) -> None:

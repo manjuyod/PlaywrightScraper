@@ -38,6 +38,10 @@ EXPECTED_PORTALS = {
 }
 
 
+def test_portals_are_not_agenda_capable_by_default() -> None:
+    assert PortalEngine.agenda_capable is False
+
+
 def _isolate_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry, "_REGISTRY", {})
     monkeypatch.setattr(registry, "managed_portals", {})
