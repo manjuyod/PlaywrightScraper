@@ -31,10 +31,12 @@ def _context(student_id: int = 7) -> dict:
 
 
 def test_context_mapping_preserves_legacy_scraper_shape_without_logging(capsys) -> None:
-    student = runner._student_from_context(_context())
+    student = runner.student_from_context(_context())
 
     assert student["db_id"] == 7
+    assert student["login_url"] == "https://portal.example/login"
     assert student["id"] == "ada-user"
+    assert student["alt_login_url"] == "https://classroom.google.com"
     assert student["alt_id"] == "ada-alt"
     assert student["auth_images"] == ["cat", "moon"]
     assert capsys.readouterr().out == ""
@@ -160,7 +162,9 @@ def test_heartbeat_failure_sets_the_stop_scheduling_signal(monkeypatch) -> None:
     assert asyncio.run(scenario()) is True
 
 
-def test_fatal_boundary_failure_marks_the_job_failed_and_propagates(monkeypatch) -> None:
+def test_fatal_boundary_failure_marks_the_job_failed_and_propagates(
+    monkeypatch,
+) -> None:
     failed = []
     notifications = []
 

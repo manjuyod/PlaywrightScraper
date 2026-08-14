@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
 from dotenv import load_dotenv
 from playwright.async_api import BrowserContext, async_playwright
 
+from scraper.agenda_contract import (
+    AgendaBundle,
+    AgendaWeeks,
+    empty_agenda_bundle,
+    normalize_agenda,
+)
 from scraper.db_cli import (
     GradeDbClient,
     GradeDbError,
@@ -25,43 +32,106 @@ from scraper.runner import (
 load_dotenv()
 
 
+@dataclass(frozen=True, repr=False)
+class AgendaSlot:
+    number: Literal[1, 2]
+    key: Literal["agenda1", "agenda2"]
+    portal: str | None
+    login_url: str | None
+    username: str | None
+    password: str | None
+
+
+class AgendaSlotCollectionError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def resolve_agenda_slots(
+    student: Mapping[str, object],
+) -> tuple[AgendaSlot, AgendaSlot]:
+    primary_url = _optional_string(student.get("login_url"))
+    alternate_url = _optional_string(student.get("alt_login_url"))
+    return (
+        AgendaSlot(
+            number=1,
+            key="agenda1",
+            portal=get_portal_key_from_url(primary_url or ""),
+            login_url=primary_url,
+            username=_optional_string(student.get("id")),
+            password=_optional_string(student.get("password")),
+        ),
+        AgendaSlot(
+            number=2,
+            key="agenda2",
+            portal=get_portal_key_from_url(alternate_url or ""),
+            login_url=alternate_url,
+            username=_optional_string(student.get("alt_id")),
+            password=_optional_string(student.get("alt_password")),
+        ),
+    )
+
+
+async def _collect_slot(
+    ctx: BrowserContext,
+    student: Mapping[str, object],
+    slot: AgendaSlot,
+) -> AgendaWeeks:
+    if not slot.portal or not slot.login_url or not slot.username or not slot.password:
+        raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
+    page = await ctx.new_page()
+    try:
+        engine = get_portal(slot.portal)
+        scraper = engine(
+            page,
+            slot.username,
+            slot.password,
+            slot.login_url,
+            student_name=_optional_string(student.get("student_name")),
+        )
+        await scraper.login(first_name=_optional_string(student.get("student_name")))
+        records = await scraper.get_agenda()
+        return normalize_agenda(records)
+    finally:
+        await page.close()
+
+
 async def fetch_agenda(
     ctx: BrowserContext,
     student: dict[str, Any],
-    target: Literal["upcoming", "missing"],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    page = await ctx.new_page()
-    try:
-        if student["portal"] == "canvas":
-            login_url = student["login_url"]
-            sid = student["id"]
-            password = student["password"]
-        else:
-            login_url = student["alt_login_url"]
-            sid = student["alt_id"]
-            password = student["alt_password"]
+) -> tuple[AgendaBundle, dict[str, Any]]:
+    slots = resolve_agenda_slots(student)
+    bundle = empty_agenda_bundle([slot.portal for slot in slots])
+    workers: list[tuple[AgendaSlot, asyncio.Task[AgendaWeeks]]] = []
+    for slot in slots:
+        if (
+            not slot.portal
+            or not slot.login_url
+            or not slot.username
+            or not slot.password
+        ):
+            continue
+        engine = get_portal(slot.portal)
+        if not engine.agenda_capable:
+            continue
+        workers.append((slot, asyncio.create_task(_collect_slot(ctx, student, slot))))
 
-        portal = get_portal_key_from_url(login_url)
-        if portal not in ("canvas", "google_classroom"):
-            raise RuntimeError("agenda portal is unsupported")
-        engine = get_portal(portal)
-        scraper = engine(
-            page,
-            sid,
-            password,
-            alt_student_id=student.get("alt_id"),
-            alt_password=student.get("alt_password"),
-            login_url=login_url,
-            alt_portal_url=student.get("alt_login_url"),
-            student_name=student.get("student_name"),
-        )
-        if student.get("auth_images") and student["portal"] == "gps":
-            setattr(scraper, "auth_images", student["auth_images"])
-        await scraper.login(first_name=student.get("student_name"))
-        agenda = await scraper.get_agenda(get=target)
-        return agenda, student
-    finally:
-        await page.close()
+    results = await asyncio.gather(
+        *(task for _, task in workers),
+        return_exceptions=True,
+    )
+    for (slot, _task), result in zip(workers, results, strict=True):
+        if isinstance(result, BaseException):
+            raise AgendaSlotCollectionError(
+                f"{slot.key}_{slot.portal}_failed"
+            ) from None
+        bundle[slot.key]["weeks"] = result
+    return bundle, student
 
 
 async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
@@ -76,7 +146,6 @@ async def _collect_and_post_agendas(
     session: Mapping[str, Any],
     context: BrowserContext,
     students: list[dict[str, Any]],
-    target: Literal["upcoming", "missing"],
     progress: dict[str, int],
     lease_failed: asyncio.Event,
     on_progress=None,
@@ -84,7 +153,7 @@ async def _collect_and_post_agendas(
     if lease_failed.is_set():
         return "lease_renewal_failed"
     tasks = {
-        asyncio.create_task(fetch_agenda(context, student, target)): student
+        asyncio.create_task(fetch_agenda(context, student)): student
         for student in students
     }
     pending = set(tasks)
@@ -100,19 +169,18 @@ async def _collect_and_post_agendas(
                 student = tasks[task]
                 try:
                     weekly_agenda, _ = task.result()
-                    if isinstance(weekly_agenda, dict) and weekly_agenda:
-                        outcome = {
-                            "kind": "agenda_success",
-                            "weekly_agenda": weekly_agenda,
-                        }
-                        collection_succeeded = True
-                    else:
-                        outcome = {
-                            "kind": "failure",
-                            "code": "agenda_empty",
-                            "passwordgood": None,
-                        }
-                        collection_succeeded = False
+                    outcome = {
+                        "kind": "agenda_success",
+                        "weekly_agenda": weekly_agenda,
+                    }
+                    collection_succeeded = True
+                except AgendaSlotCollectionError as exc:
+                    outcome = {
+                        "kind": "failure",
+                        "code": exc.code,
+                        "passwordgood": None,
+                    }
+                    collection_succeeded = False
                 except Exception:
                     outcome = {
                         "kind": "failure",
@@ -154,7 +222,6 @@ async def _collect_and_post_agendas(
 async def main(
     franchise_id: int | None,
     student_id: int | None,
-    target: Literal["upcoming", "missing"] = "upcoming",
 ):
     client = GradeDbClient()
     session = await asyncio.to_thread(
@@ -196,7 +263,6 @@ async def main(
                     session,
                     context,
                     students,
-                    target,
                     progress,
                     lease_failed,
                 )
@@ -236,6 +302,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Collect student agendas.")
     parser.add_argument("-f", "--franchise-id", type=int)
     parser.add_argument("-s", "--student", type=int)
-    parser.add_argument("--target", choices=("upcoming", "missing"), default="upcoming")
     args = parser.parse_args()
-    asyncio.run(main(args.franchise_id, args.student, target=args.target))
+    asyncio.run(main(args.franchise_id, args.student))
