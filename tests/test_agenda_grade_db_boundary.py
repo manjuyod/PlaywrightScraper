@@ -210,39 +210,45 @@ def test_unsupported_and_unidentified_slots_remain_in_empty_bundle() -> None:
     assert context.pages == []
 
 
-def test_empty_slot_and_successfully_empty_worker_post_one_success(monkeypatch) -> None:
+def test_no_worker_slots_post_exactly_one_empty_success() -> None:
     posts = []
+    student = _student(7)
+    student.update(
+        login_url="https://district.powerschool.example/login",
+        alt_login_url=None,
+        alt_id=None,
+        alt_password=None,
+    )
     empty_bundle = {
-        "agenda1": {"portal": "canvas", "weeks": {}},
+        "agenda1": {"portal": "powerschool", "weeks": {}},
         "agenda2": {"portal": None, "weeks": {}},
     }
-
-    async def fetch(_context, student):
-        return empty_bundle, student
+    context = FakeContext()
 
     class Client:
         def post_result(self, **kwargs):
             posts.append(kwargs)
             return {"applied": True, "duplicate": False}
 
-    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
     progress = _new_progress(1)
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
-            object(),
-            [_student(7)],
+            context,
+            [student],
             progress,
             asyncio.Event(),
         )
     )
 
     assert failure is None
+    assert len(posts) == 1
     assert posts[0]["outcome"] == {
         "kind": "agenda_success",
         "weekly_agenda": empty_bundle,
     }
+    assert context.pages == []
     assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
 
 
@@ -299,12 +305,13 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
             "https://parentvue.example/Login_Parent_PXP.aspx?value=sentinel-query"
         ),
     )
+    context = FakeContext()
 
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
-            FakeContext(),
+            context,
             [student],
             _new_progress(1),
             asyncio.Event(),
@@ -312,11 +319,14 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
     )
 
     assert failure is None
+    assert len(posts) == 1
     assert posts[0]["outcome"] == {
         "kind": "failure",
         "code": "agenda2_parentvue_failed",
         "passwordgood": None,
     }
+    assert len(context.pages) == 2
+    assert all(page.closed for page in context.pages)
     exposed = repr(agenda.resolve_agenda_slots(student)) + str(posts) + caplog.text
     assert all(sentinel not in exposed for sentinel in sentinels)
 
