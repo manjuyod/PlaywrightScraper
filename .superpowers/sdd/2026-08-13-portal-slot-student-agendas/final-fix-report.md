@@ -206,3 +206,61 @@ Python suites from being wholly green; they are outside this owned-file scope.
 Bounded agenda storage intentionally omits the later canonical tail of an
 exceptionally large slot rather than rejecting the atomic snapshot. That
 behavior and its independent per-slot capacity are documented in both guides.
+
+## Round 2: post-fix review
+
+The post-fix review found two remaining input-order and CSS-cascade edge cases.
+No live system, production Rust/SQL, node budget, portal order, source-ID
+identity, cross-slot deduplication, or saved browser state changed in this
+round.
+
+### Root causes and fixes
+
+1. Course and title sorting ended at `casefold()`. Python's stable sort
+   therefore let input order decide exact-case ties, including which one of 124
+   rows was omitted at the 123-row boundary. Same-status duplicate resolution
+   also retained the first input representative. Exact display text is now the
+   secondary course/title key, and equal-status stable/fallback duplicates
+   choose the same minimum canonical representative. Missing still takes
+   precedence over due.
+2. ParentVUE inline-style parsing compared literal values and treated every
+   ancestor `visibility:hidden` as conclusive. Terminal `!important` is now
+   normalized. The closest explicit visibility declaration wins, while
+   `hidden`, `aria-hidden=true`, and `display:none` on any ancestor remain
+   unconditional.
+
+The 497-node per-slot budget is unchanged. The round-2 boundary regression
+permutes 124 source-distinct, casefold-equal titles and receives byte-equivalent
+output every time: the same exact-sorted 123-row prefix, totaling 497 nodes.
+
+### Round-2 TDD evidence
+
+```text
+normalization RED: 3 failed, 1 passed in 0.09s
+normalization GREEN: 4 passed in 0.03s
+ParentVUE RED: 2 failed in 0.23s
+ParentVUE GREEN: 2 passed in 0.18s
+complete edited-area files: 20 passed in 0.19s
+```
+
+### Round-2 verification
+
+```text
+agenda/portal/boundary/redaction selection: 66 passed in 0.90s
+Task 9 selection: 149 passed, 2 known failures in 11.40s
+complete Python: 205 passed, 2 known failures, 1 skipped in 8.91s
+Rust contracts: 7 passed
+complete Rust: 32 passed, 0 failed
+ruff check .: All checks passed!
+cargo fmt --check: exit 0
+git diff --check: exit 0
+```
+
+The two Python failures are the same unrelated dashboard authorization
+baseline named above. GitNexus pre-stage change detection reported 32 mapped
+symbols in four implementation/test files, five affected processes, and
+aggregate MEDIUM risk. Final staged detection, including both reports, reported
+the same 32 symbols and five processes across six files at MEDIUM risk. All 25
+steps in the five traces were inspected: the three agenda-main normalization
+traces and the two ParentVUE `get_agenda` parsing/visibility traces. No
+unexpected production process was affected.

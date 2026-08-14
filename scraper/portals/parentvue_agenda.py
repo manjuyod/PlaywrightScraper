@@ -83,8 +83,24 @@ def _is_missing(row: Tag) -> bool:
     )
 
 
+def _style_declarations(element: Tag) -> dict[str, str]:
+    style = element.get("style")
+    if not isinstance(style, str):
+        return {}
+    declarations: dict[str, str] = {}
+    for declaration in style.split(";"):
+        if ":" not in declaration:
+            continue
+        name, value = declaration.split(":", 1)
+        normalized_value = value.strip().casefold()
+        normalized_value = normalized_value.removesuffix("!important").rstrip()
+        declarations[name.strip().casefold()] = normalized_value
+    return declarations
+
+
 def _is_hidden(element: Tag) -> bool:
     current: Tag | None = element
+    visibility: str | None = None
     while isinstance(current, Tag):
         aria_hidden = current.get("aria-hidden")
         if current.has_attr("hidden") or (
@@ -92,21 +108,14 @@ def _is_hidden(element: Tag) -> bool:
             and aria_hidden.strip().casefold() == "true"
         ):
             return True
-        style = current.get("style")
-        if isinstance(style, str):
-            declarations = {
-                name.strip().casefold(): value.strip().casefold()
-                for declaration in style.split(";") if ":" in declaration
-                for name, value in [declaration.split(":", 1)]
-            }
-            if (
-                declarations.get("display") == "none"
-                or declarations.get("visibility") == "hidden"
-            ):
-                return True
+        declarations = _style_declarations(current)
+        if declarations.get("display") == "none":
+            return True
+        if visibility is None and "visibility" in declarations:
+            visibility = declarations["visibility"]
         parent = current.parent
         current = parent if isinstance(parent, Tag) else None
-    return False
+    return visibility == "hidden"
 
 
 def _assignment_rows(soup: BeautifulSoup) -> list[Tag]:

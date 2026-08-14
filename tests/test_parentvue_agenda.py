@@ -132,6 +132,73 @@ def test_hidden_assignment_rows_and_hidden_ancestors_are_omitted() -> None:
     assert [record["title"] for record in records] == ["Visible work"]
 
 
+def test_important_hidden_rows_and_markers_are_omitted() -> None:
+    """Would fail if terminal !important text bypasses inline visibility checks."""
+    html = '''<section><h2>Upcoming Assignments</h2>
+      <div class="assignment-row" data-course-title="History"
+           style=" DISPLAY : NONE !important ">
+        <span class="assignment-title">Display important row</span>
+        <time datetime="2026-08-19">08/19/2026</time>
+      </div>
+      <div class="assignment-row" data-course-title="History"
+           style="visibility: HIDDEN!important">
+        <span class="assignment-title">Visibility important row</span>
+        <time datetime="2026-08-20">08/20/2026</time>
+      </div>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Display important marker</span>
+        <time datetime="2026-08-21">08/21/2026</time>
+        <span class="status" style="display:none !IMPORTANT">Missing</span>
+      </div>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Visibility important marker</span>
+        <time datetime="2026-08-22">08/22/2026</time>
+        <span class="status" style="visibility:hidden!important">Missing</span>
+      </div>
+    </section>'''
+
+    records = parse_parentvue_agenda(html)
+
+    assert [(record["title"], record["status"]) for record in records] == [
+        ("Display important marker", "due"),
+        ("Visibility important marker", "due"),
+    ]
+
+
+def test_nearest_visibility_declaration_can_override_hidden_ancestor() -> None:
+    """Would fail if a farther visibility:hidden always overrides a visible child."""
+    html = '''<section><h2>Upcoming Assignments</h2>
+      <div style="visibility: hidden !important">
+        <div class="assignment-row" data-course-title="History"
+             style="visibility:VISIBLE">
+          <span class="assignment-title">Visible child row</span>
+          <time datetime="2026-08-19">08/19/2026</time>
+        </div>
+      </div>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Visible child marker</span>
+        <time datetime="2026-08-20">08/20/2026</time>
+        <span style="visibility:hidden">
+          <span class="status" style="visibility: visible !important">Missing</span>
+        </span>
+      </div>
+      <div style="display:none">
+        <div class="assignment-row" data-course-title="History"
+             style="visibility:visible">
+          <span class="assignment-title">Display still wins</span>
+          <time datetime="2026-08-21">08/21/2026</time>
+        </div>
+      </div>
+    </section>'''
+
+    records = parse_parentvue_agenda(html)
+
+    assert [(record["title"], record["status"]) for record in records] == [
+        ("Visible child row", "due"),
+        ("Visible child marker", "missing"),
+    ]
+
+
 def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming() -> None:
     """Would fail if ParentVUE source identities cannot deduplicate status overlap."""
     records = parse_parentvue_agenda(FIXTURE.read_text(encoding="utf-8"))

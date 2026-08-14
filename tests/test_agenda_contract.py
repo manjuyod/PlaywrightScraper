@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from scraper.agenda_contract import empty_agenda_bundle, normalize_agenda
 
 
@@ -141,3 +143,148 @@ def test_normalize_truncates_canonical_rows_at_the_weeks_node_boundary() -> None
     ] == [f"Missing {index:03d}" for index in range(123)]
     assert forward["2026-08-10"]["Alpha"]["due"] == []
     assert _json_value_nodes(forward) == 497
+
+
+def test_boundary_truncation_is_deterministic_for_casefold_equal_titles() -> None:
+    """Would fail if stable input order decides which tied row is truncated."""
+    variants = [
+        "".join(
+            character.upper() if index & (1 << position) else character
+            for position, character in enumerate("abcdefgh")
+        )
+        for index in range(124)
+    ]
+    records = [
+        {
+            "sourceId": f"assignment-{index:03d}",
+            "course": "Alpha",
+            "title": title,
+            "dueDate": "2026-08-16",
+            "dueTime": None,
+            "status": "due",
+        }
+        for index, title in enumerate(variants)
+    ]
+
+    outputs = [
+        normalize_agenda(records),
+        normalize_agenda(reversed(records)),
+        normalize_agenda([*records[::2], *records[1::2]]),
+    ]
+    serialized = [json.dumps(output, separators=(",", ":")) for output in outputs]
+    retained_titles = outputs[0]["2026-08-10"]["Alpha"]["due"]
+    retained_titles = [row["title"] for row in retained_titles]
+
+    assert serialized[0] == serialized[1] == serialized[2]
+    assert len(retained_titles) == 123
+    assert retained_titles == sorted(retained_titles)
+    assert set(variants) - set(retained_titles) == {max(variants)}
+    assert _json_value_nodes(outputs[0]) == 497
+
+
+def test_casefold_equal_courses_use_exact_display_value_as_secondary_order() -> None:
+    """Would fail if stable input order decides case-equivalent course order."""
+    records = [
+        {
+            "sourceId": "lower-course",
+            "course": "alpha",
+            "title": "Lower course",
+            "dueDate": "2026-08-16",
+            "dueTime": None,
+            "status": "due",
+        },
+        {
+            "sourceId": "upper-course",
+            "course": "Alpha",
+            "title": "Upper course",
+            "dueDate": "2026-08-16",
+            "dueTime": None,
+            "status": "due",
+        },
+    ]
+
+    forward = normalize_agenda(records)
+    reverse = normalize_agenda(reversed(records))
+
+    assert json.dumps(forward, separators=(",", ":")) == json.dumps(
+        reverse,
+        separators=(",", ":"),
+    )
+    assert list(forward["2026-08-10"]) == ["Alpha", "alpha"]
+
+
+def test_same_status_duplicates_choose_a_deterministic_display_representative() -> None:
+    """Would fail if the first stable/fallback duplicate controls stored casing."""
+    for source_id in (None, "shared-assignment"):
+        records = [
+            {
+                "course": "math",
+                "title": "essay",
+                "dueDate": "2026-08-16",
+                "dueTime": None,
+                "status": "due",
+            },
+            {
+                "course": "Math",
+                "title": "Essay",
+                "dueDate": "2026-08-16",
+                "dueTime": None,
+                "status": "due",
+            },
+        ]
+        if source_id is not None:
+            for record in records:
+                record["sourceId"] = source_id
+
+        forward = normalize_agenda(records)
+        reverse = normalize_agenda(reversed(records))
+
+        assert forward == reverse == {
+            "2026-08-10": {
+                "Math": {
+                    "missing": [],
+                    "due": [
+                        {
+                            "title": "Essay",
+                            "dueDate": "2026-08-16",
+                            "dueTime": None,
+                        }
+                    ],
+                }
+            }
+        }
+
+
+def test_missing_precedence_survives_deterministic_duplicate_selection() -> None:
+    """Would fail if a lower-sorting due duplicate can replace missing work."""
+    due = {
+        "sourceId": "shared-assignment",
+        "course": "Math",
+        "title": "Essay",
+        "dueDate": "2026-08-16",
+        "dueTime": None,
+        "status": "due",
+    }
+    missing = {
+        "sourceId": "shared-assignment",
+        "course": "math",
+        "title": "essay",
+        "dueDate": "2026-08-16",
+        "dueTime": None,
+        "status": "missing",
+    }
+
+    assert normalize_agenda([due, missing]) == normalize_agenda([missing, due]) == {
+        "2026-08-10": {
+            "math": {
+                "missing": [
+                    {
+                        "title": "essay",
+                        "dueDate": "2026-08-16",
+                        "dueTime": None,
+                    }
+                ],
+                "due": [],
+            }
+        }
+    }

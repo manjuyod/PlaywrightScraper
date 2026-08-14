@@ -108,6 +108,21 @@ def _bounded_weeks(weeks: AgendaWeeks) -> AgendaWeeks:
     return retained
 
 
+def _agenda_record_sort_key(
+    record: tuple[str, str, str, str | None, AgendaStatus],
+) -> tuple[str, str, str, str, str, str]:
+    """Return a total order for canonical rows and duplicate representatives."""
+    course, title, due_date, due_time, _status = record
+    return (
+        course.casefold(),
+        course,
+        due_date,
+        due_time or "",
+        title.casefold(),
+        title,
+    )
+
+
 def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
     deduplicated: dict[
         tuple[object, ...],
@@ -144,17 +159,24 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
                 due_time,
             )
         )
+        candidate = (
+            course,
+            title,
+            due_date.isoformat(),
+            due_time,
+            status,
+        )
         existing = deduplicated.get(identity)
-        if existing is not None and existing[4] == "missing":
-            continue
-        if existing is None or status == "missing":
-            deduplicated[identity] = (
-                course,
-                title,
-                due_date.isoformat(),
-                due_time,
-                status,
+        if (
+            existing is None
+            or (status == "missing" and existing[4] == "due")
+            or (
+                status == existing[4]
+                and _agenda_record_sort_key(candidate)
+                < _agenda_record_sort_key(existing)
             )
+        ):
+            deduplicated[identity] = candidate
 
     grouped: AgendaWeeks = {}
     for course, title, due_date, due_time, status in deduplicated.values():
@@ -170,7 +192,10 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
     ordered: AgendaWeeks = {}
     for week in sorted(grouped):
         ordered[week] = {}
-        for course in sorted(grouped[week], key=str.casefold):
+        for course in sorted(
+            grouped[week],
+            key=lambda value: (value.casefold(), value),
+        ):
             buckets = grouped[week][course]
             ordered[week][course] = {
                 status: sorted(
@@ -179,6 +204,7 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
                         item["dueDate"],
                         item["dueTime"] or "",
                         item["title"].casefold(),
+                        item["title"],
                     ),
                 )
                 for status in ("missing", "due")
