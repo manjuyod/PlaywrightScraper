@@ -100,8 +100,17 @@ def _agenda_slots(
     student: dashboard.DashboardStudent, *, today: date | None = None
 ) -> list[dict[str, Any]]:
     agenda = student.agenda
-    if not isinstance(agenda, dict) or not all(
-        key in agenda for key in ("agenda1", "agenda2")
+    if not isinstance(agenda, dict):
+        return []
+
+    raw_slots = [agenda.get(key) for key in ("agenda1", "agenda2")]
+    if any(
+        not isinstance(slot, dict)
+        or "portal" not in slot
+        or "weeks" not in slot
+        or (slot["portal"] is not None and not isinstance(slot["portal"], str))
+        or not isinstance(slot["weeks"], dict)
+        for slot in raw_slots
     ):
         return []
 
@@ -173,6 +182,8 @@ def _agenda_slots(
                         try:
                             due_date = date.fromisoformat(raw_due_date)
                         except ValueError:
+                            continue
+                        if due_date - timedelta(days=due_date.weekday()) != week_start:
                             continue
                         if raw_due_time is not None and (
                             not isinstance(raw_due_time, str)

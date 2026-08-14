@@ -247,6 +247,29 @@ def test_student_page_contains_canonical_grades_and_agenda(monkeypatch) -> None:
     assert student["agendaSlots"] == []
 
 
+def test_student_page_keeps_legacy_items_for_noncanonical_slot_hybrid(monkeypatch) -> None:
+    client, routes = _create_client(monkeypatch)
+    student = _student(101)
+    student = student.__class__(
+        **{
+            **student.__dict__,
+            "agenda": {
+                "2026-07-15": [["English", "Essay"]],
+                "agenda1": [],
+                "agenda2": [],
+            },
+        }
+    )
+    monkeypatch.setattr(routes.dashboard, "load_student", lambda *_args: student)
+
+    payload = _page_data(client.get("/franchise/57/student/101"))["student"]
+
+    assert payload["agendaSlots"] == []
+    assert payload["agendaItems"] == [
+        {"dueDate": "2026-07-15", "course": "English", "title": "Essay"}
+    ]
+
+
 def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) -> None:
     client, routes = _create_client(monkeypatch)
     student = _student(101)
@@ -361,7 +384,7 @@ def test_agenda_slots_orders_and_skips_malformed_nested_data(monkeypatch) -> Non
                         "bad-week": {},
                     },
                 },
-                "agenda2": {"portal": "canvas", "weeks": []},
+                "agenda2": {"portal": "canvas", "weeks": {}},
             },
         }
     )
@@ -388,6 +411,65 @@ def test_agenda_slots_orders_and_skips_malformed_nested_data(monkeypatch) -> Non
         "Later",
     ]
     assert slots[1] == {"number": 2, "portal": "canvas", "portalLabel": "Canvas", "weeks": []}
+
+
+def test_agenda_slots_skips_rows_outside_the_enclosing_week(monkeypatch) -> None:
+    _client, routes = _create_client(monkeypatch)
+    student = _student(101)
+    student = student.__class__(
+        **{
+            **student.__dict__,
+            "agenda": {
+                "agenda1": {
+                    "portal": "canvas",
+                    "weeks": {
+                        "2026-08-10": {
+                            "English": {
+                                "missing": [],
+                                "due": [
+                                    {
+                                        "title": "This week",
+                                        "dueDate": "2026-08-13",
+                                        "dueTime": None,
+                                    },
+                                    {
+                                        "title": "Wrong week",
+                                        "dueDate": "2026-09-01",
+                                        "dueTime": None,
+                                    },
+                                ],
+                            }
+                        }
+                    },
+                },
+                "agenda2": {"portal": None, "weeks": {}},
+            },
+        }
+    )
+
+    assignments = routes._agenda_slots(student)[0]["weeks"][0]["classes"][0][
+        "assignments"
+    ]
+
+    assert [assignment["title"] for assignment in assignments] == ["This week"]
+
+
+def test_agenda_slots_labels_unlisted_safe_portals(monkeypatch) -> None:
+    _client, routes = _create_client(monkeypatch)
+    student = _student(101)
+    student = student.__class__(
+        **{
+            **student.__dict__,
+            "agenda": {
+                "agenda1": {"portal": "district_portal", "weeks": {}},
+                "agenda2": {"portal": None, "weeks": {}},
+            },
+        }
+    )
+
+    slots = routes._agenda_slots(student)
+
+    assert slots[0]["portalLabel"] == "District Portal"
 
 
 def test_non_dev_direct_franchise_and_student_urls_remain_available(
