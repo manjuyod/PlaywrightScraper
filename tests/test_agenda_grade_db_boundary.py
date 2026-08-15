@@ -325,6 +325,55 @@ def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> N
     assert all(page.close_calls == 1 for page in browser.pages)
 
 
+def test_agenda_job_limits_active_portal_workers(monkeypatch) -> None:
+    active = 0
+    peak_active = 0
+    posts = []
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            nonlocal active, peak_active
+            active += 1
+            peak_active = max(peak_active, active)
+            await asyncio.sleep(0)
+
+        async def get_agenda(self):
+            nonlocal active
+            await asyncio.sleep(0)
+            active -= 1
+            return []
+
+    class Client:
+        def post_result(self, **kwargs):
+            posts.append(kwargs)
+            return {"applied": True, "duplicate": False}
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    students = [_student(student_id) for student_id in range(1, 5)]
+    for student in students:
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+    failure = asyncio.run(
+        agenda._collect_and_post_agendas(
+            Client(),
+            {"job_id": "job", "lease_token": "lease"},
+            FakeBrowser(),
+            students,
+            _new_progress(len(students)),
+            asyncio.Event(),
+        )
+    )
+
+    assert failure is None
+    assert peak_active == min(agenda.MAX_CONCURRENT_AGENDA_WORKERS, len(students))
+    assert len(posts) == len(students)
+
+
 @pytest.mark.parametrize(
     ("portal", "url"),
     [
@@ -634,7 +683,7 @@ def test_lease_failure_closes_started_slot_context_and_page_once(monkeypatch) ->
 def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
     cancelled = asyncio.Event()
 
-    async def fetch(_context, student):
+    async def fetch(_context, student, **_kwargs):
         if student["db_id"] == 7:
             return {
                 "agenda1": {"portal": "canvas", "weeks": {}},
@@ -670,7 +719,7 @@ def test_lease_failure_cancels_outstanding_collection(monkeypatch) -> None:
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
-    async def fetch(_context, student):
+    async def fetch(_context, student, **_kwargs):
         started.set()
         try:
             await asyncio.Event().wait()
@@ -706,7 +755,7 @@ def test_lease_failure_cancels_outstanding_collection(monkeypatch) -> None:
 def test_heartbeat_failure_prevents_agenda_tasks_from_starting(monkeypatch) -> None:
     started = []
 
-    async def fetch(_context, student):
+    async def fetch(_context, student, **_kwargs):
         started.append(student["db_id"])
         return {}, student
 

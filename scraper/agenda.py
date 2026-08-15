@@ -31,6 +31,8 @@ from scraper.runner import (
 
 load_dotenv()
 
+MAX_CONCURRENT_AGENDA_WORKERS = 2
+
 
 @dataclass(frozen=True, repr=False)
 class AgendaSlot:
@@ -112,7 +114,16 @@ async def _collect_slot(
 async def fetch_agenda(
     browser: Browser,
     student: dict[str, Any],
+    *,
+    worker_semaphore: asyncio.Semaphore | None = None,
 ) -> tuple[AgendaBundle, dict[str, Any]]:
+    if worker_semaphore is None:
+        worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
+
+    async def collect_slot(slot: AgendaSlot) -> AgendaWeeks:
+        async with worker_semaphore:
+            return await _collect_slot(browser, student, slot)
+
     slots = resolve_agenda_slots(student)
     bundle = empty_agenda_bundle([slot.portal for slot in slots])
     workers: list[tuple[AgendaSlot, asyncio.Task[AgendaWeeks]]] = []
@@ -127,9 +138,7 @@ async def fetch_agenda(
         engine = get_portal(slot.portal)
         if not engine.agenda_capable:
             continue
-        workers.append(
-            (slot, asyncio.create_task(_collect_slot(browser, student, slot)))
-        )
+        workers.append((slot, asyncio.create_task(collect_slot(slot))))
 
     results = await asyncio.gather(
         *(task for _, task in workers),
@@ -162,8 +171,15 @@ async def _collect_and_post_agendas(
 ) -> str | None:
     if lease_failed.is_set():
         return "lease_renewal_failed"
+    worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
     tasks = {
-        asyncio.create_task(fetch_agenda(browser, student)): student
+        asyncio.create_task(
+            fetch_agenda(
+                browser,
+                student,
+                worker_semaphore=worker_semaphore,
+            )
+        ): student
         for student in students
     }
     pending = set(tasks)
