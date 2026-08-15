@@ -1,16 +1,71 @@
 from __future__ import annotations
-from typing import Optional, Literal
+from typing import Optional
+from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from datetime import datetime, date, time
-# from bs4 import BeautifulSoup
+from datetime import datetime
 
-from scraper.portals.base import GradeMap, AgendaItem, PortalEngine, PlaywrightTimeout
+from scraper.agenda_contract import AgendaRecord, AgendaStatus
+from scraper.portals.base import GradeMap, PortalEngine, PlaywrightTimeout
 from scraper.portals import get_portal
 from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_from_url
+
+
+class GoogleClassroomAgendaError(Exception):
+    def __init__(self) -> None:
+        super().__init__("google_classroom_agenda_failed")
+
+
+def _parse_classroom_agenda(
+    html: str, status: AgendaStatus, *, reference: datetime
+) -> list[AgendaRecord]:
+    soup = BeautifulSoup(html, "html.parser")
+    records: list[AgendaRecord] = []
+    items = soup.select('li:has(a[href*="/details"]) div[data-course-id][data-stream-item-id]')
+    for card in items:
+        title_elem = card.select_one(".y9bEQb p")
+        course_elem = card.select_one(".y9bEQb p.tWeh6") or (
+            card.select(".y9bEQb p")[1]
+            if len(card.select(".y9bEQb p")) > 1
+            else None
+        )
+        due_elem = card.select_one("p.pOf0gc")
+        if due_elem is None:
+            due_split = card.select_one("div.nQaZq")
+            due = (
+                " ".join(part.get_text(strip=True) for part in due_split.select("p"))
+                if due_split is not None
+                else None
+            )
+        else:
+            due = due_elem.get_text(strip=True)
+
+        title = title_elem.get_text(strip=True) if title_elem is not None else None
+        course = course_elem.get_text(strip=True) if course_elem is not None else None
+        source_id = card.get("data-stream-item-id")
+        if not title or not course or not due or not source_id:
+            continue
+
+        try:
+            due_date, due_time = reconcile_day_time(due, reference=reference)
+        except ValueError:
+            continue
+        records.append(
+            {
+                "sourceId": f"google_classroom:{source_id}",
+                "course": course,
+                "title": title,
+                "dueDate": due_date.isoformat(),
+                "dueTime": due_time.strftime("%H:%M") if due_time else None,
+                "status": status,
+            }
+        )
+    return records
+
 
 class GoogleClassroom(PortalEngine):
     portal_key = "google_classroom"
     url_patterns = ("classroom.google", "accounts.google")
+    agenda_capable = True
 
     @retry(
         stop=stop_after_attempt(3),
@@ -41,79 +96,45 @@ class GoogleClassroom(PortalEngine):
         except Exception:
             raise
 
-    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming") -> dict[str, list[AgendaItem]]:
-        agenda: dict[str, list[AgendaItem]] = {}  # dict like {date: [(class, assignment, due_time),  ...]}
+    async def get_agenda(self) -> list[AgendaRecord]:
         try:
             menu_sidebar_selector = 'button[aria-label="Main Menu"]'
             await self.page.wait_for_selector(menu_sidebar_selector, timeout=10000)
             todo_tab_button = self.page.get_by_role('menuitem', name='To-do')
-            # todo_tab_button = self.page.locator('a[aria-label="To-do"]')
 
             if not await exists(todo_tab_button):
                 menu_button = self.page.locator(menu_sidebar_selector)
                 assert await exists(menu_button)
-                await menu_button.click() # no nav
+                await menu_button.click()
             await todo_tab_button.click()
 
             upcoming_assignments_url_pattern = '**/a/not-turned-in/**'
             await wait_after_nav(self.page, pattern=upcoming_assignments_url_pattern)
 
-            # buttons on the to-do page
             upcoming_tab_button = self.page.get_by_role('link', name='Assigned')
             missing_tab_button = self.page.get_by_role('link', name='Missing')
             assert await exists(upcoming_tab_button)
             assert await exists(missing_tab_button)
-            match get:
-                case "upcoming":
-                    target_button = upcoming_tab_button
-                    target_url = upcoming_assignments_url_pattern
-                case "missing":
-                    target_button = missing_tab_button
-                    target_url = '**/a/missing/**'
+            await upcoming_tab_button.click()
+            await wait_after_nav(
+                self.page, pattern=upcoming_assignments_url_pattern, wait_after_load=2000
+            )
+            due_records = _parse_classroom_agenda(
+                await self.page.content(), "due", reference=datetime.now()
+            )
 
-            await target_button.click()
-            await wait_after_nav(self.page, pattern=target_url, wait_after_load=2000)
-
-            soup = await self.get_soup()
-
-            items = soup.select('li:has(a[href*="/details"]) div[data-course-id][data-stream-item-id]')
-
-            for card in items:
-                # title/course live in the first ".y9bEQb" area
-                title_elem = card.select_one('.y9bEQb p')
-                course_elem = card.select_one('.y9bEQb p.tWeh6') or (
-                    card.select('.y9bEQb p')[1] if len(card.select('.y9bEQb p')) > 1 else None)
-
-                # due: prefer combined, fall back to split
-                due_elem = card.select_one('p.pOf0gc')
-                if not due_elem:
-                    due_split = card.select_one('div.nQaZq')
-                    due = " ".join(p.get_text(strip=True) for p in due_split.select('p')) if due_split else None
-                else:
-                    due = due_elem.get_text(strip=True)
-
-                title = title_elem.get_text(strip=True) if title_elem else None
-                course = course_elem.get_text(strip=True) if course_elem else None
-
-                due_info = reconcile_day_time(due, reference=datetime.now()) if due else (None, None)
-                day: Optional[date] = due_info[0] if due_info[0] else None
-                due_at: Optional[time] = due_info[1] if due_info[1] else None
-
-
-
-                if not title or not course or not day:
-                    continue
-                due_date = day.strftime("%m/%d/%Y")
-                due_time = due_at.strftime("%H:%M") if due_at else None
-
-                if not agenda.get(due_date):
-                    agenda[due_date] = [(course, title, due_time)]
-                else:
-                    agenda[due_date].append((course, title, due_time))
-            # return agenda
+            await missing_tab_button.click()
+            await wait_after_nav(
+                self.page, pattern='**/a/missing/**', wait_after_load=2000
+            )
+            missing_records = _parse_classroom_agenda(
+                await self.page.content(), "missing", reference=datetime.now()
+            )
+            return due_records + missing_records
+        except GoogleClassroomAgendaError:
+            raise
         except Exception:
-            pass
-        return agenda
+            raise GoogleClassroomAgendaError() from None
 
     async def fetch_grades(self) -> GradeMap:
         return {}

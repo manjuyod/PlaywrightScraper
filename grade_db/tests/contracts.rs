@@ -1,8 +1,8 @@
 use grade_db::models::{
-    deterministic_result_key, merge_runner_student, CrmStudent, ResultOutcome, ResultPostRequest,
-    StudentGradeState,
+    deterministic_result_key, merge_runner_student, CrmStudent, JobKind, ResultOutcome,
+    ResultPostRequest, StudentGradeState,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 fn crm_student() -> CrmStudent {
@@ -104,4 +104,46 @@ fn rejected_result_audit_never_contains_academic_payload() {
     assert_eq!(audit["rejection_code"], "crm_ineligible");
     assert!(audit.get("parsed_grades").is_none());
     assert!(!audit.to_string().contains("Algebra"));
+}
+
+#[test]
+fn agenda_result_accepts_portal_slot_bundle() {
+    let outcome = ResultOutcome::AgendaSuccess {
+        weekly_agenda: json!({
+            "agenda1": {
+                "portal": "canvas",
+                "weeks": {
+                    "2026-08-10": {
+                        "English 11": {
+                            "missing": [],
+                            "due": [{
+                                "title": "Reading response",
+                                "dueDate": "2026-08-16",
+                                "dueTime": null
+                            }]
+                        }
+                    }
+                }
+            },
+            "agenda2": {"portal": "parentvue", "weeks": {}}
+        }),
+    };
+
+    assert_eq!(outcome.validate_for_job(JobKind::Agenda), Ok(()));
+}
+
+#[test]
+fn agenda_result_accepts_exact_node_limit_and_rejects_one_over() {
+    let allowed = ResultOutcome::AgendaSuccess {
+        weekly_agenda: json!({"nodes": vec![Value::Null; 998]}),
+    };
+    let too_large = ResultOutcome::AgendaSuccess {
+        weekly_agenda: json!({"nodes": vec![Value::Null; 999]}),
+    };
+
+    assert_eq!(allowed.validate_for_job(JobKind::Agenda), Ok(()));
+    assert_eq!(
+        too_large.validate_for_job(JobKind::Agenda),
+        Err("result payload is too large")
+    );
 }

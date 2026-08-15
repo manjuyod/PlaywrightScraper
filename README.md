@@ -135,6 +135,57 @@ Run agenda collection:
 uv run python -m scraper.agenda --franchise-id 19
 ```
 
+### Agenda workflow
+
+An agenda run always collects both missing and upcoming/due work for every
+supported, configured credential slot. It does not accept a per-status target:
+there is one complete collection for the selected students.
+
+Agenda storage remains the existing `weekly_agenda` snapshot, with two fixed
+top-level slots:
+
+```json
+{
+  "agenda1": {"portal": "canvas", "weeks": {}},
+  "agenda2": {"portal": null, "weeks": {}}
+}
+```
+
+Portal 1 always supplies `agenda1`; Portal 2 always supplies `agenda2`. Slot
+identity is never reordered by portal type. Each populated `weeks` object is
+grouped by the ISO date of the Monday containing an assignment's due date, then
+by the portal-provided class name, with `missing` and `due` arrays in each
+class bucket. A row visible in both slots remains in both slots; there is no
+cross-slot deduplication or reordering.
+
+Storage is intentionally bounded by the unchanged Rust result validator. Each
+slot's normalized `weeks` subtree is capped independently at 497 recursively
+counted JSON values, so the complete two-slot bundle is at most 999 values
+against the 1,000-value boundary. When a slot exceeds that capacity, it keeps
+the deterministic canonical prefix: weeks in ascending order, classes in
+case-insensitive order, missing rows before due rows, and rows ordered by due
+date, time, and title. A week or class is included only when at least one of
+its rows fits. Capacity is never borrowed across slots, and bounding does not
+deduplicate or reorder work between `agenda1` and `agenda2`.
+
+Canvas, ParentVUE, and Google Classroom are the currently supported agenda
+collectors, and each returns missing plus upcoming/due work in the same run.
+An unconfigured, unsupported, or parserless portal is a valid blank slot:
+its `weeks` object stays empty. A capable collector that successfully finds no
+dated work is also a valid blank result. If any capable worker that starts
+fails, the run posts no partial agenda snapshot, so the previously stored
+snapshot remains unchanged.
+
+For a safe, fictional UI preview that does not need CRM, Neon, credentials, or
+live portal data, run:
+
+```powershell
+uv run python tests/support/student_agenda_preview.py --port 8765
+```
+
+The preview serves localhost only. It neither imports dashboard routes nor
+opens a database connection, and its data is synthetic.
+
 Batch helpers live in `batches/`, including per-franchise pipelines and `pipeline_all_franchises.bat`.
 
 ## Rust Database Boundary
