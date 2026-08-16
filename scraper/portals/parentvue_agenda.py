@@ -49,14 +49,22 @@ def _course(row: Tag) -> str | None:
     value = row.get("data-course-title")
     if isinstance(value, str) and value.strip():
         return value.strip()
-    section = row.find_parent(class_=["gb-class-section", "gb-class-row"])
-    if isinstance(section, Tag):
-        value = section.get("data-course-title")
+    ancestor = row.parent
+    while isinstance(ancestor, Tag):
+        classes = ancestor.get("class", [])
+        is_class_container = isinstance(classes, list) and any(
+            str(item) in {"gb-class-section", "gb-class-row"} for item in classes
+        )
+        if not is_class_container:
+            ancestor = ancestor.parent
+            continue
+        value = ancestor.get("data-course-title")
         if isinstance(value, str) and value.strip():
             return value.strip()
-        title = _text(section.select_one(".course-title"))
+        title = _text(ancestor.select_one(".course-title"))
         if title:
             return title
+        ancestor = ancestor.parent
     return _text(row.select_one('[data-label="Course"], [data-label="Course Title"]'))
 
 
@@ -136,10 +144,19 @@ def _assignment_rows(soup: BeautifulSoup) -> list[Tag]:
 def parse_parentvue_agenda(html: str) -> list[AgendaRecord]:
     soup = BeautifulSoup(html, "html.parser")
     rows = _assignment_rows(soup)
-    recognizable = bool(rows) or bool(
+    visible_no_data = any(
+        not _is_hidden(marker) for marker in soup.select("#gb-assignments .no-data")
+    )
+    recognizable = bool(rows) or bool(soup.select_one("#gb-assignments")) or bool(
         soup.select_one(".gb-class-section, .gb-class-row, a[href*='Gradebook'], a[href*='GradeBook']")
     ) or "upcoming assignments" in soup.get_text(" ", strip=True).casefold()
     if not recognizable:
+        raise ParentVueAgendaError()
+    if visible_no_data:
+        if rows:
+            raise ParentVueAgendaError()
+        return []
+    if not rows:
         raise ParentVueAgendaError()
 
     records: list[AgendaRecord] = []
@@ -165,4 +182,6 @@ def parse_parentvue_agenda(html: str) -> list[AgendaRecord]:
         if isinstance(assignment_id, str) and assignment_id.strip():
             record["sourceId"] = f"parentvue:{assignment_id.strip()}"
         records.append(record)
+    if rows and not records:
+        raise ParentVueAgendaError()
     return records

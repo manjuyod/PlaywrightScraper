@@ -44,6 +44,15 @@ class ParentVUE(PortalEngine):
         await self.page.wait_for_load_state(
             state="domcontentloaded", timeout=30000
         )
+        await self.page.wait_for_selector("#gb-assignments", timeout=30000)
+        await self.page.wait_for_selector(
+            "#gb-assignments .no-data:visible, "
+            "#gb-assignments .assignment-row:visible, "
+            "#gb-assignments .gb-assignment-row:visible, "
+            "#gb-assignments tr:has(.assignment-title, .assignment-name, "
+            '[data-label="Assignment"]):visible',
+            timeout=30000,
+        )
 
 
 

@@ -59,11 +59,94 @@ def test_parses_missing_and_upcoming_gradebook_assignments() -> None:
     ]
 
 
-def test_empty_recognized_upcoming_section_returns_no_records() -> None:
-    """Would fail if an empty Grade Book section is treated as a parse failure."""
+def test_visible_gradebook_no_data_marker_returns_no_records() -> None:
+    """Would fail if a confirmed empty Grade Book is treated as a parse failure."""
     assert parse_parentvue_agenda(
-        '<section><h2>Upcoming Assignments</h2></section>'
+        '<div id="gb-assignments"><div class="no-data">No assignments found.</div></div>'
     ) == []
+
+
+def test_gradebook_shell_without_candidates_or_no_data_marker_raises() -> None:
+    """Would fail if an ambiguous authenticated Grade Book shell is accepted as empty."""
+    html = '<div id="gb-assignments"><table><tbody></tbody></table></div>'
+
+    try:
+        parse_parentvue_agenda(html)
+    except ParentVueAgendaError as error:
+        assert str(error) == "parentvue_agenda_parse_failed"
+    else:
+        raise AssertionError("ambiguous Grade Book shell did not raise")
+
+
+def test_gradebook_candidates_conflicting_with_no_data_marker_raise() -> None:
+    """Would fail if contradictory Grade Book states are silently accepted."""
+    html = '''<div id="gb-assignments">
+      <div class="no-data">No assignments found.</div>
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Primary source</span>
+        <time datetime="2026-08-19">08/19/2026</time>
+      </div>
+    </div>'''
+
+    try:
+        parse_parentvue_agenda(html)
+    except ParentVueAgendaError as error:
+        assert str(error) == "parentvue_agenda_parse_failed"
+    else:
+        raise AssertionError("contradictory Grade Book state did not raise")
+
+
+def test_all_malformed_gradebook_candidates_raise() -> None:
+    """Would fail if non-actionable Grade Book candidates become an empty agenda."""
+    html = '''<div id="gb-assignments">
+      <div class="assignment-row" data-course-title="History">
+        <span class="assignment-title">Undated work</span>
+      </div>
+    </div>'''
+
+    try:
+        parse_parentvue_agenda(html)
+    except ParentVueAgendaError as error:
+        assert str(error) == "parentvue_agenda_parse_failed"
+    else:
+        raise AssertionError("malformed Grade Book candidates did not raise")
+
+
+def test_hidden_gradebook_no_data_marker_does_not_confirm_empty_agenda() -> None:
+    """Would fail if hidden stale no-data UI turns an ambiguous page into an empty agenda."""
+    html = '''<div id="gb-assignments">
+      <div class="no-data" hidden>No assignments found.</div>
+    </div>'''
+
+    try:
+        parse_parentvue_agenda(html)
+    except ParentVueAgendaError as error:
+        assert str(error) == "parentvue_agenda_parse_failed"
+    else:
+        raise AssertionError("hidden no-data marker did not raise")
+
+
+def test_course_is_resolved_from_outer_gradebook_ancestor() -> None:
+    """Would fail if nested class rows mask the ancestor that owns the course title."""
+    html = '''<div id="gb-assignments">
+      <section class="gb-class-section" data-course-title="Outer Biology">
+        <h2>Upcoming Assignments</h2>
+        <div class="gb-class-row">
+          <div class="assignment-row">
+            <span class="assignment-title">Cell lab</span>
+            <time datetime="2026-08-18">08/18/2026</time>
+          </div>
+        </div>
+      </section>
+    </div>'''
+
+    assert parse_parentvue_agenda(html) == [{
+        "course": "Outer Biology",
+        "title": "Cell lab",
+        "dueDate": "2026-08-18",
+        "dueTime": None,
+        "status": "due",
+    }]
 
 
 def test_raises_stable_error_for_unrecognizable_document() -> None:
@@ -257,6 +340,7 @@ class FakeNavigationPage:
     def __init__(self) -> None:
         self.clicked_visible_gradebook = False
         self.selector: str | None = None
+        self.waited_for_selectors: list[str] = []
 
     def locator(self, selector: str) -> FakeGradebookLocator:
         self.selector = selector
@@ -264,6 +348,9 @@ class FakeNavigationPage:
 
     async def wait_for_load_state(self, *_args: object, **_kwargs: object) -> None:
         pass
+
+    async def wait_for_selector(self, selector: str, **_kwargs: object) -> None:
+        self.waited_for_selectors.append(selector)
 
     async def wait_for_timeout(self, _milliseconds: int) -> None:
         pass
@@ -278,3 +365,9 @@ def test_after_login_selects_visible_href_specific_gradebook_link() -> None:
 
     assert page.clicked_visible_gradebook
     assert page.selector == 'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
+    assert page.waited_for_selectors == [
+        "#gb-assignments",
+        "#gb-assignments .no-data:visible, #gb-assignments .assignment-row:visible, "
+        "#gb-assignments .gb-assignment-row:visible, "
+        "#gb-assignments tr:has(.assignment-title, .assignment-name, [data-label=\"Assignment\"]):visible",
+    ]
