@@ -10,12 +10,13 @@ from scraper.portals.canvas import CanvasEngine
 
 
 class RouteRequest:
-    def __init__(self, url: str, frame: object) -> None:
+    def __init__(self, url: str, frame: object, *, navigation: bool = True) -> None:
         self.url = url
         self.frame = frame
+        self._navigation = navigation
 
     def is_navigation_request(self) -> bool:
-        return True
+        return self._navigation
 
 
 class RoutePage:
@@ -35,8 +36,18 @@ class RoutePage:
         if callback in listeners:
             listeners.remove(callback)
 
-    def request_navigation(self, url: str, *, frame: object | None = None) -> None:
-        request = RouteRequest(url, self.main_frame if frame is None else frame)
+    def request_navigation(
+        self,
+        url: str,
+        *,
+        frame: object | None = None,
+        navigation: bool = True,
+    ) -> None:
+        request = RouteRequest(
+            url,
+            self.main_frame if frame is None else frame,
+            navigation=navigation,
+        )
         for callback in list(self._listeners.get("request", [])):
             callback(request)
 
@@ -188,6 +199,27 @@ def test_canvas_route_guard_ignores_subframe_navigation_requests() -> None:
             frame=object(),
         )
         engine._raise_canvas_route_error()
+    finally:
+        engine._remove_canvas_route_guard()
+
+
+def test_canvas_route_guard_ignores_same_frame_non_navigation_requests() -> None:
+    """Would fail if a resource request can poison an authenticated main-frame route."""
+    page = RoutePage()
+    engine = CanvasEngine(
+        page, "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+    route = canvas._CanvasAuthRoute(engine.login_url)
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    engine._install_canvas_route_guard(route)
+    try:
+        page.request_navigation(
+            "https://unknown-idp.example/resource",
+            navigation=False,
+        )
+        engine._raise_canvas_route_error()
+        route.require_microsoft_credentials()
     finally:
         engine._remove_canvas_route_guard()
 
