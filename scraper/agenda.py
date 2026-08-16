@@ -21,7 +21,11 @@ from scraper.db_cli import (
     GradeDbLeaseExpired,
     GradeDbUnavailable,
 )
-from scraper.config.logging import bind_log_context, reset_log_context
+from scraper.config.logging import (
+    bind_log_context,
+    reset_log_context,
+    suspend_log_context,
+)
 from scraper.portals import get_portal
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.runner import (
@@ -83,25 +87,27 @@ def _log_agenda_slot_diagnostic(
     }
     if exception_kind is not None:
         extra["exception_kind"] = exception_kind
+    _emit_agenda_diagnostic(event, extra)
+
+
+def _emit_agenda_diagnostic(event: str, extra: dict[str, object]) -> None:
+    context_token = suspend_log_context()
     try:
         logger.info(event, extra=extra)
     except Exception:
         pass
+    finally:
+        reset_log_context(context_token)
 
 
 def _log_agenda_fetch_prepared(worker_count: int) -> None:
-    try:
-        logger.info(
-            "agenda.fetch.prepared",
-            extra={
-                "phase": "agenda_fetch",
-                "worker_count": min(
-                    max(worker_count, 0), MAX_CONCURRENT_AGENDA_WORKERS
-                ),
-            },
-        )
-    except Exception:
-        pass
+    _emit_agenda_diagnostic(
+        "agenda.fetch.prepared",
+        {
+            "phase": "agenda_fetch",
+            "worker_count": min(max(worker_count, 0), MAX_CONCURRENT_AGENDA_WORKERS),
+        },
+    )
 
 
 def _optional_string(value: object) -> str | None:
@@ -139,70 +145,91 @@ async def _collect_slot(
     slot: AgendaSlot,
 ) -> AgendaWeeks:
     context_token = bind_log_context(portal=slot.portal, slot=slot.number)
-    context = None
-    page = None
-    page_cleanup: CleanupStatus = "not_started"
-    context_cleanup: CleanupStatus = "not_started"
-    exception_kind: AgendaExceptionKind | None = None
     try:
-        if not slot.portal or not slot.login_url or not slot.username or not slot.password:
-            raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
-        first_slot, second_slot = resolve_agenda_slots(student)
-        alternate_slot = second_slot if slot.number == 1 else first_slot
-        context = await browser.new_context()
-        context.set_default_timeout(15_000)
-        context.set_default_navigation_timeout(15_000)
-        page = await context.new_page()
-        engine = get_portal(slot.portal)
-        engine_kwargs: dict[str, object] = {
-            "alt_portal_url": alternate_slot.login_url,
-            "alt_student_id": alternate_slot.username,
-            "alt_password": alternate_slot.password,
-            "student_name": _optional_string(student.get("student_name")),
-        }
-        if slot.portal == "google_classroom":
-            raw_auth_images = student.get("auth_images")
-            if isinstance(raw_auth_images, list):
-                engine_kwargs["auth_images"] = [
-                    image for image in raw_auth_images[:3] if isinstance(image, str)
-                ]
-        scraper = engine(
-            page,
-            slot.username,
-            slot.password,
-            slot.login_url,
-            **engine_kwargs,
-        )
-        await scraper.login(first_name=_optional_string(student.get("student_name")))
-        records = await scraper.get_agenda()
-        return normalize_agenda(records)
-    except BaseException as exc:
-        exception_kind = _agenda_exception_kind(exc)
-        raise
+        context = None
+        page = None
+        page_cleanup: CleanupStatus = "not_started"
+        context_cleanup: CleanupStatus = "not_started"
+        exception_kind: AgendaExceptionKind | None = None
+        primary_exception: BaseException | None = None
+        body_succeeded = False
+        try:
+            if (
+                not slot.portal
+                or not slot.login_url
+                or not slot.username
+                or not slot.password
+            ):
+                raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
+            first_slot, second_slot = resolve_agenda_slots(student)
+            alternate_slot = second_slot if slot.number == 1 else first_slot
+            context = await browser.new_context()
+            context.set_default_timeout(15_000)
+            context.set_default_navigation_timeout(15_000)
+            page = await context.new_page()
+            engine = get_portal(slot.portal)
+            engine_kwargs: dict[str, object] = {
+                "alt_portal_url": alternate_slot.login_url,
+                "alt_student_id": alternate_slot.username,
+                "alt_password": alternate_slot.password,
+                "student_name": _optional_string(student.get("student_name")),
+            }
+            if slot.portal == "google_classroom":
+                raw_auth_images = student.get("auth_images")
+                if isinstance(raw_auth_images, list):
+                    engine_kwargs["auth_images"] = [
+                        image for image in raw_auth_images[:3] if isinstance(image, str)
+                    ]
+            scraper = engine(
+                page,
+                slot.username,
+                slot.password,
+                slot.login_url,
+                **engine_kwargs,
+            )
+            await scraper.login(first_name=_optional_string(student.get("student_name")))
+            records = await scraper.get_agenda()
+            weeks = normalize_agenda(records)
+            body_succeeded = True
+            return weeks
+        except BaseException as exc:
+            primary_exception = exc
+            exception_kind = _agenda_exception_kind(exc)
+            raise
+        finally:
+            cleanup_exception: BaseException | None = None
+            if page is not None:
+                try:
+                    await page.close()
+                    page_cleanup = "closed"
+                except BaseException as exc:
+                    page_cleanup = "failed"
+                    cleanup_exception = exc
+            if context is not None:
+                try:
+                    await context.close()
+                    context_cleanup = "closed"
+                except BaseException as exc:
+                    context_cleanup = "failed"
+                    cleanup_exception = cleanup_exception or exc
+            _log_agenda_slot_diagnostic(
+                event=(
+                    "agenda.slot.collection.completed"
+                    if exception_kind is None
+                    else "agenda.slot.collection.failed"
+                ),
+                slot=slot,
+                exception_kind=exception_kind,
+                page_cleanup=page_cleanup,
+                context_cleanup=context_cleanup,
+            )
+            if (
+                cleanup_exception is not None
+                and primary_exception is None
+                and not body_succeeded
+            ):
+                raise cleanup_exception
     finally:
-        if page is not None:
-            try:
-                await page.close()
-                page_cleanup = "closed"
-            except Exception:
-                page_cleanup = "failed"
-        if context is not None:
-            try:
-                await context.close()
-                context_cleanup = "closed"
-            except Exception:
-                context_cleanup = "failed"
-        _log_agenda_slot_diagnostic(
-            event=(
-                "agenda.slot.collection.completed"
-                if exception_kind is None
-                else "agenda.slot.collection.failed"
-            ),
-            slot=slot,
-            exception_kind=exception_kind,
-            page_cleanup=page_cleanup,
-            context_cleanup=context_cleanup,
-        )
         reset_log_context(context_token)
 
 

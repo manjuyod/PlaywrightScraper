@@ -10,7 +10,12 @@ import pytest
 
 from scraper.portals.base import PortalEngine
 from scraper import agenda
-from scraper.config.logging import ContextFilter, JsonFormatter
+from scraper.config.logging import (
+    ContextFilter,
+    JsonFormatter,
+    bind_log_context,
+    reset_log_context,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -146,10 +151,18 @@ def test_agenda_slot_diagnostics_allowlist_and_redact_collection_data(
         "student_name": sentinels[5],
         "unknown_extra": sentinels[6],
     }
+    outer_context_token = bind_log_context(
+        password=sentinels[1],
+        html=sentinels[4],
+        url=sentinels[2],
+        assignment=sentinels[5],
+        unknown_extra=sentinels[6],
+    )
     try:
         with pytest.raises(agenda.AgendaSlotCollectionError):
             asyncio.run(agenda.fetch_agenda(Browser(), student))
     finally:
+        reset_log_context(outer_context_token)
         logger.removeHandler(handler)
         logger.setLevel(original_level)
         logger.propagate = original_propagate

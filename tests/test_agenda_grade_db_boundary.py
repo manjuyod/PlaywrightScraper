@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
 from scraper import agenda
+from scraper.config.logging import ContextFilter
 from scraper.db_cli import GradeDbUnavailable
 from scraper.runner import _new_progress
 
@@ -89,6 +91,72 @@ class FakeBrowser:
         if self._legacy_context is None:
             self._legacy_context = await self.new_context()
         return await self._legacy_context.new_page()
+
+
+@pytest.mark.parametrize("cleanup_target", ["page", "context"])
+@pytest.mark.parametrize("body_fails", [False, True])
+def test_cleanup_cancellation_preserves_established_slot_outcome(
+    monkeypatch, cleanup_target: str, body_fails: bool
+) -> None:
+    """Cancellation during cleanup cannot replace a success or body failure."""
+
+    class CancellingPage(FakePage):
+        async def close(self) -> None:
+            await super().close()
+            if cleanup_target == "page":
+                raise asyncio.CancelledError
+
+    class CancellingContext(FakeContext):
+        async def new_page(self) -> FakePage:
+            page = CancellingPage(len(self.browser.pages) + 1, self)
+            self.pages.append(page)
+            return page
+
+        async def close(self) -> None:
+            await super().close()
+            if cleanup_target == "context":
+                raise asyncio.CancelledError
+
+    class CancellingBrowser(FakeBrowser):
+        async def new_context(self) -> FakeContext:
+            context = CancellingContext(self, len(self.contexts) + 1)
+            self.contexts.append(context)
+            return context
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            if body_fails:
+                raise RuntimeError("body failure")
+            return []
+
+    async def scenario() -> dict[str, object]:
+        browser = CancellingBrowser()
+        slot = agenda.resolve_agenda_slots(_student(7))[0]
+        if body_fails:
+            with pytest.raises(RuntimeError, match="^body failure$"):
+                await agenda._collect_slot(browser, _student(7), slot)
+        else:
+            assert await agenda._collect_slot(browser, _student(7), slot) == {}
+
+        record = logging.makeLogRecord({})
+        ContextFilter().filter(record)
+        assert not hasattr(record, "slot")
+        assert not hasattr(record, "portal")
+        return {"page": browser.pages[0], "context": browser.contexts[0]}
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    cleanup = asyncio.run(scenario())
+
+    assert cleanup["page"].close_calls == 1
+    assert cleanup["context"].close_calls == 1
 
 
 def test_resolve_agenda_slots_preserves_source_order_over_legacy_portal() -> None:

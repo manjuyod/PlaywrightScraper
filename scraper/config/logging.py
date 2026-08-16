@@ -39,6 +39,12 @@ def reset_log_context(token: Token[dict[str, object]]) -> None:
     _LOG_CONTEXT.reset(token)
 
 
+def suspend_log_context() -> Token[dict[str, object]]:
+    """Temporarily prevent inherited context from being attached to a record."""
+
+    return _LOG_CONTEXT.set({})
+
+
 class JsonFormatter(logging.Formatter):
     """Small JSON formatter for machine-readable production logs."""
 
