@@ -41,10 +41,41 @@ def _local_due(raw_due: object, timezone: ZoneInfo) -> tuple[str, str] | None:
     return local.date().isoformat(), local.strftime("%H:%M")
 
 
+def _https_origin_key(url: str) -> tuple[str, int] | None:
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+    ):
+        return None
+    return host, 443
+
+
 def _same_origin(url: str, origin: str) -> bool:
-    candidate = urlparse(url)
-    expected = urlparse(origin)
-    return candidate.scheme == expected.scheme and candidate.netloc == expected.netloc
+    candidate = _https_origin_key(url)
+    expected = _https_origin_key(origin)
+    return candidate is not None and candidate == expected
+
+
+def _validated_origin(origin: str) -> str:
+    key = _https_origin_key(origin)
+    parsed = urlparse(origin)
+    if (
+        key is None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise CanvasAgendaError()
+    return f"https://{key[0]}"
 
 
 async def _fetch_pages(page: Page, origin: str, url: str) -> list[dict[str, Any]]:
@@ -56,7 +87,7 @@ async def _fetch_pages(page: Page, origin: str, url: str) -> list[dict[str, Any]
             raise CanvasAgendaError()
         response = None
         try:
-            response = await page.context.request.get(current_url)
+            response = await page.context.request.get(current_url, max_redirects=0)
             if not response.ok:
                 raise CanvasAgendaError()
             payload = await response.json()
@@ -121,6 +152,7 @@ def _record(
 async def collect_canvas_agenda(
     page: Page, origin: str, *, today: date | None = None
 ) -> list[AgendaRecord]:
+    origin = _validated_origin(origin)
     timezone = await _canvas_timezone(page)
     local_today = today or datetime.now(timezone).date()
     end_day = local_today + timedelta(days=365)

@@ -84,7 +84,7 @@ class FakeRequest:
         self.responses = responses
         self.urls: list[str] = []
 
-    async def get(self, url: str) -> FakeResponse:
+    async def get(self, url: str, **_kwargs: object) -> FakeResponse:
         self.urls.append(url)
         return self.responses[url]
 
@@ -261,7 +261,7 @@ def test_rejects_http_error_without_response_content() -> None:
 
 
 def test_canvas_engine_delegates_agenda_collection_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Would fail if Canvas falls back to DOM scraping or uses the wrong origin."""
+    """Would fail if Canvas ignores the verified return origin when collecting agenda data."""
     received: list[tuple[object, str]] = []
     expected = [{"course": "English 11", "title": "Reading", "dueDate": "2026-08-13", "dueTime": None, "status": "due"}]
 
@@ -271,9 +271,99 @@ def test_canvas_engine_delegates_agenda_collection_once(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(canvas, "collect_canvas_agenda", collect)
     page = object()
+    engine = CanvasEngine(
+        page,
+        "Student.P1Username",
+        "password",
+        "https://husd.instructure.com/login/canvas",
+    )
+    engine._canvas_origin = "https://iad.login.instructure.com"
 
-    assert asyncio.run(CanvasEngine(page, "Student.P1Username", "password", "https://canvas.example/login/canvas").get_agenda()) == expected
-    assert received == [(page, "https://canvas.example")]
+    assert asyncio.run(engine.get_agenda()) == expected
+    assert received == [(page, "https://iad.login.instructure.com")]
+
+
+def test_canvas_engine_refuses_agenda_without_verified_login_origin() -> None:
+    """Would fail if agenda APIs could run before positive authenticated-origin verification."""
+    engine = CanvasEngine(
+        object(),
+        "Student.P1Username",
+        "password",
+        "https://husd.instructure.com/login/canvas",
+    )
+
+    with pytest.raises(CanvasAgendaError, match="^canvas_agenda_origin_unverified$"):
+        asyncio.run(engine.get_agenda())
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://canvas.example",
+        "https://user@canvas.example",
+        "https://canvas.example:444",
+    ],
+)
+def test_canvas_agenda_rejects_untrusted_origin_before_requests(origin: str) -> None:
+    """Would fail if agenda credentials could be sent through an unsafe API origin."""
+    request = FakeRequest({})
+
+    with pytest.raises(CanvasAgendaError, match="^canvas_agenda_request_failed$"):
+        asyncio.run(collect_canvas_agenda(FakePage(request), origin))
+
+    assert request.urls == []
+
+
+def test_canvas_agenda_pagination_compares_effective_default_https_port() -> None:
+    """Would fail if an equivalent explicit HTTPS port is rejected or changes request origin."""
+    origin = "https://canvas.example"
+    courses_1 = f"{origin}/api/v1/courses?per_page=100&enrollment_state=active"
+    courses_2 = "https://canvas.example:443/api/v1/courses?page=2"
+    missing = f"{origin}/api/v1/users/self/missing_submissions?per_page=100"
+    planner = (
+        f"{origin}/api/v1/planner/items?per_page=100"
+        "&start_date=2026-08-13T00%3A00%3A00-07%3A00"
+        "&end_date=2027-08-13T00%3A00%3A00-07%3A00"
+    )
+    request = FakeRequest(
+        {
+            courses_1: FakeResponse([], link=f'<{courses_2}>; rel="next"'),
+            courses_2: FakeResponse([]),
+            missing: FakeResponse([]),
+            planner: FakeResponse([]),
+        }
+    )
+    page = FakePage(request)
+
+    records = asyncio.run(collect_canvas_agenda(page, origin, today=date(2026, 8, 13)))
+
+    assert records == []
+    assert request.urls == [courses_1, courses_2, missing, planner]
+
+
+def test_canvas_agenda_disables_automatic_cross_origin_http_redirects() -> None:
+    """Would fail if the request client can follow authenticated API calls off origin."""
+    origin = "https://canvas.example"
+    courses = f"{origin}/api/v1/courses?per_page=100&enrollment_state=active"
+    attacker = "https://attacker.example/collect"
+
+    class RedirectingRequest:
+        def __init__(self) -> None:
+            self.urls: list[str] = []
+
+        async def get(self, url: str, **kwargs: object) -> FakeResponse:
+            self.urls.append(url)
+            if kwargs.get("max_redirects") != 0:
+                self.urls.append(attacker)
+                return FakeResponse([])
+            return FakeResponse([], ok=False, link=None)
+
+    request = RedirectingRequest()
+
+    with pytest.raises(CanvasAgendaError, match="^canvas_agenda_request_failed$"):
+        asyncio.run(collect_canvas_agenda(FakePage(request), origin))
+
+    assert request.urls == [courses]
 
 
 def test_invalid_canvas_timezone_name_falls_back_to_utc() -> None:
