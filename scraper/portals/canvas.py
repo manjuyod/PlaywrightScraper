@@ -35,6 +35,12 @@ _CANVAS_PREAUTH_HOSTS = frozenset(
         "af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com",
     }
 )
+_CANVAS_RETURN_HOSTS = frozenset(
+    {
+        _CANVAS_ENTRY_HOST,
+        "iad.login.instructure.com",
+    }
+)
 _CANVAS_TRANSIT_HOST = "sso.canvaslms.com"
 _MICROSOFT_LOGIN_HOST = "login.microsoftonline.com"
 _MICROSOFT_CONTINUATION_HOSTS = frozenset(
@@ -81,48 +87,83 @@ class _CanvasAuthRoute:
 
     def reset(self) -> None:
         self._phase = "entry"
+        self._current_host = _CANVAS_ENTRY_HOST
+        self._password_submitted = False
 
     def observe(self, url: str) -> None:
         origin, host = _normalized_https_origin(url)
         if self._phase == "entry":
             if origin == self.entry_origin:
+                self._current_host = host
                 return
             if host in _CANVAS_PREAUTH_HOSTS:
                 self._phase = "preauth"
+                self._current_host = host
                 return
             if host == _CANVAS_TRANSIT_HOST:
                 self._phase = "transit"
+                self._current_host = host
                 return
         elif self._phase == "preauth":
             if origin == self.entry_origin or host in _CANVAS_PREAUTH_HOSTS:
+                self._current_host = host
                 return
             if host == _CANVAS_TRANSIT_HOST:
                 self._phase = "transit"
+                self._current_host = host
                 return
         elif self._phase == "transit":
             if host == _CANVAS_TRANSIT_HOST or origin == self.entry_origin:
+                self._current_host = host
                 return
             if host == _MICROSOFT_LOGIN_HOST:
                 self._phase = "microsoft"
+                self._current_host = host
                 return
         elif self._phase == "microsoft":
-            if host in _MICROSOFT_CONTINUATION_HOSTS:
+            if host == _MICROSOFT_LOGIN_HOST:
+                self._current_host = host
                 return
-            if _is_canvas_host(host):
+            if self._password_submitted and host in _MICROSOFT_CONTINUATION_HOSTS:
+                self._current_host = host
+                return
+            if self._password_submitted and host in _CANVAS_RETURN_HOSTS:
                 self._phase = "canvas_return"
+                self._current_host = host
                 return
-        elif self._phase == "canvas_return" and _is_canvas_host(host):
+        elif self._phase == "canvas_return" and host in _CANVAS_RETURN_HOSTS:
+            self._current_host = host
             return
         raise CanvasTrustError()
 
     def require_microsoft_credentials(self) -> None:
-        if self._phase != "microsoft":
+        if (
+            self._phase != "microsoft"
+            or self._current_host != _MICROSOFT_LOGIN_HOST
+            or self._password_submitted
+        ):
+            raise CanvasTrustError()
+
+    def mark_password_submitted(self) -> None:
+        self.require_microsoft_credentials()
+        self._password_submitted = True
+
+    def require_microsoft_continuation(self) -> None:
+        if (
+            self._phase != "microsoft"
+            or not self._password_submitted
+            or self._current_host not in _MICROSOFT_CONTINUATION_HOSTS
+        ):
             raise CanvasTrustError()
 
     def verified_canvas_origin(self, url: str) -> str:
         origin, host = _normalized_https_origin(url)
         self.observe(url)
-        if self._phase != "canvas_return" or not _is_canvas_host(host):
+        if (
+            self._phase != "canvas_return"
+            or not self._password_submitted
+            or host not in _CANVAS_RETURN_HOSTS
+        ):
             raise CanvasTrustError()
         return origin
 
@@ -475,6 +516,9 @@ class CanvasEngine(PortalEngine):
             route.require_microsoft_credentials()
             await self.page.fill("input#i0118", self.pw)
             self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            route.mark_password_submitted()
             await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
         else:
             self._raise_canvas_route_error()
@@ -482,6 +526,9 @@ class CanvasEngine(PortalEngine):
             route.require_microsoft_credentials()
             await self.page.fill("input#password", self.pw)
             self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            route.mark_password_submitted()
             await self._run_canvas_auth_action(
                 self.page.locator('.form-group input[name="password"]').press("Enter")
             )
@@ -493,7 +540,7 @@ class CanvasEngine(PortalEngine):
         stay_signed_in = self.page.get_by_text("Stay signed in?")
         if await stay_signed_in.count() > 0:
             route.observe(self.page.url)
-            route.require_microsoft_credentials()
+            route.require_microsoft_continuation()
             await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
 
     async def login(self, first_name: Optional[str] = None):

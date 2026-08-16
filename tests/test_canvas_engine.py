@@ -128,6 +128,7 @@ def test_canvas_route_accepts_only_the_approved_sso_sequence() -> None:
     route.observe("https://sso.canvaslms.com/login/saml")
     route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
     route.require_microsoft_credentials()
+    route.mark_password_submitted()
     route.observe("https://iad.login.instructure.com/login/saml")
 
     assert route.verified_canvas_origin("https://iad.login.instructure.com/dashboard") == (
@@ -150,12 +151,90 @@ def test_canvas_route_accepts_the_exact_live_redirect_chain() -> None:
         route.observe(url)
 
     route.require_microsoft_credentials()
+    route.mark_password_submitted()
     route.observe("https://login.live.com/continue")
-    route.require_microsoft_credentials()
     route.observe("https://iad.login.instructure.com/dashboard")
     assert route.verified_canvas_origin("https://iad.login.instructure.com/dashboard") == (
         "https://iad.login.instructure.com"
     )
+
+
+def test_canvas_route_rejects_live_continuation_before_password_submission() -> None:
+    """Would fail if a continuation host can receive username/password credentials."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        route.observe("https://login.live.com/continue")
+
+
+def test_canvas_route_allows_live_continuation_only_after_password_submission() -> None:
+    """Would fail if the approved post-submit continuation cannot be distinguished."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+
+    route.observe("https://login.live.com/continue")
+
+
+def test_canvas_route_rejects_unrelated_canvas_return_after_microsoft() -> None:
+    """Would fail if another Canvas tenant can become the agenda API origin."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        route.observe("https://other.instructure.com/dashboard")
+
+
+def test_canvas_route_final_verification_rejects_unrelated_canvas_tenant() -> None:
+    """Would fail if final origin verification broadens a trusted Canvas return."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe("https://iad.login.instructure.com/dashboard")
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        route.verified_canvas_origin("https://other.instructure.com/dashboard")
+
+
+def test_canvas_exact_live_redirect_cannot_receive_password_before_submission() -> None:
+    """Would fail if a username-stage live redirect can receive the password."""
+
+    class Page(RoutePage):
+        def __init__(self) -> None:
+            super().__init__("https://login.microsoftonline.com/common/oauth2/authorize")
+            self.password_fills = 0
+
+        async def fill(self, selector: str, _value: str, **_kwargs: object) -> None:
+            if selector == "input#username":
+                raise PlaywrightTimeout("modern Microsoft form")
+            if selector == "input#i0118":
+                self.password_fills += 1
+
+        async def click(self, selector: str) -> None:
+            if selector == "#idSIButton9":
+                self.navigate("https://login.live.com/continue")
+
+    page = Page()
+    engine = CanvasEngine(
+        page, "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+    route = canvas._CanvasAuthRoute(engine.login_url)
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe(page.url)
+    engine._install_canvas_route_guard(route)
+    try:
+        with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+            asyncio.run(engine._submit_microsoft_credentials_once(route))
+    finally:
+        engine._remove_canvas_route_guard()
+
+    assert page.password_fills == 0
 
 
 def test_canvas_route_guard_observes_main_frame_redirect_requests() -> None:
@@ -297,6 +376,7 @@ def test_post_submit_timeout_submits_once_and_is_not_retried() -> None:
 
         async def _submit_microsoft_credentials_once(self, route: object) -> None:
             route.require_microsoft_credentials()
+            route.mark_password_submitted()
             self.submit_calls += 1
 
         async def _wait_for_login_result(self, timeout_ms: int = 12000) -> bool:
@@ -577,6 +657,7 @@ def test_successful_login_freezes_the_verified_canvas_return_origin() -> None:
 
         async def _submit_microsoft_credentials_once(self, route: object) -> None:
             route.require_microsoft_credentials()
+            route.mark_password_submitted()
 
         async def _wait_for_login_result(self, timeout_ms: int = 12000) -> bool:
             self.page.navigate("https://iad.login.instructure.com/dashboard")
