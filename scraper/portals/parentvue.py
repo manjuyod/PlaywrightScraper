@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 from scraper.portals.base import (
     GradeTableConfig,
     PortalEngine,
@@ -31,28 +32,31 @@ class ParentVUE(PortalEngine):
         await self.raise_login_error_if("Login" in self.page.url)
 
     async def after_login(self, first_name: str | None) -> None:
-        await wait_after_nav(
-            self.page, wait_until="domcontentloaded", timeout=30000
-        )
-        if "Login_Parent" in self.login_url:
-            await self.select_student(first_name)
-        self.logger.info("portal.navigation.gradebook_started")
-        gradebook_link = self.page.locator(
-            'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
-        ).first
-        await gradebook_link.click()
-        await self.page.wait_for_load_state(
-            state="domcontentloaded", timeout=30000
-        )
-        await self.page.wait_for_selector("#gb-assignments", timeout=30000)
-        await self.page.wait_for_selector(
-            "#gb-assignments .no-data:visible, "
-            "#gb-assignments .assignment-row:visible, "
-            "#gb-assignments .gb-assignment-row:visible, "
-            "#gb-assignments tr:has(.assignment-title, .assignment-name, "
-            '[data-label="Assignment"]):visible',
-            timeout=30000,
-        )
+        try:
+            await wait_after_nav(
+                self.page, wait_until="domcontentloaded", timeout=30000
+            )
+            if "Login_Parent" in self.login_url:
+                await self.select_student(first_name)
+            self.logger.info("portal.navigation.gradebook_started")
+            gradebook_link = self.page.locator(
+                'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
+            ).first
+            await gradebook_link.click()
+            await self.page.wait_for_load_state(
+                state="domcontentloaded", timeout=30000
+            )
+            await self.page.wait_for_selector("#gb-assignments", timeout=30000)
+            await self.page.wait_for_selector(
+                "#gb-assignments .no-data:visible, "
+                "#gb-assignments .assignment-row:visible, "
+                "#gb-assignments .gb-assignment-row:visible, "
+                "#gb-assignments tr:has(.assignment-title, .assignment-name, "
+                '[data-label="Assignment"]):visible',
+                timeout=30000,
+            )
+        except PlaywrightTimeout:
+            raise self.LoginError("portal login rejected") from None
 
 
 

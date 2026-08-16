@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+from tenacity import wait_none
+
 from scraper.agenda_contract import normalize_agenda
+from scraper.portals import utils as portal_utils
 from scraper.portals.parentvue import ParentVUE
 from scraper.portals.parentvue_agenda import ParentVueAgendaError, parse_parentvue_agenda
 
@@ -337,7 +342,9 @@ class FakeGradebookLocator:
 
 
 class FakeNavigationPage:
-    def __init__(self) -> None:
+    def __init__(self, *, readiness_times_out: bool = False) -> None:
+        self.url = "https://parentvue.example/Login_Student_PXP.aspx"
+        self.readiness_times_out = readiness_times_out
         self.clicked_visible_gradebook = False
         self.selector: str | None = None
         self.waited_for_selectors: list[str] = []
@@ -351,6 +358,8 @@ class FakeNavigationPage:
 
     async def wait_for_selector(self, selector: str, **_kwargs: object) -> None:
         self.waited_for_selectors.append(selector)
+        if self.readiness_times_out:
+            raise PlaywrightTimeout("sensitive post-submit detail")
 
     async def wait_for_timeout(self, _milliseconds: int) -> None:
         pass
@@ -371,3 +380,33 @@ def test_after_login_selects_visible_href_specific_gradebook_link() -> None:
         "#gb-assignments .gb-assignment-row:visible, "
         "#gb-assignments tr:has(.assignment-title, .assignment-name, [data-label=\"Assignment\"]):visible",
     ]
+
+
+def test_login_does_not_resubmit_credentials_when_gradebook_readiness_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a post-submit ParentVUE timeout re-enters the login flow."""
+    page = FakeNavigationPage(readiness_times_out=True)
+    login_calls: list[str] = []
+
+    async def fake_universal_login_flow(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        login_calls.append("submit")
+        page.url = "https://parentvue.example/home"
+
+    monkeypatch.setattr(portal_utils, "universal_login_flow", fake_universal_login_flow)
+    engine = ParentVUE(
+        page,  # type: ignore[arg-type]
+        "student",
+        "password",
+        "https://parentvue.example/Login_Student_PXP.aspx",
+    )
+
+    with pytest.raises(Exception) as raised:
+        asyncio.run(
+            type(engine).login.retry_with(wait=wait_none())(engine)
+        )
+
+    assert login_calls == ["submit"]
+    assert type(raised.value) is ParentVUE.LoginError
+    assert str(raised.value) == "portal login rejected"

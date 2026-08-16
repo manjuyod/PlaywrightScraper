@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+from tenacity import wait_none
 
 from scraper.portals import utils as portal_utils
 from scraper.portals.gps import GPS
@@ -93,3 +95,26 @@ def test_login_continues_to_gps_auth_after_the_login_form_disappears(
 
     assert login_calls == ["submit"]
     assert auth_calls == ["pictographs"]
+
+
+def test_login_does_not_resubmit_credentials_when_pictograph_readiness_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a post-submit GPS timeout re-enters the whole login flow."""
+    page = FakeLoginPage(username_visible=False, password_visible=False)
+    login_calls, _ = _configure_login_dependencies(monkeypatch)
+
+    async def fail_pictograph_readiness(_self: GPS) -> None:
+        raise PlaywrightTimeout("sensitive post-submit detail")
+
+    monkeypatch.setattr(GPS, "do_gps_auth", fail_pictograph_readiness)
+    engine = _engine(page)
+
+    with pytest.raises(Exception) as raised:
+        asyncio.run(
+            type(engine).login.retry_with(wait=wait_none())(engine)
+        )
+
+    assert login_calls == ["submit"]
+    assert type(raised.value) is GPS.LoginError
+    assert str(raised.value) == "portal login rejected"
