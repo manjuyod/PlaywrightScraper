@@ -82,6 +82,201 @@ class FakePage:
         return ASSIGNED_HTML if self.current_tab == "Assigned" else MISSING_HTML
 
 
+class LoginControl:
+    def __init__(self, visible: bool) -> None:
+        self.visible = visible
+
+
+class LoginPage:
+    def __init__(self, url: str, *, main_menu_visible: bool = False) -> None:
+        self.url = url
+        self.main_menu_visible = main_menu_visible
+        self.goto_urls: list[str] = []
+
+    async def goto(self, url: str, *, wait_until: str) -> None:
+        _ = wait_until
+        self.goto_urls.append(url)
+
+    def locator(self, selector: str) -> LoginControl:
+        assert selector == 'button[aria-label="Main Menu"]'
+        return LoginControl(self.main_menu_visible)
+
+
+def _login_engine(page: LoginPage, **kwargs: object) -> GoogleClassroom:
+    return GoogleClassroom(
+        page,
+        "google-user",
+        "google-password",
+        "https://classroom.google.com",
+        **kwargs,
+    )
+
+
+def _configure_google_login(
+    monkeypatch: pytest.MonkeyPatch, *, navigation_times_out: bool = False
+) -> None:
+    async def google_login(_: GoogleClassroom) -> None:
+        return None
+
+    async def wait_for_navigation(*_: object, **__: object) -> None:
+        if navigation_times_out:
+            raise google_classroom.PlaywrightTimeout("redirect pending")
+
+    async def control_exists(control: LoginControl, timeout: int = 1000) -> bool:
+        _ = timeout
+        return control.visible
+
+    monkeypatch.setattr(GoogleClassroom, "google_login", google_login)
+    monkeypatch.setattr(google_classroom, "wait_after_nav", wait_for_navigation)
+    monkeypatch.setattr(google_classroom, "exists", control_exists)
+
+
+def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a Classroom URL is accepted before its authenticated UI is ready."""
+    page = LoginPage("https://classroom.google.com/u/0/h", main_menu_visible=True)
+    _configure_google_login(monkeypatch)
+
+    asyncio.run(_login_engine(page).login())
+
+
+@pytest.mark.parametrize(
+    ("url", "portal_key"),
+    [
+        ("https://accounts.google.com/signin/challenge", "google_classroom"),
+        ("https://unknown.example/continue", None),
+    ],
+)
+def test_login_rejects_unresolved_or_unknown_redirects(
+    monkeypatch: pytest.MonkeyPatch, url: str, portal_key: str | None
+) -> None:
+    """Would fail if a non-Classroom redirect is treated as an authenticated session."""
+    page = LoginPage(url)
+    _configure_google_login(monkeypatch, navigation_times_out=True)
+    monkeypatch.setattr(
+        google_classroom, "get_portal_key_from_url", lambda _: portal_key
+    )
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(_login_engine(page).login())
+
+
+def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if approved GPS delegation uses Google credentials or shares auth images."""
+    page = LoginPage("https://gps.example/sso/callback")
+    _configure_google_login(monkeypatch, navigation_times_out=True)
+    constructed: list[tuple[object, ...]] = []
+
+    class GpsEngine:
+        async def login(self) -> None:
+            return None
+
+    def get_portal_key(url: str) -> str | None:
+        return "gps" if "gps.example" in url else "google_classroom"
+
+    def get_portal(portal: str):
+        assert portal == "gps"
+
+        def construct(*args: object, **kwargs: object) -> GpsEngine:
+            constructed.append((*args, kwargs))
+            return GpsEngine()
+
+        return construct
+
+    monkeypatch.setattr(google_classroom, "get_portal_key_from_url", get_portal_key)
+    monkeypatch.setattr(google_classroom, "get_portal", get_portal)
+    images = ["circle", "triangle", "star"]
+
+    asyncio.run(
+        _login_engine(
+            page,
+            alt_portal_url="https://gps.example/login",
+            alt_student_id="gps-user",
+            alt_password="gps-password",
+            auth_images=images,
+        ).login()
+    )
+
+    assert len(constructed) == 1
+    (
+        page_arg,
+        sid,
+        password,
+    ) = constructed[0][:3]
+    kwargs = constructed[0][3]
+    assert page_arg is page
+    assert (sid, password) == ("gps-user", "gps-password")
+    assert kwargs == {
+        "login_url": "https://gps.example/sso/callback",
+        "student_name": None,
+        "auth_images": ["circle", "triangle", "star"],
+    }
+    assert kwargs["auth_images"] is not images
+
+
+def test_login_rejects_gps_redirect_when_origins_do_not_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a same-key portal on another HTTPS origin receives alternate credentials."""
+    page = LoginPage("https://other-gps.example/sso/callback")
+    _configure_google_login(monkeypatch, navigation_times_out=True)
+    constructed = False
+
+    monkeypatch.setattr(google_classroom, "get_portal_key_from_url", lambda _: "gps")
+
+    def get_portal(_: str):
+        nonlocal constructed
+        constructed = True
+        raise AssertionError("origin-mismatched portal must not be constructed")
+
+    monkeypatch.setattr(google_classroom, "get_portal", get_portal)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(
+            _login_engine(
+                page,
+                alt_portal_url="https://gps.example/login",
+                alt_student_id="gps-user",
+                alt_password="gps-password",
+            ).login()
+        )
+
+    assert constructed is False
+
+
+def test_login_stops_a_delegation_loop_after_one_approved_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a redirected Google engine can repeatedly hand off the same page."""
+    page = LoginPage("https://gps.example/sso/callback")
+    _configure_google_login(monkeypatch, navigation_times_out=True)
+    constructed = 0
+
+    monkeypatch.setattr(google_classroom, "get_portal_key_from_url", lambda _: "gps")
+
+    def get_portal(_: str):
+        nonlocal constructed
+        constructed += 1
+        return GoogleClassroom
+
+    monkeypatch.setattr(google_classroom, "get_portal", get_portal)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(
+            _login_engine(
+                page,
+                alt_portal_url="https://gps.example/login",
+                alt_student_id="gps-user",
+                alt_password="gps-password",
+            ).login()
+        )
+
+    assert constructed == 1
+
+
 def test_parser_normalizes_sanitized_assigned_and_missing_records() -> None:
     """Would fail if source IDs, due dates/times, or statuses stop being normalized."""
     reference = datetime(2026, 8, 13, 12, 0)
@@ -136,7 +331,10 @@ def test_get_agenda_collects_assigned_then_missing_tabs(monkeypatch: pytest.Monk
     async def wait_for_navigation(_: object, *, pattern: str, **__: object) -> None:
         waits.append(pattern)
 
-    async def control_exists(_: object) -> bool:
+    readiness_checks: list[tuple[str, int]] = []
+
+    async def control_exists(control: object, timeout: int = 1000) -> bool:
+        readiness_checks.append((getattr(control, "name"), timeout))
         return True
 
     monkeypatch.setattr(google_classroom, "wait_after_nav", wait_for_navigation)
@@ -149,6 +347,11 @@ def test_get_agenda_collects_assigned_then_missing_tabs(monkeypatch: pytest.Monk
     assert GoogleClassroom.agenda_capable is True
     assert page.clicks == ["To-do", "Assigned", "Missing"]
     assert waits == ["**/a/not-turned-in/**", "**/a/not-turned-in/**", "**/a/missing/**"]
+    assert readiness_checks == [
+        ("To-do", 10_000),
+        ("Assigned", 10_000),
+        ("Missing", 10_000),
+    ]
     assert [record["sourceId"] for record in records] == [
         "google_classroom:stream-10",
         "google_classroom:stream-9",
@@ -157,6 +360,7 @@ def test_get_agenda_collects_assigned_then_missing_tabs(monkeypatch: pytest.Monk
 
 def test_get_agenda_raises_safe_code_when_navigation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Would fail if a navigation error returns a silent partial agenda."""
+
     async def navigation_failure(*_: object, **__: object) -> None:
         raise RuntimeError("sensitive navigation details")
 
@@ -175,6 +379,7 @@ def test_get_agenda_raises_safe_code_when_navigation_fails(monkeypatch: pytest.M
 
 def test_get_agenda_raises_safe_code_when_parser_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Would fail if a parser error leaks content or returns an incomplete result."""
+
     async def wait_for_navigation(*_: object, **__: object) -> None:
         return None
 

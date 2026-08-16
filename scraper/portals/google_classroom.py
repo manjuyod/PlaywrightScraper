@@ -1,11 +1,12 @@
 from __future__ import annotations
 from typing import Optional
+from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime
 
 from scraper.agenda_contract import AgendaRecord, AgendaStatus
-from scraper.portals.base import GradeMap, PortalEngine, PlaywrightTimeout
+from scraper.portals.base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
 from scraper.portals import get_portal
 from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_from_url
 
@@ -13,6 +14,38 @@ from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_fr
 class GoogleClassroomAgendaError(Exception):
     def __init__(self) -> None:
         super().__init__("google_classroom_agenda_failed")
+
+
+def _normalized_https_origin(url: str | None) -> str | None:
+    if not isinstance(url, str):
+        return None
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.casefold() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+    ):
+        return None
+    return f"https://{parsed.hostname.casefold()}"
+
+
+async def _has_classroom_main_menu(page: object) -> bool:
+    return _normalized_https_origin(
+        getattr(page, "url", None)
+    ) == "https://classroom.google.com" and await exists(
+        page.locator('button[aria-label="Main Menu"]'), timeout=10_000
+    )
+
+
+async def _require_agenda_control(control: object) -> None:
+    if not await exists(control, timeout=10_000):
+        raise GoogleClassroomAgendaError()
 
 
 def _parse_classroom_agenda(
@@ -73,28 +106,54 @@ class GoogleClassroom(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
     async def login(self, first_name: Optional[str] = None) -> None:
-        try: # in theory, we should just use the Google sign in
-            # in reality, after inserting the username, the page may reroute to some internal portal
+        _ = first_name
+        try:
             if self.login_url != self.page.url:  # Only nav if we are not at the target page
                 await self.page.goto(self.login_url, wait_until="domcontentloaded")
             try:
                 await self.google_login()
                 await wait_after_nav(self.page, pattern='classroom.google.com')
             except PlaywrightTimeout:
-                portal = get_portal_key_from_url(self.page.url)
-                if portal and portal != 'google_classroom': # new portal reached, create a new engine and login there
-                    Engine = get_portal(portal)
-                    scraper = Engine(
-                        self.page,
-                        self.sid,
-                        self.pw,
-                        login_url=self.page.url,
-                        student_name=self.student_name,
-                        auth_images=self.auth_images
-                    )
-                    await scraper.login()
-        except Exception:
+                pass
+
+            if await _has_classroom_main_menu(self.page):
+                return
+
+            redirect_origin = _normalized_https_origin(self.page.url)
+            configured_origin = _normalized_https_origin(self.alt_portal_url)
+            redirect_portal = get_portal_key_from_url(self.page.url)
+            configured_portal = get_portal_key_from_url(self.alt_portal_url or "")
+            approved_delegation = (
+                redirect_origin is not None
+                and redirect_origin == configured_origin
+                and redirect_portal is not None
+                and redirect_portal == configured_portal
+                and redirect_portal != self.portal_key
+                and self.alt_sid is not None
+                and self.alt_pw is not None
+            )
+            if not approved_delegation:
+                raise LoginError("portal login rejected")
+            if getattr(self.page, "_google_classroom_delegated", False):
+                raise LoginError("portal login rejected")
+            setattr(self.page, "_google_classroom_delegated", True)
+
+            Engine = get_portal(redirect_portal)
+            scraper = Engine(
+                self.page,
+                self.alt_sid,
+                self.alt_pw,
+                login_url=self.page.url,
+                student_name=self.student_name,
+                auth_images=list(self.auth_images)
+                if self.auth_images is not None
+                else None,
+            )
+            await scraper.login()
+        except LoginError:
             raise
+        except Exception:
+            raise LoginError("portal login rejected") from None
 
     async def get_agenda(self) -> list[AgendaRecord]:
         try:
@@ -102,10 +161,11 @@ class GoogleClassroom(PortalEngine):
             await self.page.wait_for_selector(menu_sidebar_selector, timeout=10000)
             todo_tab_button = self.page.get_by_role('menuitem', name='To-do')
 
-            if not await exists(todo_tab_button):
+            if not await exists(todo_tab_button, timeout=10_000):
                 menu_button = self.page.locator(menu_sidebar_selector)
-                assert await exists(menu_button)
+                await _require_agenda_control(menu_button)
                 await menu_button.click()
+                await _require_agenda_control(todo_tab_button)
             await todo_tab_button.click()
 
             upcoming_assignments_url_pattern = '**/a/not-turned-in/**'
@@ -113,8 +173,8 @@ class GoogleClassroom(PortalEngine):
 
             upcoming_tab_button = self.page.get_by_role('link', name='Assigned')
             missing_tab_button = self.page.get_by_role('link', name='Missing')
-            assert await exists(upcoming_tab_button)
-            assert await exists(missing_tab_button)
+            await _require_agenda_control(upcoming_tab_button)
+            await _require_agenda_control(missing_tab_button)
             await upcoming_tab_button.click()
             await wait_after_nav(
                 self.page, pattern=upcoming_assignments_url_pattern, wait_after_load=2000
