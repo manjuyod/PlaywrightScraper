@@ -182,8 +182,18 @@ def test_two_canvas_slots_use_distinct_pages_and_keep_duplicate_assignments(
         "https://district.instructure.com/login",
     )
     assert [call[4] for call in constructors] == [
-        {"student_name": "Student 7"},
-        {"student_name": "Student 7"},
+        {
+            "alt_portal_url": "https://district.instructure.com/login",
+            "alt_student_id": "alt-user-7",
+            "alt_password": "alternate-secret",
+            "student_name": "Student 7",
+        },
+        {
+            "alt_portal_url": "https://canvas.example/login",
+            "alt_student_id": "user-7",
+            "alt_password": "primary-secret",
+            "student_name": "Student 7",
+        },
     ]
     assert all(page.close_calls == 1 for page in browser.pages)
 
@@ -261,13 +271,166 @@ def test_concurrent_same_origin_slots_use_isolated_contexts(monkeypatch) -> None
 
     assert observed == {"user-7": "user-7", "alt-user-7": "alt-user-7"}
     assert len(browser.contexts) == 2
-    assert all(context.default_timeout == 5_000 for context in browser.contexts)
+    assert all(context.default_timeout == 15_000 for context in browser.contexts)
     assert all(
-        context.default_navigation_timeout == 5_000
+        context.default_navigation_timeout == 15_000
         for context in browser.contexts
     )
     assert all(context.close_calls == 1 for context in browser.contexts)
     assert all(page.close_calls == 1 for page in browser.pages)
+
+
+def test_google_slot_uses_opposite_gps_credentials_and_copied_auth_images(
+    monkeypatch,
+) -> None:
+    """Would fail if Google uses its own slot as GPS fallback or shares auth images."""
+    constructed: list[tuple[str, str, str, dict]] = []
+
+    class GpsEngine:
+        agenda_capable = False
+
+    class GoogleEngine:
+        agenda_capable = True
+
+        def __init__(self, _page, username, password, login_url, **kwargs):
+            constructed.append((username, password, login_url, kwargs))
+            kwargs["auth_images"].append("mutated-by-engine")
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            return []
+
+    def get_portal(portal: str):
+        return GpsEngine if portal == "gps" else GoogleEngine
+
+    monkeypatch.setattr(agenda, "get_portal", get_portal)
+    student = _student(7)
+    student.update(
+        login_url="https://gpsportal.example/login",
+        id="gps-user",
+        password="gps-password",
+        alt_login_url="https://classroom.google.com",
+        alt_id="google-user",
+        alt_password="google-password",
+        auth_images=["circle", "triangle", "star"],
+    )
+
+    bundle, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), student))
+
+    assert bundle["agenda2"]["weeks"] == {}
+    assert constructed == [
+        (
+            "google-user",
+            "google-password",
+            "https://classroom.google.com",
+            {
+                "alt_portal_url": "https://gpsportal.example/login",
+                "alt_student_id": "gps-user",
+                "alt_password": "gps-password",
+                "student_name": "Student 7",
+                "auth_images": ["circle", "triangle", "star", "mutated-by-engine"],
+            },
+        )
+    ]
+    assert student["auth_images"] == ["circle", "triangle", "star"]
+    assert constructed[0][3]["auth_images"] is not student["auth_images"]
+
+
+@pytest.mark.parametrize("cleanup_target", ["page", "context"])
+def test_agenda_success_survives_cleanup_failure(monkeypatch, cleanup_target: str) -> None:
+    """Would fail if cleanup replaces a successfully collected agenda."""
+
+    class CleanupFailingPage(FakePage):
+        async def close(self) -> None:
+            await super().close()
+            if cleanup_target == "page":
+                raise RuntimeError("cleanup failure")
+
+    class CleanupFailingContext(FakeContext):
+        async def new_page(self) -> FakePage:
+            page = CleanupFailingPage(len(self.browser.pages) + 1, self)
+            self.pages.append(page)
+            return page
+
+        async def close(self) -> None:
+            await super().close()
+            if cleanup_target == "context":
+                raise RuntimeError("cleanup failure")
+
+    class CleanupFailingBrowser(FakeBrowser):
+        async def new_context(self) -> FakeContext:
+            context = CleanupFailingContext(self, len(self.contexts) + 1)
+            self.contexts.append(context)
+            return context
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            return []
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    student = _student(7)
+    student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+    bundle, _ = asyncio.run(agenda.fetch_agenda(CleanupFailingBrowser(), student))
+
+    assert bundle["agenda1"]["weeks"] == {}
+
+
+def test_agenda_slot_failure_code_survives_cleanup_failure(monkeypatch) -> None:
+    """Would fail if cleanup replaces the established public slot failure code."""
+
+    class CleanupFailingPage(FakePage):
+        async def close(self) -> None:
+            await super().close()
+            raise RuntimeError("cleanup failure")
+
+    class CleanupFailingContext(FakeContext):
+        async def new_page(self) -> FakePage:
+            page = CleanupFailingPage(len(self.browser.pages) + 1, self)
+            self.pages.append(page)
+            return page
+
+        async def close(self) -> None:
+            await super().close()
+            raise RuntimeError("cleanup failure")
+
+    class CleanupFailingBrowser(FakeBrowser):
+        async def new_context(self) -> FakeContext:
+            context = CleanupFailingContext(self, len(self.contexts) + 1)
+            self.contexts.append(context)
+            return context
+
+    class FailingEngine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            raise RuntimeError("collection failure")
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: FailingEngine)
+    student = _student(7)
+    student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+    with pytest.raises(
+        agenda.AgendaSlotCollectionError,
+        match="^agenda1_canvas_failed$",
+    ):
+        asyncio.run(agenda.fetch_agenda(CleanupFailingBrowser(), student))
 
 
 def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> None:

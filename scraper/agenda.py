@@ -86,29 +86,47 @@ async def _collect_slot(
 ) -> AgendaWeeks:
     if not slot.portal or not slot.login_url or not slot.username or not slot.password:
         raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
+    first_slot, second_slot = resolve_agenda_slots(student)
+    alternate_slot = second_slot if slot.number == 1 else first_slot
     context = await browser.new_context()
     page = None
     try:
-        context.set_default_timeout(5_000)
-        context.set_default_navigation_timeout(5_000)
+        context.set_default_timeout(15_000)
+        context.set_default_navigation_timeout(15_000)
         page = await context.new_page()
         engine = get_portal(slot.portal)
+        engine_kwargs: dict[str, object] = {
+            "alt_portal_url": alternate_slot.login_url,
+            "alt_student_id": alternate_slot.username,
+            "alt_password": alternate_slot.password,
+            "student_name": _optional_string(student.get("student_name")),
+        }
+        if slot.portal == "google_classroom":
+            raw_auth_images = student.get("auth_images")
+            if isinstance(raw_auth_images, list):
+                engine_kwargs["auth_images"] = [
+                    image for image in raw_auth_images[:3] if isinstance(image, str)
+                ]
         scraper = engine(
             page,
             slot.username,
             slot.password,
             slot.login_url,
-            student_name=_optional_string(student.get("student_name")),
+            **engine_kwargs,
         )
         await scraper.login(first_name=_optional_string(student.get("student_name")))
         records = await scraper.get_agenda()
         return normalize_agenda(records)
     finally:
-        try:
-            if page is not None:
+        if page is not None:
+            try:
                 await page.close()
-        finally:
+            except Exception:
+                pass
+        try:
             await context.close()
+        except Exception:
+            pass
 
 
 async def fetch_agenda(
