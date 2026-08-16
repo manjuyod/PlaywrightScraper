@@ -4,11 +4,17 @@ from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime
+from playwright.async_api import Page
 
 from scraper.agenda_contract import AgendaRecord, AgendaStatus
 from scraper.portals.base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
 from scraper.portals import get_portal
 from .utils import exists, wait_after_nav, reconcile_day_time, get_portal_key_from_url
+
+
+_CLASSROOM_ORIGIN = "https://classroom.google.com"
+_GOOGLE_CREDENTIAL_ORIGIN = "https://accounts.google.com"
+_GOOGLE_CREDENTIAL_SUBMITTED = "_google_classroom_credentials_submitted"
 
 
 class GoogleClassroomAgendaError(Exception):
@@ -35,10 +41,39 @@ def _normalized_https_origin(url: str | None) -> str | None:
     return f"https://{parsed.hostname.casefold()}"
 
 
+class _GoogleCredentialSubmitter:
+    def __init__(self, page: Page, student_id: str, password: str) -> None:
+        self.page = page
+        self.student_id = student_id
+        self.password = password
+
+    def _require_credential_origin(self) -> None:
+        if _normalized_https_origin(self.page.url) != _GOOGLE_CREDENTIAL_ORIGIN:
+            raise LoginError("portal login rejected")
+
+    async def submit_once(self) -> None:
+        self._require_credential_origin()
+        if getattr(self.page, _GOOGLE_CREDENTIAL_SUBMITTED, False):
+            raise LoginError("portal login rejected")
+        setattr(self.page, _GOOGLE_CREDENTIAL_SUBMITTED, True)
+
+        await self.page.fill("input#identifierId", self.student_id)
+        await self.page.wait_for_timeout(3000)
+        self._require_credential_origin()
+        await self.page.get_by_text("Next").click()
+        self._require_credential_origin()
+        _ = await self.page.wait_for_selector('input[name="Passwd"]')
+        self._require_credential_origin()
+        await self.page.fill('input[name="Passwd"]', self.password)
+        await self.page.wait_for_timeout(2000)
+        self._require_credential_origin()
+        await self.page.get_by_role("button", name="Next").click()
+
+
 async def _has_classroom_main_menu(page: object) -> bool:
     return _normalized_https_origin(
         getattr(page, "url", None)
-    ) == "https://classroom.google.com" and await exists(
+    ) == _CLASSROOM_ORIGIN and await exists(
         page.locator('button[aria-label="Main Menu"]'), timeout=10_000
     )
 
@@ -108,10 +143,31 @@ class GoogleClassroom(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         _ = first_name
         try:
+            if _normalized_https_origin(self.login_url) != _CLASSROOM_ORIGIN:
+                raise LoginError("portal login rejected")
             if await _has_classroom_main_menu(self.page):
                 return
-            if self.login_url != self.page.url:  # Only nav if we are not at the target page
+
+            if await self._delegate_current_portal():
+                return
+
+            current_origin = _normalized_https_origin(self.page.url)
+            if current_origin not in (
+                None,
+                _CLASSROOM_ORIGIN,
+                _GOOGLE_CREDENTIAL_ORIGIN,
+            ):
+                raise LoginError("portal login rejected")
+            if current_origin is None and self.page.url != "about:blank":
+                raise LoginError("portal login rejected")
+            if current_origin != _GOOGLE_CREDENTIAL_ORIGIN:
                 await self.page.goto(self.login_url, wait_until="domcontentloaded")
+
+            if await _has_classroom_main_menu(self.page):
+                return
+            if await self._delegate_current_portal():
+                return
+
             try:
                 await self.google_login()
                 await wait_after_nav(self.page, pattern='classroom.google.com')
@@ -120,44 +176,51 @@ class GoogleClassroom(PortalEngine):
 
             if await _has_classroom_main_menu(self.page):
                 return
-
-            redirect_origin = _normalized_https_origin(self.page.url)
-            configured_origin = _normalized_https_origin(self.alt_portal_url)
-            redirect_portal = get_portal_key_from_url(self.page.url)
-            configured_portal = get_portal_key_from_url(self.alt_portal_url or "")
-            approved_delegation = (
-                redirect_origin is not None
-                and redirect_origin == configured_origin
-                and redirect_portal is not None
-                and redirect_portal == configured_portal
-                and redirect_portal != self.portal_key
-                and self.alt_sid is not None
-                and self.alt_pw is not None
-            )
-            if not approved_delegation:
-                raise LoginError("portal login rejected")
-            if getattr(self.page, "_google_classroom_delegated", False):
-                raise LoginError("portal login rejected")
-            setattr(self.page, "_google_classroom_delegated", True)
-
-            Engine = get_portal(redirect_portal)
-            scraper = Engine(
-                self.page,
-                self.alt_sid,
-                self.alt_pw,
-                login_url=self.page.url,
-                student_name=self.student_name,
-                auth_images=list(self.auth_images)
-                if self.auth_images is not None
-                else None,
-            )
-            await scraper.login()
-            if not await _has_classroom_main_menu(self.page):
+            if not await self._delegate_current_portal():
                 raise LoginError("portal login rejected")
         except LoginError:
-            raise
+            raise LoginError("portal login rejected") from None
         except Exception:
             raise LoginError("portal login rejected") from None
+
+    async def google_login(self) -> None:
+        await _GoogleCredentialSubmitter(self.page, self.sid, self.pw).submit_once()
+
+    async def _delegate_current_portal(self) -> bool:
+        redirect_origin = _normalized_https_origin(self.page.url)
+        configured_origin = _normalized_https_origin(self.alt_portal_url)
+        redirect_portal = get_portal_key_from_url(self.page.url)
+        configured_portal = get_portal_key_from_url(self.alt_portal_url or "")
+        approved_delegation = (
+            redirect_origin is not None
+            and redirect_origin == configured_origin
+            and redirect_portal is not None
+            and redirect_portal == configured_portal
+            and redirect_portal != self.portal_key
+            and self.alt_sid is not None
+            and self.alt_pw is not None
+        )
+        if not approved_delegation:
+            return False
+        if getattr(self.page, "_google_classroom_delegated", False):
+            raise LoginError("portal login rejected")
+        setattr(self.page, "_google_classroom_delegated", True)
+
+        Engine = get_portal(redirect_portal)
+        scraper = Engine(
+            self.page,
+            self.alt_sid,
+            self.alt_pw,
+            login_url=self.page.url,
+            student_name=self.student_name,
+            auth_images=list(self.auth_images)
+            if self.auth_images is not None
+            else None,
+        )
+        await scraper.login()
+        if not await _has_classroom_main_menu(self.page):
+            raise LoginError("portal login rejected")
+        return True
 
     async def get_agenda(self) -> list[AgendaRecord]:
         try:

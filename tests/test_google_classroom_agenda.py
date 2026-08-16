@@ -102,6 +102,56 @@ class LoginPage:
         return LoginControl(self.main_menu_visible)
 
 
+class CredentialControl:
+    def __init__(self, on_click=None) -> None:
+        self.on_click = on_click
+
+    async def click(self) -> None:
+        if self.on_click is not None:
+            self.on_click()
+
+
+class CredentialPage(LoginPage):
+    def __init__(
+        self,
+        url: str,
+        *,
+        goto_target: str | None = None,
+        post_identifier_url: str | None = None,
+    ) -> None:
+        super().__init__(url)
+        self.goto_target = goto_target
+        self.post_identifier_url = post_identifier_url
+        self.fills: list[tuple[str, str]] = []
+
+    async def goto(self, url: str, *, wait_until: str) -> None:
+        await super().goto(url, wait_until=wait_until)
+        self.url = self.goto_target or url
+
+    async def fill(self, selector: str, value: str) -> None:
+        self.fills.append((selector, value))
+
+    async def wait_for_timeout(self, _: int) -> None:
+        return None
+
+    def get_by_text(self, text: str) -> CredentialControl:
+        assert text == "Next"
+
+        def redirect() -> None:
+            if self.post_identifier_url is not None:
+                self.url = self.post_identifier_url
+
+        return CredentialControl(redirect)
+
+    async def wait_for_selector(self, selector: str) -> object:
+        assert selector == 'input[name="Passwd"]'
+        return object()
+
+    def get_by_role(self, role: str, name: str) -> CredentialControl:
+        assert (role, name) == ("button", "Next")
+        return CredentialControl()
+
+
 def _login_engine(page: LoginPage, **kwargs: object) -> GoogleClassroom:
     return GoogleClassroom(
         page,
@@ -133,6 +183,39 @@ def _configure_google_login(
     monkeypatch.setattr(google_classroom, "wait_after_nav", wait_for_navigation)
     monkeypatch.setattr(google_classroom, "exists", control_exists)
     return calls
+
+
+def _configure_login_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def wait_for_navigation(*_: object, **__: object) -> None:
+        return None
+
+    async def control_exists(control: LoginControl, timeout: int = 1000) -> bool:
+        _ = timeout
+        return control.visible
+
+    monkeypatch.setattr(google_classroom, "wait_after_nav", wait_for_navigation)
+    monkeypatch.setattr(google_classroom, "exists", control_exists)
+
+
+def test_login_rejects_substring_dispatched_config_before_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a lookalike configured URL can receive Google credentials."""
+    malicious_url = "https://classroom.google.com.evil.example/login"
+    page = CredentialPage("about:blank")
+    _configure_login_dependencies(monkeypatch)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(
+            GoogleClassroom(
+                page,
+                "google-user",
+                "google-password",
+                malicious_url,
+            ).login()
+        )
+
+    assert page.fills == []
 
 
 def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
@@ -174,7 +257,9 @@ def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
 ) -> None:
     """Would fail if approved GPS delegation uses Google credentials or shares auth images."""
     page = LoginPage("https://gps.example/sso/callback")
-    _configure_google_login(monkeypatch, navigation_times_out=True)
+    google_login_calls = _configure_google_login(
+        monkeypatch, navigation_times_out=True
+    )
     constructed: list[tuple[object, ...]] = []
 
     class GpsEngine:
@@ -227,6 +312,24 @@ def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
         "auth_images": ["circle", "triangle", "star"],
     }
     assert kwargs["auth_images"] is not images
+    assert google_login_calls == []
+
+
+def test_login_rejects_post_identifier_lookalike_before_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a post-identifier lookalike origin can receive the password."""
+    page = CredentialPage(
+        "about:blank",
+        goto_target="https://accounts.google.com/signin/v2/identifier",
+        post_identifier_url="https://accounts.google.com.evil.example/challenge",
+    )
+    _configure_login_dependencies(monkeypatch)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(_login_engine(page).login())
+
+    assert page.fills == [("input#identifierId", "google-user")]
 
 
 def test_login_rejects_delegation_that_remains_on_gps(
