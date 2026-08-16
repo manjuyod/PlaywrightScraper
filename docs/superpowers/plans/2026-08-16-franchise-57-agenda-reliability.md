@@ -32,7 +32,7 @@
 
 - [ ] **Step 1: Select and validate the exact target in a read-only transaction**
 
-Run an inline SQLAlchemy script that selects the single tracked franchise 57 student whose configured slots are GPS and Google Classroom, verifies one populated legacy row, verifies canonical `auth_answers = []`, and prints only bounded counts/booleans.
+Run an inline SQLAlchemy script that selects the single tracked franchise 57 student whose configured slots are GPS and Google Classroom and verifies one populated legacy row. Separately require exactly one distinct canonical CRM candidate in franchise 57 agenda job history whose result code is `agenda2_google_classroom_failed`, verify its canonical `auth_answers = []`, and print only bounded counts/booleans. Do not join legacy `student.id` to canonical `crmstudentid`; the live schema has no such relationship.
 
 - [ ] **Step 2: Strictly parse without printing values**
 
@@ -40,7 +40,7 @@ Accept exactly three trimmed strings, reject empty strings, duplicates, more tha
 
 - [ ] **Step 3: Perform one conditional transaction**
 
-Execute a parameterized update equivalent to:
+Execute a parameterized update equivalent to the job-history-guarded statement below. The independently unique legacy source supplies the strictly parsed payload, while the write atomically constrains the canonical target:
 
 ```sql
 UPDATE public.students_grades_20262027 AS canonical
@@ -50,10 +50,13 @@ WHERE canonical.crmstudentid = :student_id
   AND canonical.auth_answers = '[]'::jsonb
   AND EXISTS (
       SELECT 1
-      FROM public.student AS student
-      WHERE student.id = canonical.crmstudentid
-        AND student.franchiseid = 57
-        AND student.track_agenda IS TRUE
+      FROM public.grade_scrape_results AS result
+      JOIN public.grade_scrape_jobs AS job ON job.id = result.job_id
+      WHERE result.crmstudentid = canonical.crmstudentid
+        AND job.franchise_id = 57
+        AND job.kind = 'agenda'
+        AND result.payload->>'kind' = 'failure'
+        AND result.payload->>'code' = 'agenda2_google_classroom_failed'
   )
 RETURNING canonical.crmstudentid
 ```
@@ -62,7 +65,7 @@ Require one returned row before commit; otherwise roll back. Print only `updated
 
 - [ ] **Step 4: Verify canonically in a read-only transaction**
 
-Assert `jsonb_array_length(auth_answers) = 3` for the exact row and that no other franchise 57 canonical row changed during this operation.
+Assert `jsonb_array_length(auth_answers) = 3` for the exact job-history target, the legacy GPS→Google source remains unique and tracked, the job-history target remains unique, the update returned one row, and no trigger can update additional canonical rows.
 
 ### Task 2: Agenda slot credential and cleanup boundary
 
@@ -274,4 +277,3 @@ Confirm ParentVUE returns a validated explicit empty, both Google accounts reach
 - [ ] **Step 5: Analyze and publish**
 
 Run `gitnexus_detect_changes(scope="all")`, inspect `git diff --check`, set git identity to `manjuyod <manjuyod@gmail.com>`, commit the reviewed scope, and push the current `dev` branch.
-

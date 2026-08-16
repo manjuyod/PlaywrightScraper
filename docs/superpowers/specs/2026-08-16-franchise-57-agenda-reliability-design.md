@@ -17,7 +17,8 @@ Make every agenda-capable franchise 57 portal produce either a validated agenda 
 
 - Do not connect to SMSS, CRM, or SQL Server during implementation or validation.
 - Neon inspection is read-only except for one authorized canonical update.
-- The update must select exactly one franchise 57 tracked student, require exactly one populated legacy authentication row, strictly parse exactly three bounded nonempty answers, require the canonical JSON array to still be empty, update exactly one canonical row, and commit atomically.
+- Legacy `student.id` and canonical `crmstudentid` have no relational key. The authorized one-time mapping therefore requires two independently unique proofs: exactly one tracked franchise 57 GPS→Google source with one populated legacy authentication row, and exactly one canonical CRM target appearing in franchise 57 agenda job history with `agenda2_google_classroom_failed`. The update must strictly parse exactly three bounded nonempty answers, require the canonical JSON array to still be empty, retain the franchise/job-history predicate in the write, update exactly one canonical row, and commit atomically.
+- Because the source and target cannot be joined relationally, the transaction report and a post-write read-only audit must preserve the uniqueness evidence for both sets. No runtime code may infer or repeat this compatibility mapping.
 - Do not print student IDs, names, usernames, passwords, authentication answers, portal hostnames, URLs, HTML, cookies, tokens, screenshots, traces, or assignment content.
 - The production runner continues to receive credentials and canonical authentication configuration through the existing grade-db boundary. No runtime legacy-table fallback is added.
 
@@ -64,4 +65,3 @@ External failure codes and atomic snapshot preservation remain unchanged. Intern
 - Targeted portal and boundary tests run before the broader non-live suite. The two previously acknowledged unrelated failing tests are not blockers.
 - Live validation reads franchise 57 credentials from Neon in a read-only transaction, runs the four agenda-capable slots sequentially with output limited to portal/status/counts, and performs no agenda or job writes.
 - Completion requires: ParentVUE validated explicit empty; both Google Classroom agendas authenticated and collected; Canvas authenticated and collected from its verified final origin.
-
