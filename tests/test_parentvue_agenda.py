@@ -410,3 +410,44 @@ def test_login_does_not_resubmit_credentials_when_gradebook_readiness_times_out(
     assert login_calls == ["submit"]
     assert type(raised.value) is ParentVUE.LoginError
     assert str(raised.value) == "portal login rejected"
+
+
+def test_parent_login_sanitizes_exhausted_student_selection_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if selection retries wrap their final timeout in RetryError."""
+
+    class StudentSelectionPage(FakeNavigationPage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.selection_attempts = 0
+
+        async def click(self, _selector: str) -> None:
+            self.selection_attempts += 1
+            raise PlaywrightTimeout("sensitive post-submit detail")
+
+    page = StudentSelectionPage()
+    login_calls: list[str] = []
+
+    async def fake_universal_login_flow(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        login_calls.append("submit")
+        page.url = "https://parentvue.example/home"
+
+    fast_select_student = ParentVUE.select_student.retry_with(wait=wait_none())
+    monkeypatch.setattr(ParentVUE, "select_student", fast_select_student)
+    monkeypatch.setattr(portal_utils, "universal_login_flow", fake_universal_login_flow)
+    engine = ParentVUE(
+        page,  # type: ignore[arg-type]
+        "student",
+        "password",
+        "https://parentvue.example/Login_Parent_PXP.aspx",
+    )
+
+    with pytest.raises(Exception) as raised:
+        asyncio.run(engine.login("First"))
+
+    assert login_calls == ["submit"]
+    assert page.selection_attempts == 3
+    assert type(raised.value) is ParentVUE.LoginError
+    assert str(raised.value) == "portal login rejected"
