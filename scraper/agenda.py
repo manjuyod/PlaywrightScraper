@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
@@ -20,6 +21,7 @@ from scraper.db_cli import (
     GradeDbLeaseExpired,
     GradeDbUnavailable,
 )
+from scraper.config.logging import bind_log_context, reset_log_context
 from scraper.portals import get_portal
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.runner import (
@@ -32,6 +34,10 @@ from scraper.runner import (
 load_dotenv()
 
 MAX_CONCURRENT_AGENDA_WORKERS = 2
+logger = logging.getLogger("scraper.agenda")
+
+AgendaExceptionKind = Literal["cancelled", "configuration", "timeout", "unexpected"]
+CleanupStatus = Literal["not_started", "closed", "failed"]
 
 
 @dataclass(frozen=True, repr=False)
@@ -48,6 +54,54 @@ class AgendaSlotCollectionError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+def _agenda_exception_kind(exc: BaseException) -> AgendaExceptionKind:
+    if isinstance(exc, asyncio.CancelledError):
+        return "cancelled"
+    if isinstance(exc, AgendaSlotCollectionError):
+        return "configuration"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    return "unexpected"
+
+
+def _log_agenda_slot_diagnostic(
+    *,
+    event: Literal["agenda.slot.collection.completed", "agenda.slot.collection.failed"],
+    slot: AgendaSlot,
+    exception_kind: AgendaExceptionKind | None,
+    page_cleanup: CleanupStatus,
+    context_cleanup: CleanupStatus,
+) -> None:
+    extra: dict[str, object] = {
+        "phase": "slot_collection",
+        "portal": slot.portal,
+        "slot": slot.number,
+        "page_cleanup": page_cleanup,
+        "context_cleanup": context_cleanup,
+    }
+    if exception_kind is not None:
+        extra["exception_kind"] = exception_kind
+    try:
+        logger.info(event, extra=extra)
+    except Exception:
+        pass
+
+
+def _log_agenda_fetch_prepared(worker_count: int) -> None:
+    try:
+        logger.info(
+            "agenda.fetch.prepared",
+            extra={
+                "phase": "agenda_fetch",
+                "worker_count": min(
+                    max(worker_count, 0), MAX_CONCURRENT_AGENDA_WORKERS
+                ),
+            },
+        )
+    except Exception:
+        pass
 
 
 def _optional_string(value: object) -> str | None:
@@ -84,13 +138,18 @@ async def _collect_slot(
     student: Mapping[str, object],
     slot: AgendaSlot,
 ) -> AgendaWeeks:
-    if not slot.portal or not slot.login_url or not slot.username or not slot.password:
-        raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
-    first_slot, second_slot = resolve_agenda_slots(student)
-    alternate_slot = second_slot if slot.number == 1 else first_slot
-    context = await browser.new_context()
+    context_token = bind_log_context(portal=slot.portal, slot=slot.number)
+    context = None
     page = None
+    page_cleanup: CleanupStatus = "not_started"
+    context_cleanup: CleanupStatus = "not_started"
+    exception_kind: AgendaExceptionKind | None = None
     try:
+        if not slot.portal or not slot.login_url or not slot.username or not slot.password:
+            raise AgendaSlotCollectionError(f"{slot.key}_configuration_missing")
+        first_slot, second_slot = resolve_agenda_slots(student)
+        alternate_slot = second_slot if slot.number == 1 else first_slot
+        context = await browser.new_context()
         context.set_default_timeout(15_000)
         context.set_default_navigation_timeout(15_000)
         page = await context.new_page()
@@ -117,16 +176,34 @@ async def _collect_slot(
         await scraper.login(first_name=_optional_string(student.get("student_name")))
         records = await scraper.get_agenda()
         return normalize_agenda(records)
+    except BaseException as exc:
+        exception_kind = _agenda_exception_kind(exc)
+        raise
     finally:
         if page is not None:
             try:
                 await page.close()
+                page_cleanup = "closed"
             except Exception:
-                pass
-        try:
-            await context.close()
-        except Exception:
-            pass
+                page_cleanup = "failed"
+        if context is not None:
+            try:
+                await context.close()
+                context_cleanup = "closed"
+            except Exception:
+                context_cleanup = "failed"
+        _log_agenda_slot_diagnostic(
+            event=(
+                "agenda.slot.collection.completed"
+                if exception_kind is None
+                else "agenda.slot.collection.failed"
+            ),
+            slot=slot,
+            exception_kind=exception_kind,
+            page_cleanup=page_cleanup,
+            context_cleanup=context_cleanup,
+        )
+        reset_log_context(context_token)
 
 
 async def fetch_agenda(
@@ -157,6 +234,8 @@ async def fetch_agenda(
         if not engine.agenda_capable:
             continue
         workers.append((slot, asyncio.create_task(collect_slot(slot))))
+
+    _log_agenda_fetch_prepared(len(workers))
 
     results = await asyncio.gather(
         *(task for _, task in workers),
