@@ -17,16 +17,19 @@ class FakeLoginControl:
 
 
 class FakeLoginPage:
-    def __init__(self, *, login_form_visible: bool) -> None:
+    def __init__(
+        self, *, username_visible: bool, password_visible: bool
+    ) -> None:
         self.url = "https://gpsportal.example/login"
-        self.login_form_visible = login_form_visible
+        self.username_visible = username_visible
+        self.password_visible = password_visible
 
     def locator(self, selector: str) -> FakeLoginControl:
-        assert selector in {
-            "input#identification",
-            "input#ember535",
+        visibility = {
+            "input#identification": self.username_visible,
+            "input#ember535": self.password_visible,
         }
-        return FakeLoginControl(self.login_form_visible)
+        return FakeLoginControl(visibility[selector])
 
 
 def _engine(page: FakeLoginPage) -> GPS:
@@ -57,10 +60,20 @@ def _configure_login_dependencies(
     return login_calls, auth_calls
 
 
+@pytest.mark.parametrize(
+    ("username_visible", "password_visible"),
+    [(True, False), (False, True)],
+    ids=("username-only", "password-only"),
+)
 def test_login_rejects_a_lingering_gps_form_without_retrying_or_entering_auth(
     monkeypatch: pytest.MonkeyPatch,
+    username_visible: bool,
+    password_visible: bool,
 ) -> None:
-    page = FakeLoginPage(login_form_visible=True)
+    page = FakeLoginPage(
+        username_visible=username_visible,
+        password_visible=password_visible,
+    )
     login_calls, auth_calls = _configure_login_dependencies(monkeypatch)
 
     with pytest.raises(GPS.LoginError, match="^portal login rejected$"):
@@ -73,7 +86,7 @@ def test_login_rejects_a_lingering_gps_form_without_retrying_or_entering_auth(
 def test_login_continues_to_gps_auth_after_the_login_form_disappears(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    page = FakeLoginPage(login_form_visible=False)
+    page = FakeLoginPage(username_visible=False, password_visible=False)
     login_calls, auth_calls = _configure_login_dependencies(monkeypatch)
 
     asyncio.run(_engine(page).login())
