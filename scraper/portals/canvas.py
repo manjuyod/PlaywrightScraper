@@ -29,8 +29,20 @@ class TermContext(TypedDict):
 
 _CANVAS_ENTRY_HOST = "husd.instructure.com"
 _CANVAS_HOST_SUFFIX = "instructure.com"
+_CANVAS_PREAUTH_HOSTS = frozenset(
+    {
+        "iad.login.instructure.com",
+        "af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com",
+    }
+)
 _CANVAS_TRANSIT_HOST = "sso.canvaslms.com"
 _MICROSOFT_LOGIN_HOST = "login.microsoftonline.com"
+_MICROSOFT_CONTINUATION_HOSTS = frozenset(
+    {
+        _MICROSOFT_LOGIN_HOST,
+        "login.live.com",
+    }
+)
 
 
 class CanvasTrustError(LoginError):
@@ -75,17 +87,26 @@ class _CanvasAuthRoute:
         if self._phase == "entry":
             if origin == self.entry_origin:
                 return
+            if host in _CANVAS_PREAUTH_HOSTS:
+                self._phase = "preauth"
+                return
+            if host == _CANVAS_TRANSIT_HOST:
+                self._phase = "transit"
+                return
+        elif self._phase == "preauth":
+            if origin == self.entry_origin or host in _CANVAS_PREAUTH_HOSTS:
+                return
             if host == _CANVAS_TRANSIT_HOST:
                 self._phase = "transit"
                 return
         elif self._phase == "transit":
-            if host == _CANVAS_TRANSIT_HOST:
+            if host == _CANVAS_TRANSIT_HOST or origin == self.entry_origin:
                 return
             if host == _MICROSOFT_LOGIN_HOST:
                 self._phase = "microsoft"
                 return
         elif self._phase == "microsoft":
-            if host == _MICROSOFT_LOGIN_HOST:
+            if host in _MICROSOFT_CONTINUATION_HOSTS:
                 return
             if _is_canvas_host(host):
                 self._phase = "canvas_return"
@@ -396,22 +417,30 @@ class CanvasEngine(PortalEngine):
     def _install_canvas_route_guard(self, route: _CanvasAuthRoute) -> None:
         self._canvas_route_error: CanvasTrustError | None = None
 
-        def observe_main_frame(frame: Any) -> None:
-            if frame is not self.page.main_frame:
+        def observe_main_frame(request: Any) -> None:
+            if (
+                not request.is_navigation_request()
+                or request.frame is not self.page.main_frame
+            ):
                 return
             try:
-                route.observe(frame.url)
+                route.observe(request.url)
             except CanvasTrustError as error:
                 self._canvas_route_error = error
 
         self._canvas_route_callback: Callable[[Any], None] = observe_main_frame
-        self.page.on("framenavigated", observe_main_frame)
+        self.page.on("request", observe_main_frame)
 
     def _remove_canvas_route_guard(self) -> None:
         callback = getattr(self, "_canvas_route_callback", None)
-        if callback is not None:
-            self.page.off("framenavigated", callback)
-            del self._canvas_route_callback
+        if callback is None:
+            return
+        try:
+            self.page.remove_listener("request", callback)
+        except Exception:
+            pass
+        finally:
+            self.__dict__.pop("_canvas_route_callback", None)
 
     def _raise_canvas_route_error(self) -> None:
         error = getattr(self, "_canvas_route_error", None)

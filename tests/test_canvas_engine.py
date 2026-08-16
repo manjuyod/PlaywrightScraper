@@ -9,26 +9,41 @@ from scraper.portals import canvas
 from scraper.portals.canvas import CanvasEngine
 
 
+class RouteRequest:
+    def __init__(self, url: str, frame: object) -> None:
+        self.url = url
+        self.frame = frame
+
+    def is_navigation_request(self) -> bool:
+        return True
+
+
 class RoutePage:
     def __init__(self, url: str = "about:blank") -> None:
         self.url = url
         self.main_frame = self
-        self._listeners: list[object] = []
+        self._listeners: dict[str, list[object]] = {}
         self.goto_calls = 0
         self.fill_calls = 0
         self.press_calls = 0
 
     def on(self, event: str, callback: object) -> None:
-        if event == "framenavigated":
-            self._listeners.append(callback)
+        self._listeners.setdefault(event, []).append(callback)
 
-    def off(self, event: str, callback: object) -> None:
-        if event == "framenavigated" and callback in self._listeners:
-            self._listeners.remove(callback)
+    def remove_listener(self, event: str, callback: object) -> None:
+        listeners = self._listeners.get(event, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
+    def request_navigation(self, url: str, *, frame: object | None = None) -> None:
+        request = RouteRequest(url, self.main_frame if frame is None else frame)
+        for callback in list(self._listeners.get("request", [])):
+            callback(request)
 
     def navigate(self, url: str) -> None:
+        self.request_navigation(url)
         self.url = url
-        for callback in list(self._listeners):
+        for callback in list(self._listeners.get("framenavigated", [])):
             callback(self)
 
     async def goto(self, url: str, **_kwargs: object) -> None:
@@ -67,12 +82,20 @@ def test_canvas_route_rejects_untrusted_configured_entry(entry_url: str) -> None
     ("prefix", "untrusted_url"),
     [
         ([], "https://other.instructure.com/login"),
+        ([], "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com.evil.example/login"),
         ([], "https://unknown-sso.example/login"),
         ([], "https://sso.canvaslms.com.evil.example/login"),
         (["https://sso.canvaslms.com/login"], "https://login.microsoftonline.com.evil.example/common/oauth2"),
         (["https://sso.canvaslms.com/login"], "http://login.microsoftonline.com/common/oauth2"),
         (["https://sso.canvaslms.com/login"], "https://user@login.microsoftonline.com/common/oauth2"),
         (["https://sso.canvaslms.com/login"], "https://login.microsoftonline.com:444/common/oauth2"),
+        (
+            [
+                "https://sso.canvaslms.com/login",
+                "https://login.microsoftonline.com/common/oauth2",
+            ],
+            "https://login.live.com.evil.example/continue",
+        ),
     ],
 )
 def test_canvas_route_rejects_untrusted_authentication_hops(
@@ -99,6 +122,108 @@ def test_canvas_route_accepts_only_the_approved_sso_sequence() -> None:
     assert route.verified_canvas_origin("https://iad.login.instructure.com/dashboard") == (
         "https://iad.login.instructure.com"
     )
+
+
+def test_canvas_route_accepts_the_exact_live_redirect_chain() -> None:
+    """Would fail if the approved pre-auth redirects cannot reach Microsoft safely."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+
+    for url in (
+        "https://husd.instructure.com/login/canvas",
+        "https://iad.login.instructure.com/",
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso",
+        "https://sso.canvaslms.com/login/saml",
+        "https://husd.instructure.com/login/saml",
+        "https://login.microsoftonline.com/common/oauth2/authorize",
+    ):
+        route.observe(url)
+
+    route.require_microsoft_credentials()
+    route.observe("https://login.live.com/continue")
+    route.require_microsoft_credentials()
+    route.observe("https://iad.login.instructure.com/dashboard")
+    assert route.verified_canvas_origin("https://iad.login.instructure.com/dashboard") == (
+        "https://iad.login.instructure.com"
+    )
+
+
+def test_canvas_route_guard_observes_main_frame_redirect_requests() -> None:
+    """Would fail if server redirects are invisible until their final document commits."""
+    page = RoutePage()
+    engine = CanvasEngine(
+        page, "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+    route = canvas._CanvasAuthRoute(engine.login_url)
+    engine._install_canvas_route_guard(route)
+    try:
+        for url in (
+            "https://husd.instructure.com/login/canvas",
+            "https://iad.login.instructure.com/",
+            "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso",
+            "https://sso.canvaslms.com/login/saml",
+            "https://husd.instructure.com/login/saml",
+            "https://login.microsoftonline.com/common/oauth2/authorize",
+        ):
+            page.request_navigation(url)
+        engine._raise_canvas_route_error()
+        route.require_microsoft_credentials()
+    finally:
+        engine._remove_canvas_route_guard()
+
+    page.request_navigation("https://unknown-idp.example/after-cleanup")
+    engine._raise_canvas_route_error()
+
+
+def test_canvas_route_guard_ignores_subframe_navigation_requests() -> None:
+    """Would fail if an unrelated iframe can poison the main-frame trust route."""
+    page = RoutePage()
+    engine = CanvasEngine(
+        page, "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+    route = canvas._CanvasAuthRoute(engine.login_url)
+    engine._install_canvas_route_guard(route)
+    try:
+        page.request_navigation(
+            "https://unknown-idp.example/frame",
+            frame=object(),
+        )
+        engine._raise_canvas_route_error()
+    finally:
+        engine._remove_canvas_route_guard()
+
+
+def test_canvas_login_cleanup_preserves_the_primary_exception() -> None:
+    """Would fail if listener cleanup replaces the actual login failure."""
+
+    class Engine(CanvasEngine):
+        async def _prepare_login(self, _route: object) -> None:
+            raise PlaywrightTimeout("primary login timeout")
+
+    engine = Engine(
+        RoutePage(), "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+
+    with pytest.raises(PlaywrightTimeout, match="primary login timeout"):
+        asyncio.run(engine.login())
+
+
+def test_canvas_login_cleanup_failure_does_not_mask_the_primary_exception() -> None:
+    """Would fail if a listener-removal error replaces the actual login failure."""
+
+    class Page(RoutePage):
+        def remove_listener(self, _event: str, _callback: object) -> None:
+            raise RuntimeError("listener cleanup failed")
+
+    class Engine(CanvasEngine):
+        async def _prepare_login(self, _route: object) -> None:
+            raise PlaywrightTimeout("primary login timeout")
+
+    engine = Engine(
+        Page(), "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+
+    with pytest.raises(PlaywrightTimeout, match="primary login timeout"):
+        asyncio.run(engine.login())
 
 
 def test_pre_submit_preparation_retries_without_filling_or_pressing() -> None:
