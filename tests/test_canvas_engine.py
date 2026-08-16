@@ -66,6 +66,7 @@ def test_canvas_route_rejects_untrusted_configured_entry(entry_url: str) -> None
 @pytest.mark.parametrize(
     ("prefix", "untrusted_url"),
     [
+        ([], "https://other.instructure.com/login"),
         ([], "https://unknown-sso.example/login"),
         ([], "https://sso.canvaslms.com.evil.example/login"),
         (["https://sso.canvaslms.com/login"], "https://login.microsoftonline.com.evil.example/common/oauth2"),
@@ -437,3 +438,65 @@ def test_successful_login_freezes_the_verified_canvas_return_origin() -> None:
     asyncio.run(engine.login())
 
     assert engine._canvas_origin == "https://iad.login.instructure.com"
+
+
+def test_untrusted_navigation_during_post_login_precedes_cleanup_error() -> None:
+    """Would fail if post-login cleanup can mask a pending Canvas trust violation."""
+
+    class Engine(CanvasEngine):
+        async def _prepare_login(self, route: object) -> None:
+            route.observe("https://sso.canvaslms.com/login/saml")
+            self.page.navigate("https://login.microsoftonline.com/common/oauth2/authorize")
+
+        async def _submit_microsoft_credentials_once(self, route: object) -> None:
+            route.require_microsoft_credentials()
+
+        async def _wait_for_login_result(self, timeout_ms: int = 12000) -> bool:
+            self.page.navigate("https://iad.login.instructure.com/dashboard")
+            return True
+
+        async def post_login(self) -> None:
+            self.page.navigate("https://attacker.example/after-login")
+            raise RuntimeError("cleanup failed")
+
+    engine = Engine(
+        RoutePage(), "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        asyncio.run(engine.login())
+
+
+@pytest.mark.parametrize("probe_timeout", [False, True])
+def test_untrusted_navigation_during_final_auth_probe_preserves_trust_error(
+    probe_timeout: bool,
+) -> None:
+    """Would fail if final verification turns a pending trust error into rejection/timeout."""
+
+    class Engine(CanvasEngine):
+        async def _prepare_login(self, route: object) -> None:
+            route.observe("https://sso.canvaslms.com/login/saml")
+            self.page.navigate("https://login.microsoftonline.com/common/oauth2/authorize")
+
+        async def _submit_microsoft_credentials_once(self, route: object) -> None:
+            route.require_microsoft_credentials()
+
+        async def _wait_for_login_result(self, timeout_ms: int = 12000) -> bool:
+            self.page.navigate("https://iad.login.instructure.com/dashboard")
+            return True
+
+        async def post_login(self) -> None:
+            pass
+
+        async def _is_canvas_logged_in(self) -> bool:
+            self.page.navigate("https://attacker.example/final-probe")
+            if probe_timeout:
+                raise PlaywrightTimeout("final auth probe timed out")
+            return False
+
+    engine = Engine(
+        RoutePage(), "student-id", "password", "https://husd.instructure.com/login/canvas"
+    )
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        asyncio.run(engine.login())

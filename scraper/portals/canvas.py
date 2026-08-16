@@ -71,9 +71,9 @@ class _CanvasAuthRoute:
         self._phase = "entry"
 
     def observe(self, url: str) -> None:
-        _, host = _normalized_https_origin(url)
+        origin, host = _normalized_https_origin(url)
         if self._phase == "entry":
-            if _is_canvas_host(host):
+            if origin == self.entry_origin:
                 return
             if host == _CANVAS_TRANSIT_HOST:
                 self._phase = "transit"
@@ -482,22 +482,27 @@ class CanvasEngine(PortalEngine):
             await self._prepare_login(route)
             await self._submit_microsoft_credentials_once(route)
 
-            login_ok = await self._wait_for_login_result(timeout_ms=14000)
+            login_ok = await self._run_canvas_auth_action(
+                self._wait_for_login_result(timeout_ms=14000)
+            )
             await self.raise_login_error_if(not login_ok)
 
-            await self.post_login()
+            await self._run_canvas_auth_action(self.post_login())
 
-            ok = await self._is_canvas_logged_in()
+            ok = await self._run_canvas_auth_action(self._is_canvas_logged_in())
             await self.raise_login_error_if(not ok)
             self._raise_canvas_route_error()
             self._canvas_origin = route.verified_canvas_origin(self.page.url)
         except CanvasTrustError:
             raise
         except PlaywrightTimeout:
+            self._raise_canvas_route_error()
             raise
         except LoginError:
+            self._raise_canvas_route_error()
             raise LoginError("portal login rejected") from None
         except Exception:
+            self._raise_canvas_route_error()
             raise LoginError("portal login rejected") from None
         finally:
             self._remove_canvas_route_guard()
