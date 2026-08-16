@@ -108,6 +108,8 @@ class GoogleClassroom(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         _ = first_name
         try:
+            if await _has_classroom_main_menu(self.page):
+                return
             if self.login_url != self.page.url:  # Only nav if we are not at the target page
                 await self.page.goto(self.login_url, wait_until="domcontentloaded")
             try:
@@ -150,6 +152,8 @@ class GoogleClassroom(PortalEngine):
                 else None,
             )
             await scraper.login()
+            if not await _has_classroom_main_menu(self.page):
+                raise LoginError("portal login rejected")
         except LoginError:
             raise
         except Exception:

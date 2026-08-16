@@ -114,8 +114,11 @@ def _login_engine(page: LoginPage, **kwargs: object) -> GoogleClassroom:
 
 def _configure_google_login(
     monkeypatch: pytest.MonkeyPatch, *, navigation_times_out: bool = False
-) -> None:
+) -> list[GoogleClassroom]:
+    calls: list[GoogleClassroom] = []
+
     async def google_login(_: GoogleClassroom) -> None:
+        calls.append(_)
         return None
 
     async def wait_for_navigation(*_: object, **__: object) -> None:
@@ -129,6 +132,7 @@ def _configure_google_login(
     monkeypatch.setattr(GoogleClassroom, "google_login", google_login)
     monkeypatch.setattr(google_classroom, "wait_after_nav", wait_for_navigation)
     monkeypatch.setattr(google_classroom, "exists", control_exists)
+    return calls
 
 
 def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
@@ -136,9 +140,12 @@ def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
 ) -> None:
     """Would fail if a Classroom URL is accepted before its authenticated UI is ready."""
     page = LoginPage("https://classroom.google.com/u/0/h", main_menu_visible=True)
-    _configure_google_login(monkeypatch)
+    google_login_calls = _configure_google_login(monkeypatch)
 
     asyncio.run(_login_engine(page).login())
+
+    assert page.goto_urls == []
+    assert google_login_calls == []
 
 
 @pytest.mark.parametrize(
@@ -171,7 +178,12 @@ def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
     constructed: list[tuple[object, ...]] = []
 
     class GpsEngine:
+        def __init__(self, page: LoginPage) -> None:
+            self.page = page
+
         async def login(self) -> None:
+            self.page.url = "https://classroom.google.com/u/0/h"
+            self.page.main_menu_visible = True
             return None
 
     def get_portal_key(url: str) -> str | None:
@@ -182,7 +194,7 @@ def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
 
         def construct(*args: object, **kwargs: object) -> GpsEngine:
             constructed.append((*args, kwargs))
-            return GpsEngine()
+            return GpsEngine(args[0])
 
         return construct
 
@@ -215,6 +227,38 @@ def test_login_delegates_once_with_configured_gps_credentials_and_copied_images(
         "auth_images": ["circle", "triangle", "star"],
     }
     assert kwargs["auth_images"] is not images
+
+
+def test_login_rejects_delegation_that_remains_on_gps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a successful GPS handoff is accepted without Classroom readiness."""
+    page = LoginPage("https://gps.example/sso/callback")
+    _configure_google_login(monkeypatch, navigation_times_out=True)
+
+    class GpsEngine:
+        def __init__(self, *_: object, **__: object) -> None:
+            return None
+
+        async def login(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        google_classroom,
+        "get_portal_key_from_url",
+        lambda url: "gps" if "gps.example" in url else "google_classroom",
+    )
+    monkeypatch.setattr(google_classroom, "get_portal", lambda _: GpsEngine)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(
+            _login_engine(
+                page,
+                alt_portal_url="https://gps.example/login",
+                alt_student_id="gps-user",
+                alt_password="gps-password",
+            ).login()
+        )
 
 
 def test_login_rejects_gps_redirect_when_origins_do_not_match(
