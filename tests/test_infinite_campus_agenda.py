@@ -392,6 +392,7 @@ class FakeSelection:
         | None = None,
         count: int | Callable[[], int] | None = None,
         on_click: Callable[[], None] | None = None,
+        on_evaluate: Callable[[], None] | None = None,
         attribute: Callable[[], str | None] | None = None,
         visible: bool | Callable[[], bool] = True,
         strict: bool = False,
@@ -405,6 +406,7 @@ class FakeSelection:
         self._rows = rows if rows is not None else []
         self._count = count
         self._on_click = on_click
+        self._on_evaluate = on_evaluate
         self._attribute = attribute
         self._visible = visible
         self._strict = strict
@@ -439,6 +441,7 @@ class FakeSelection:
             rows=lambda: self._rows_now()[:1],
             count=lambda: min(1, self._count_now()),
             on_click=self._on_click,
+            on_evaluate=self._on_evaluate,
             attribute=self._attribute,
             visible=self._visible,
             strict=self._strict,
@@ -462,6 +465,7 @@ class FakeSelection:
             generation=self._workspace._generation(),
             rows=[rows[index]],
             on_click=self._on_click,
+            on_evaluate=self._on_evaluate,
             attribute=self._attribute,
             visible=self._visible,
             strict=self._strict,
@@ -554,9 +558,10 @@ class FakeSelection:
         self._assert_fresh()
         if script != "element => element.click()" or self._count_now() == 0:
             raise InfiniteCampusAgendaError()
-        if self._on_click is None:
+        action = self._on_evaluate or self._on_click
+        if action is None:
             raise InfiniteCampusAgendaError()
-        self._on_click()
+        action()
 
 
 class FakeWorkspace:
@@ -741,6 +746,7 @@ class FakeInfiniteCampusPage:
         page_assignments_keep_menu_open: bool = False,
         page_assignments_hide_on_click_number: int | None = None,
         page_assignments_timeout_on_click_number: int | None = None,
+        workspace_missing_after_native_click_checks: int = 0,
         menu_toggle_count: int = 1,
         menu_toggle_count_after_navigation: int | None = None,
         drawer_never_hides: bool = False,
@@ -781,6 +787,11 @@ class FakeInfiniteCampusPage:
         self.page_assignments_timeout_on_click_number = (
             page_assignments_timeout_on_click_number
         )
+        self.workspace_missing_after_native_click_checks = (
+            workspace_missing_after_native_click_checks
+        )
+        self._workspace_missing_remaining = 0
+        self.transient_workspace_misses = 0
         self.menu_toggle_count = menu_toggle_count
         self.menu_toggle_count_after_navigation = menu_toggle_count_after_navigation
         self.drawer_never_hides = drawer_never_hides
@@ -814,6 +825,10 @@ class FakeInfiniteCampusPage:
     def frame(self, name: str) -> FakeWorkspace:
         assert name == _WORKSPACE_FRAME
         if self.frame_missing:
+            return None
+        if self._workspace_missing_remaining > 0:
+            self._workspace_missing_remaining -= 1
+            self.transient_workspace_misses += 1
             return None
         return FakeWorkspace(self)
 
@@ -853,6 +868,7 @@ class FakeInfiniteCampusPage:
                     if self._page_assignments_visible()
                     else [],
                     on_click=self._click_page_assignments,
+                    on_evaluate=self._evaluate_page_assignments,
                     visible=self._page_assignments_visible,
                     on_wait=self._wait_for_assignments_link,
                     on_hidden_wait=self._wait_for_assignments_hidden,
@@ -950,6 +966,12 @@ class FakeInfiniteCampusPage:
             self.page_assignments_timeout_on_click_number is not None
             and self._page_assignments_click_count
             == self.page_assignments_timeout_on_click_number
+        )
+
+    def _evaluate_page_assignments(self) -> None:
+        self._click_page_assignments()
+        self._workspace_missing_remaining = (
+            self.workspace_missing_after_native_click_checks
         )
 
     def _wait_for_assignments_hidden(self) -> None:
@@ -1248,6 +1270,7 @@ def test_navigation_reclick_uses_native_click_after_locator_timeout() -> None:
         page_assignments_keep_menu_open=True,
         page_assignments_hide_on_click_number=2,
         page_assignments_timeout_on_click_number=2,
+        workspace_missing_after_native_click_checks=1,
         drawer_never_hides=True,
     )
 
@@ -1259,6 +1282,7 @@ def test_navigation_reclick_uses_native_click_after_locator_timeout() -> None:
     assert page.actions.count("click-page-assignments") == 2
     assert page.actions.count("close-menu") == 0
     assert page.actions.count("wait-page-assignments-hidden") == 1
+    assert page.transient_workspace_misses == 1
     page_clicks = [
         index
         for index, action in enumerate(page.actions)

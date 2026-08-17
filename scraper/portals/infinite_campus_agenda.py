@@ -264,7 +264,13 @@ async def _open_current_term_assignments(page: Page) -> Frame:
         await assignments.first.wait_for(
             state="hidden", timeout=_READINESS_TIMEOUT_MS
         )
-        frame = _workspace(page)
+        frame_deadline = time.monotonic() + (_READINESS_TIMEOUT_MS / 1000)
+        frame = page.frame(_WORKSPACE_FRAME)
+        while frame is None and time.monotonic() < frame_deadline:
+            await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
+            frame = page.frame(_WORKSPACE_FRAME)
+        if frame is None:
+            raise InfiniteCampusAgendaError()
     else:
         raise InfiniteCampusAgendaError()
     frame = _workspace(page)
