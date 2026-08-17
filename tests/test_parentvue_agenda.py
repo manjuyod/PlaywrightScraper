@@ -9,6 +9,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import wait_none
 
 from scraper.agenda_contract import normalize_agenda
+from scraper.portals import parentvue as parentvue_module
 from scraper.portals import parentvue_agenda as pv_agenda
 from scraper.portals import utils as portal_utils
 from scraper.portals.parentvue import ParentVUE
@@ -498,16 +499,31 @@ class FakePage:
         return self.html
 
 
-def test_engine_collects_current_authenticated_gradebook_html() -> None:
-    """Would fail if agenda collection makes a separate request instead of parsing the page."""
+def test_engine_delegates_to_sequential_course_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if get_agenda bypasses the authenticated course scrub."""
     page = FakePage(FIXTURE.read_text(encoding="utf-8"))
+    calls: list[FakePage] = []
+
+    async def fake_collect(current_page: FakePage):
+        calls.append(current_page)
+        return [{"sourceId": "parentvue:sequential"}]
+
+    monkeypatch.setattr(
+        parentvue_module,
+        "collect_parentvue_course_agenda",
+        fake_collect,
+        raising=False,
+    )
 
     records = asyncio.run(
         ParentVUE(page, "student", "password", "https://parentvue.example/Login_Parent_PXP.aspx").get_agenda()
     )
 
-    assert page.content_calls == 1
-    assert records[0]["sourceId"] == "parentvue:pv-41"
+    assert calls == [page]
+    assert page.content_calls == 0
+    assert records == [{"sourceId": "parentvue:sequential"}]
     assert ParentVUE.agenda_capable is True
 
 
@@ -559,9 +575,9 @@ def test_after_login_selects_visible_href_specific_gradebook_link() -> None:
     assert page.selector == 'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
     assert page.waited_for_selectors == [
         "#gb-assignments",
-        "#gb-assignments .no-data:visible, #gb-assignments .assignment-row:visible, "
-        "#gb-assignments .gb-assignment-row:visible, "
-        "#gb-assignments tr:has(.assignment-title, .assignment-name, [data-label=\"Assignment\"]):visible",
+        "#gb-assignments tr.gb-upcoming-assignment:visible, "
+        "div.gb-class-header.gb-class-row:visible, "
+        "#gb-assignments .no-data:visible",
     ]
 
 
