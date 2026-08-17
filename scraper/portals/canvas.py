@@ -131,6 +131,18 @@ class _CanvasAuthRoute:
                 self._phase = "canvas_return"
                 self._current_host = host
                 return
+            if self._password_submitted and host in _CANVAS_PREAUTH_HOSTS:
+                self._phase = "postauth_broker"
+                self._current_host = host
+                return
+        elif self._phase == "postauth_broker":
+            if host in _CANVAS_RETURN_HOSTS:
+                self._phase = "canvas_return"
+                self._current_host = host
+                return
+            if host in _CANVAS_PREAUTH_HOSTS:
+                self._current_host = host
+                return
         elif self._phase == "canvas_return" and host in _CANVAS_RETURN_HOSTS:
             self._current_host = host
             return

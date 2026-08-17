@@ -159,6 +159,66 @@ def test_canvas_route_accepts_the_exact_live_redirect_chain() -> None:
     )
 
 
+def test_canvas_route_accepts_exact_preauth_broker_after_microsoft_submission() -> None:
+    """Would fail when the live post-submit broker blocks an authenticated return."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe(
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso"
+    )
+    route.observe(
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso"
+    )
+    route.observe("https://husd.instructure.com/")
+
+    assert route.verified_canvas_origin("https://husd.instructure.com/") == (
+        "https://husd.instructure.com"
+    )
+
+
+def test_canvas_postauth_broker_can_finish_on_exact_iad_return() -> None:
+    """Would fail if an approved return remains trapped in the broker phase."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe(
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso"
+    )
+    route.observe("https://iad.login.instructure.com/dashboard")
+
+    assert route.verified_canvas_origin("https://iad.login.instructure.com/dashboard") == (
+        "https://iad.login.instructure.com"
+    )
+
+
+@pytest.mark.parametrize(
+    "untrusted_url",
+    [
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com.evil.example/sso",
+        "https://login.microsoftonline.com/common/oauth2/authorize",
+    ],
+)
+def test_canvas_postauth_broker_rejects_untrusted_or_backward_hops(
+    untrusted_url: str,
+) -> None:
+    """Would fail if the broker phase could broaden or return to credential hosts."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe(
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com/sso"
+    )
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        route.observe(untrusted_url)
+
+
 def test_canvas_route_rejects_live_continuation_before_password_submission() -> None:
     """Would fail if a continuation host can receive username/password credentials."""
     route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
