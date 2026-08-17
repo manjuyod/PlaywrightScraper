@@ -228,17 +228,29 @@ async def _open_current_term_assignments(page: Page) -> Frame:
     frame = _workspace(page)
     menu = page.locator("#menu-toggle-button")
     assignments = frame.get_by_role("link", name="Assignments", exact=True)
+    frame_count = await assignments.count()
 
-    if await assignments.count() == 0:
+    if frame_count == 1:
+        await assignments.first.click()
+        frame = _workspace(page)
+    elif frame_count == 0:
         if await menu.count() != 1:
             raise InfiniteCampusAgendaError()
         await menu.click()
+        assignments = page.get_by_role("link", name="Assignments", exact=True)
+        page_count = await assignments.count()
+        if page_count == 0:
+            await assignments.wait_for(state="visible", timeout=_READINESS_TIMEOUT_MS)
+            page_count = await assignments.count()
+        if page_count != 1:
+            raise InfiniteCampusAgendaError()
+        await assignments.first.wait_for(
+            state="visible", timeout=_READINESS_TIMEOUT_MS
+        )
+        await assignments.first.click()
         frame = _workspace(page)
-        assignments = frame.get_by_role("link", name="Assignments", exact=True)
-
-    if await assignments.count() != 1:
+    else:
         raise InfiniteCampusAgendaError()
-    await assignments.first.click()
     frame = _workspace(page)
 
     missing = frame.get_by_role("button", name="Missing", exact=True)

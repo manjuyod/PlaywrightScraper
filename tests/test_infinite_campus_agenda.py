@@ -23,6 +23,7 @@ from scraper.portals.infinite_campus_agenda import (
     classify_infinite_campus_assignment,
     parse_infinite_campus_detail,
     parse_infinite_campus_list,
+    _open_current_term_assignments,
 )
 from scraper.agenda_contract import normalize_agenda
 
@@ -560,7 +561,9 @@ class FakeWorkspace:
     def get_by_role(self, role: str, name: str, *, exact: bool) -> FakeSelection:
         del exact
         if role == "link" and name == "Assignments":
-            rows = [(0, ("", "", "", ""), 0)] if self._page.view == "menu-open" else []
+            rows = [
+                (0, ("", "", "", ""), 0)
+            ] if self._page.view == "menu-open" and not self._page.use_page_level_assignments else []
             return FakeSelection(
                 self,
                 generation=self._generation(),
@@ -646,6 +649,8 @@ class FakeInfiniteCampusPage:
         pre_term_rows: list[tuple[str, str, str, str]] | None = None,
         filter_control_delay: int = 0,
         filter_row_delay: int = 0,
+        use_page_level_assignments: bool = False,
+        assignments_link_ready_after_waits: int = 0,
     ) -> None:
         self.rows = rows
         self.pre_term_rows = pre_term_rows if pre_term_rows is not None else rows
@@ -667,6 +672,9 @@ class FakeInfiniteCampusPage:
         self._missing_row_remaining = 0
         self._missing_transition_target = False
         self.generation = 0
+        self.use_page_level_assignments = use_page_level_assignments
+        self.assignments_link_ready_after_waits = assignments_link_ready_after_waits
+        self._assignments_link_remaining = 0
         self.controls_ready = True
         self.controls_ready_after_waits = 0
         self.controls_never_ready = False
@@ -715,10 +723,32 @@ class FakeInfiniteCampusPage:
             count=0,
         )
 
+    def get_by_role(self, role: str, name: str, *, exact: bool) -> FakeSelection:
+        del exact
+        if role == "link" and name == "Assignments":
+            if self.use_page_level_assignments:
+                return FakeSelection(
+                    FakeWorkspace(self),
+                    generation=self.generation,
+                    count=lambda: 1
+                    if (
+                        self.view == "menu-open"
+                        and self._assignments_link_remaining == 0
+                    )
+                    else 0,
+                    rows=[(0, ("", "", "", ""), 0)],
+                    on_click=self._open_assignments,
+                    on_wait=self._wait_for_assignments_link,
+                )
+            return FakeWorkspace(self).get_by_role(role, name, exact=True)
+
+        return FakeWorkspace(self).get_by_role(role, name, exact=True)
+
     def _open_menu(self) -> None:
         if self.view == "menu-open":
             raise InfiniteCampusAgendaError()
         self._set_generation("menu-open")
+        self._assignments_link_remaining = self.assignments_link_ready_after_waits
 
     def _open_assignments(self) -> None:
         if self.view != "menu-open":
@@ -736,6 +766,10 @@ class FakeInfiniteCampusPage:
         self._control_waited_names = set()
         self.controls_ready = self.controls_ready_after_waits == 0
         self.actions.append("open-assignments")
+
+    def _wait_for_assignments_link(self) -> None:
+        if self._assignments_link_remaining > 0:
+            self._assignments_link_remaining -= 1
 
     def _wait_for_control(self, name: str) -> None:
         if name not in self._control_waited_names:
@@ -925,6 +959,31 @@ def test_collector_waits_for_exact_term_controls_before_transition() -> None:
 
     assert records[0]["status"] == "due"
     assert page.control_waits[:2] == ["Missing", "Current Term"]
+
+
+def test_navigation_uses_page_level_assignments_after_menu() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        assignments_link_ready_after_waits=1,
+    )
+
+    frame = page.frame(_WORKSPACE_FRAME)
+    assert asyncio.run(frame.get_by_role("link", name="Assignments", exact=True).count()) == 0
+
+    returned = asyncio.run(_open_current_term_assignments(page))
+
+    assert page.view == "assignments"
+    assert returned._generation() == page.generation
+    assert asyncio.run(
+        returned.get_by_role("button", name="Missing", exact=True).count()
+    ) == 1
+    assert asyncio.run(
+        returned.get_by_role("button", name="Current Term", exact=True).count()
+    ) == 1
+    assert asyncio.run(
+        page.get_by_role("link", name="Assignments", exact=True).count()
+    ) == 0
 
 
 def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
