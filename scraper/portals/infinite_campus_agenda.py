@@ -362,6 +362,17 @@ async def _visible_list_html(frame: Frame) -> str:
     return "<div>" + "".join(fragments) + "</div>"
 
 
+async def _resolve_back_control(frame: Frame) -> Locator:
+    back_button = frame.get_by_role("button", name="Back", exact=True)
+    back_link = frame.get_by_role("link", name="Back", exact=True)
+    count = await back_button.count() + await back_link.count()
+    if count != 1:
+        raise InfiniteCampusAgendaError()
+    if await back_button.count() == 1:
+        return back_button
+    return back_link
+
+
 async def _collect_infinite_campus_agenda(
     page: Page,
     *,
@@ -407,9 +418,7 @@ async def _collect_infinite_campus_agenda(
         if record is not None:
             records.append(record)
 
-        back = frame.get_by_role("button", name="Back", exact=True)
-        if await back.count() != 1:
-            raise InfiniteCampusAgendaError()
+        back = await _resolve_back_control(frame)
         await back.click()
 
         await _wait_for_detail_exit(page)

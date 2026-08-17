@@ -599,6 +599,25 @@ class FakeWorkspace:
                 on_click=self._page._open_assignments,
             )
 
+        if self._page.view != "detail" and role == "link" and name == "Back":
+            return FakeSelection(self, generation=self._generation(), rows=[])
+        if self._page.view != "assignments" and role != "link" and name != "Back":
+            return FakeSelection(self, generation=self._generation(), rows=[])
+
+        if role == "link" and name == "Back":
+            if self._page.hide_back_on_detail == self._page.active_detail_position:
+                count = 0
+            else:
+                count = self._page.back_link_count
+            return FakeSelection(
+                self,
+                generation=self._generation(),
+                rows=[
+                    (index, ("", "", "", ""), index) for index in range(count)
+                ],
+                on_click=self._page._click_back,
+            )
+
         if self._page.view != "assignments" and name != "Back":
             return FakeSelection(self, generation=self._generation(), rows=[])
 
@@ -630,10 +649,11 @@ class FakeWorkspace:
                         generation=self._generation(),
                         rows=[],
                     )
+                count = self._page.back_button_count
                 return FakeSelection(
                     self,
                     generation=self._generation(),
-                    rows=[(0, ("", "", "", ""), 0)],
+                    rows=[(index, ("", "", "", ""), index) for index in range(count)],
                     on_click=self._page._click_back,
                 )
 
@@ -681,6 +701,8 @@ class FakeInfiniteCampusPage:
         assignments_link_ready_after_waits: int = 0,
         assignments_link_count: int = 1,
         assignments_link_never_ready: bool = False,
+        back_button_count: int = 1,
+        back_link_count: int = 0,
     ) -> None:
         self.rows = rows
         self.pre_term_rows = pre_term_rows if pre_term_rows is not None else rows
@@ -730,6 +752,8 @@ class FakeInfiniteCampusPage:
         self._did_reorder = False
         self._did_shrink = False
         self._did_duplicate = False
+        self.back_button_count = back_button_count
+        self.back_link_count = back_link_count
 
     def frame(self, name: str) -> FakeWorkspace:
         assert name == _WORKSPACE_FRAME
@@ -1277,6 +1301,47 @@ def test_collector_rejects_missing_back_control() -> None:
 
     with pytest.raises(InfiniteCampusAgendaError):
         asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+
+def test_collector_accepts_single_back_link_without_button() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        back_button_count=0,
+        back_link_count=1,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["status"] for record in records] == ["due"]
+    assert page.actions.count("open-detail:0") == 1
+    assert page.actions.count("back:0") == 1
+    assert page.actions.index("open-detail:0") < page.actions.index("back:0")
+    assert page.actions[-1].startswith("validate-list:")
+
+
+@pytest.mark.parametrize(
+    ("button_count", "link_count"),
+    [(2, 0), (0, 2), (1, 1)],
+    ids=["duplicate-button", "duplicate-link", "duplicate-button-and-link"],
+)
+def test_collector_rejects_non_atomic_back_control_counts(
+    button_count: int,
+    link_count: int,
+) -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        back_button_count=button_count,
+        back_link_count=link_count,
+    )
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    error = raised.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert not any(action.startswith("back:") for action in page.actions)
+    assert page.actions.count("open-detail:0") == 1
 
 
 def test_collector_rejects_row_count_shrink_after_back() -> None:
