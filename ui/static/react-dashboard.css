@@ -869,6 +869,11 @@ summary:focus-visible {
     color: var(--tc-red);
 }
 
+.tc-agenda-marker--low_score {
+    background: #fef3c7;
+    color: #92400e;
+}
+
 .tc-agenda-marker--due {
     background: var(--tc-blue-soft);
     color: var(--tc-blue-dark);

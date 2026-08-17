@@ -881,6 +881,11 @@
     }
 
     function AgendaClass({ classGroup }) {
+        const statuses = {
+            missing: { marker: "M", label: "Missing assignment" },
+            low_score: { marker: "LOW", label: "Low-scoring assignment" },
+            due: { marker: "DUE", label: "Upcoming assignment" },
+        };
         return h(
             "details",
             { className: "tc-agenda-class rounded-lg border border-slate-200" },
@@ -904,8 +909,9 @@
             h(
                 "div",
                 { className: "grid gap-2 border-t border-slate-200 p-3" },
-                classGroup.assignments.map((assignment, index) =>
-                    h(
+                classGroup.assignments.map((assignment, index) => {
+                    const status = statuses[assignment.status] || statuses.due;
+                    return h(
                         "article",
                         {
                             key: `${assignment.status}-${assignment.dueDate}-${assignment.title}-${index}`,
@@ -918,12 +924,9 @@
                                     "tc-agenda-marker",
                                     `tc-agenda-marker--${assignment.status}`,
                                 ),
-                                "aria-label":
-                                    assignment.status === "missing"
-                                        ? "Missing assignment"
-                                        : "Upcoming assignment",
+                                "aria-label": status.label,
                             },
-                            assignment.status === "missing" ? "M" : "DUE",
+                            status.marker,
                         ),
                         h(
                             "span",
@@ -941,8 +944,8 @@
                             },
                             assignment.dueDisplay,
                         ),
-                    ),
-                ),
+                    );
+                }),
             ),
         );
     }
@@ -964,6 +967,16 @@
                     null,
                     h("span", { className: "tc-agenda-marker tc-agenda-marker--missing" }, "M"),
                     " Missing",
+                ),
+                h(
+                    "span",
+                    null,
+                    h(
+                        "span",
+                        { className: "tc-agenda-marker tc-agenda-marker--low_score" },
+                        "LOW",
+                    ),
+                    " Low",
                 ),
                 h(
                     "span",

@@ -182,9 +182,10 @@ const data = {
                         classes: [
                             {
                                 name: "Fictional Seminar",
-                                count: 2,
+                                count: 3,
                                 assignments: [
                                     { status: "missing", title: "Reflection draft", dueDate: "2026-08-11", dueDisplay: "Aug 11" },
+                                    { status: "low_score", title: "Earlier quiz", dueDate: "2026-08-14", dueDisplay: "Aug 14" },
                                     { status: "due", title: "Reading notes", dueDate: "2026-08-16", dueDisplay: "Aug 16 · 23:59" },
                                 ],
                             },
@@ -222,13 +223,13 @@ const agendaHeadings = collect(tree, (node) => node.type === "h2")
 const scrollRegions = collect(tree, (node) => String(node.props?.["aria-label"] || "").endsWith(" assignments"));
 const details = collect(tree, (node) => node.type === "details");
 const summaries = collect(tree, (node) => node.type === "summary");
-const statusMarkers = collect(tree, (node) => node.props?.["aria-label"] === "Missing assignment" || node.props?.["aria-label"] === "Upcoming assignment");
+const statusMarkers = collect(tree, (node) => ["Missing assignment", "Low-scoring assignment", "Upcoming assignment"].includes(node.props?.["aria-label"]));
 console.log(JSON.stringify({
     agendaHeadings,
     scrollRegions: scrollRegions.map((node) => ({ label: node.props["aria-label"], tabIndex: node.props.tabIndex, text: textOf(node) })),
     detailCount: details.length,
     summaryText: summaries.map(textOf),
-    statusMarkers: statusMarkers.map((node) => ({ label: node.props["aria-label"], text: textOf(node) })),
+    statusMarkers: statusMarkers.map((node) => ({ label: node.props["aria-label"], text: textOf(node), className: node.props.className })),
     pageText: textOf(tree),
 }));
 """
@@ -244,17 +245,31 @@ console.log(JSON.stringify({
             "label": "Agenda 2 · ParentVUE assignments",
             "tabIndex": 0,
             "text": (
-                "Week of Aug 10Fictional Seminar2 assignments"
-                "MReflection draftAug 11DUEReading notesAug 16 · 23:59"
+                "Week of Aug 10Fictional Seminar3 assignments"
+                "MReflection draftAug 11LOWEarlier quizAug 14DUEReading notesAug 16 · 23:59"
             ),
         },
     ]
     assert result["detailCount"] == 1
-    assert result["summaryText"] == ["Fictional Seminar2 assignments"]
+    assert result["summaryText"] == ["Fictional Seminar3 assignments"]
     assert result["statusMarkers"] == [
-        {"label": "Missing assignment", "text": "M"},
-        {"label": "Upcoming assignment", "text": "DUE"},
+        {
+            "label": "Missing assignment",
+            "text": "M",
+            "className": "tc-agenda-marker tc-agenda-marker--missing",
+        },
+        {
+            "label": "Low-scoring assignment",
+            "text": "LOW",
+            "className": "tc-agenda-marker tc-agenda-marker--low_score",
+        },
+        {
+            "label": "Upcoming assignment",
+            "text": "DUE",
+            "className": "tc-agenda-marker tc-agenda-marker--due",
+        },
     ]
+    assert result["pageText"].count("Low") == 2
     assert "No agenda" not in result["pageText"]
     assert "scrape" not in result["pageText"].lower()
 
