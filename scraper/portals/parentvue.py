@@ -1,17 +1,21 @@
 from __future__ import annotations
 from typing import Optional
 
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 from scraper.portals.base import (
     GradeTableConfig,
     PortalEngine,
     UniversalLoginConfig,
 )
+from scraper.agenda_contract import AgendaRecord
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from .parentvue_agenda import parse_parentvue_agenda
 from .utils import wait_after_nav
 
 class ParentVUE(PortalEngine):
     portal_key = "parentvue"
     url_patterns = ("parentvue", "Login_Parent", "Login_Student")
+    agenda_capable = True
     login_config = UniversalLoginConfig(
         username_selector="#ctl00_MainContent_username",
         password_selector="#ctl00_MainContent_password",
@@ -28,18 +32,31 @@ class ParentVUE(PortalEngine):
         await self.raise_login_error_if("Login" in self.page.url)
 
     async def after_login(self, first_name: str | None) -> None:
-        await wait_after_nav(
-            self.page, wait_until="domcontentloaded", timeout=30000
-        )
-        if "Login_Parent" in self.login_url:
-            await self.select_student(first_name)
-        self.logger.info("portal.navigation.gradebook_started")
-        await self.page.get_by_role("listitem").filter(
-            has_text="Grade Book"
-        ).click()
-        await self.page.wait_for_load_state(
-            state="domcontentloaded", timeout=30000
-        )
+        try:
+            await wait_after_nav(
+                self.page, wait_until="domcontentloaded", timeout=30000
+            )
+            if "Login_Parent" in self.login_url:
+                await self.select_student(first_name)
+            self.logger.info("portal.navigation.gradebook_started")
+            gradebook_link = self.page.locator(
+                'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
+            ).first
+            await gradebook_link.click()
+            await self.page.wait_for_load_state(
+                state="domcontentloaded", timeout=30000
+            )
+            await self.page.wait_for_selector("#gb-assignments", timeout=30000)
+            await self.page.wait_for_selector(
+                "#gb-assignments .no-data:visible, "
+                "#gb-assignments .assignment-row:visible, "
+                "#gb-assignments .gb-assignment-row:visible, "
+                "#gb-assignments tr:has(.assignment-title, .assignment-name, "
+                '[data-label="Assignment"]):visible',
+                timeout=30000,
+            )
+        except PlaywrightTimeout:
+            raise self.LoginError("portal login rejected") from None
 
 
 
@@ -47,6 +64,7 @@ class ParentVUE(PortalEngine):
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
+        reraise=True,
     )
     async def select_student(self, first_name: Optional[str] = None):
         """
@@ -105,3 +123,6 @@ class ParentVUE(PortalEngine):
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(300)
+
+    async def get_agenda(self) -> list[AgendaRecord]:
+        return parse_parentvue_agenda(await self.page.content())

@@ -5,15 +5,18 @@ import re
 from time import monotonic
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Literal, TypedDict
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 from urllib.parse import urlparse, urljoin
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from playwright.async_api import TimeoutError
 
-from .base import GradeMap, AgendaItem, LoginError, PortalEngine, PlaywrightTimeout
-from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow, reconcile_day_time
+from scraper.agenda_contract import AgendaRecord
+
+from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
+from .canvas_agenda import collect_canvas_agenda
+from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow
 
 
 # --------------------- utilities ---------------------
@@ -22,6 +25,147 @@ class TermContext(TypedDict):
     fall_year: int
     spring_year: int
     term: str
+
+
+_CANVAS_ENTRY_HOST = "husd.instructure.com"
+_CANVAS_HOST_SUFFIX = "instructure.com"
+_CANVAS_PREAUTH_HOSTS = frozenset(
+    {
+        "iad.login.instructure.com",
+        "af4a8e81-f8b1-4434-88f6-0c8c0a166c9e.iad.login.instructure.com",
+    }
+)
+_CANVAS_RETURN_HOSTS = frozenset(
+    {
+        _CANVAS_ENTRY_HOST,
+        "iad.login.instructure.com",
+    }
+)
+_CANVAS_TRANSIT_HOST = "sso.canvaslms.com"
+_MICROSOFT_LOGIN_HOST = "login.microsoftonline.com"
+_MICROSOFT_CONTINUATION_HOSTS = frozenset(
+    {
+        _MICROSOFT_LOGIN_HOST,
+        "login.live.com",
+    }
+)
+
+
+class CanvasTrustError(LoginError):
+    def __init__(self) -> None:
+        super().__init__("canvas_auth_route_untrusted")
+
+
+def _normalized_https_origin(url: str) -> tuple[str, str]:
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise CanvasTrustError() from error
+    host = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "https"
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+    ):
+        raise CanvasTrustError()
+    return f"https://{host}", host
+
+
+def _is_canvas_host(host: str) -> bool:
+    return host == _CANVAS_HOST_SUFFIX or host.endswith(f".{_CANVAS_HOST_SUFFIX}")
+
+
+class _CanvasAuthRoute:
+    def __init__(self, entry_url: str) -> None:
+        self.entry_origin, entry_host = _normalized_https_origin(entry_url)
+        if entry_host != _CANVAS_ENTRY_HOST:
+            raise CanvasTrustError()
+        self.reset()
+
+    def reset(self) -> None:
+        self._phase = "entry"
+        self._current_host = _CANVAS_ENTRY_HOST
+        self._password_submitted = False
+
+    def observe(self, url: str) -> None:
+        origin, host = _normalized_https_origin(url)
+        if self._phase == "entry":
+            if origin == self.entry_origin:
+                self._current_host = host
+                return
+            if host in _CANVAS_PREAUTH_HOSTS:
+                self._phase = "preauth"
+                self._current_host = host
+                return
+            if host == _CANVAS_TRANSIT_HOST:
+                self._phase = "transit"
+                self._current_host = host
+                return
+        elif self._phase == "preauth":
+            if origin == self.entry_origin or host in _CANVAS_PREAUTH_HOSTS:
+                self._current_host = host
+                return
+            if host == _CANVAS_TRANSIT_HOST:
+                self._phase = "transit"
+                self._current_host = host
+                return
+        elif self._phase == "transit":
+            if host == _CANVAS_TRANSIT_HOST or origin == self.entry_origin:
+                self._current_host = host
+                return
+            if host == _MICROSOFT_LOGIN_HOST:
+                self._phase = "microsoft"
+                self._current_host = host
+                return
+        elif self._phase == "microsoft":
+            if host == _MICROSOFT_LOGIN_HOST:
+                self._current_host = host
+                return
+            if self._password_submitted and host in _MICROSOFT_CONTINUATION_HOSTS:
+                self._current_host = host
+                return
+            if self._password_submitted and host in _CANVAS_RETURN_HOSTS:
+                self._phase = "canvas_return"
+                self._current_host = host
+                return
+        elif self._phase == "canvas_return" and host in _CANVAS_RETURN_HOSTS:
+            self._current_host = host
+            return
+        raise CanvasTrustError()
+
+    def require_microsoft_credentials(self) -> None:
+        if (
+            self._phase != "microsoft"
+            or self._current_host != _MICROSOFT_LOGIN_HOST
+            or self._password_submitted
+        ):
+            raise CanvasTrustError()
+
+    def mark_password_submitted(self) -> None:
+        self.require_microsoft_credentials()
+        self._password_submitted = True
+
+    def require_microsoft_continuation(self) -> None:
+        if (
+            self._phase != "microsoft"
+            or not self._password_submitted
+            or self._current_host not in _MICROSOFT_CONTINUATION_HOSTS
+        ):
+            raise CanvasTrustError()
+
+    def verified_canvas_origin(self, url: str) -> str:
+        origin, host = _normalized_https_origin(url)
+        self.observe(url)
+        if (
+            self._phase != "canvas_return"
+            or not self._password_submitted
+            or host not in _CANVAS_RETURN_HOSTS
+        ):
+            raise CanvasTrustError()
+        return origin
 
 def _origin(url: str) -> str:
     u = urlparse(url)
@@ -102,6 +246,7 @@ class CanvasEngine(PortalEngine):
 
     portal_key = "canvas"
     url_patterns = ("instructure.com", "canvas")
+    agenda_capable = True
 
     # ----------------- helpers -----------------
 
@@ -157,7 +302,12 @@ class CanvasEngine(PortalEngine):
                 pass
 
     async def _is_canvas_logged_in(self) -> bool:
-        url = self.page.url or ""
+        try:
+            _, host = _normalized_https_origin(self.page.url or "")
+        except CanvasTrustError:
+            return False
+        if not _is_canvas_host(host):
+            return False
 
         username_still_visible = await exists(self.page.locator("#username"), timeout=600)
         password_still_visible = await exists(self.page.locator("#password"), timeout=600)
@@ -189,7 +339,7 @@ class CanvasEngine(PortalEngine):
             if await self._exists(sel, timeout=1000):
                 return True
 
-        return not re.search(r"/login|signin|saml|oauth|auth", url, re.I)
+        return False
 
     async def _has_canvas_login_error(self) -> bool:
         error_targets = [
@@ -198,7 +348,7 @@ class CanvasEngine(PortalEngine):
             self.page.locator(".alert"),
             self.page.locator(".error"),
             self.page.locator(".ic-flash-error"),
-            self.page.locator("text=/invalid|incorrect|failed|unsuccessful|try again|username|password/i"),
+            self.page.locator("text=/invalid|incorrect|failed|unsuccessful|try again/i"),
         ]
         for target in error_targets:
             try:
@@ -219,52 +369,36 @@ class CanvasEngine(PortalEngine):
         deadline = monotonic() + (timeout_ms / 1000)
 
         while monotonic() < deadline:
+            self._raise_canvas_route_error()
             try:
                 await self.page.wait_for_load_state("domcontentloaded", timeout=800)
             except Exception:
                 pass
+            self._raise_canvas_route_error()
 
             if await self._is_canvas_logged_in():
+                self._raise_canvas_route_error()
                 return True
 
             if await self._has_canvas_login_error():
+                self._raise_canvas_route_error()
                 return False
 
             await self.page.wait_for_timeout(500)
 
-        raise PlaywrightTimeout(f"Timed out waiting for Canvas login result (url={self.page.url})")
+        raise PlaywrightTimeout("Timed out waiting for Canvas login result")
 
     async def _click_sso_entry_if_needed(self):
         """
         Some Canvas pages first show SSO buttons rather than credential fields.
         """
-        native_user = self.page.locator("#username")
-        native_pass = self.page.locator("#password")
-        pseudo_user = self.page.locator("input[name='pseudonym_session[unique_id]']")
-        pseudo_pass = self.page.locator("input[name='pseudonym_session[password]']")
-
-        native_visible = (
-            await exists(native_user, timeout=1000)
-            or await exists(native_pass, timeout=1000)
-            or await exists(pseudo_user, timeout=1000)
-            or await exists(pseudo_pass, timeout=1000)
-        )
-        if native_visible:
-            return
-
         sso_selectors = (
-            "button:has-text('Log In With Google')",
-            "a:has-text('Log In With Google')",
-            "button:has-text('Sign in with Google')",
-            "a:has-text('Sign in with Google')",
             "button:has-text('Log In With Microsoft')",
             "a:has-text('Log In With Microsoft')",
             "button:has-text('Sign in with Microsoft')",
             "a:has-text('Sign in with Microsoft')",
             "button:has-text('Microsoft')",
             "a:has-text('Microsoft')",
-            "button:has-text('Google')",
-            "a:has-text('Google')",
             "button:has-text('Single Sign-On')",
             "a:has-text('Single Sign-On')",
             "button:has-text('SSO')",
@@ -275,9 +409,13 @@ class CanvasEngine(PortalEngine):
             try:
                 loc = self.page.locator(sso_sel).first
                 if await exists(loc, timeout=800):
-                    await loc.click()
-                    await wait_after_nav(self.page, wait_until="domcontentloaded")
+                    await self._run_canvas_auth_action(loc.click())
+                    await self._run_canvas_auth_action(
+                        wait_after_nav(self.page, wait_until="domcontentloaded")
+                    )
                     return
+            except CanvasTrustError:
+                raise
             except Exception:
                 continue
 
@@ -289,57 +427,161 @@ class CanvasEngine(PortalEngine):
         retry=retry_if_exception_type(PlaywrightTimeout),
         reraise=True,
     )
+    async def _prepare_login(self, route: _CanvasAuthRoute) -> None:
+        route.reset()
+        await self._run_canvas_auth_action(
+            self.page.goto(self.login_url, wait_until="domcontentloaded")
+        )
+        self._raise_canvas_route_error()
+        route.observe(self.page.url)
+        await self.page.wait_for_timeout(750)
+        await self._click_sso_entry_if_needed()
+        self._raise_canvas_route_error()
+
+        try:
+            _, host = _normalized_https_origin(self.page.url)
+        except CanvasTrustError:
+            raise
+        if host != _MICROSOFT_LOGIN_HOST:
+            await self._run_canvas_auth_action(
+                self.page.wait_for_url(
+                    lambda url: _normalized_https_origin(url)[1]
+                    == _MICROSOFT_LOGIN_HOST,
+                    timeout=15_000,
+                    wait_until="domcontentloaded",
+                )
+            )
+        self._raise_canvas_route_error()
+        route.observe(self.page.url)
+        route.require_microsoft_credentials()
+
+    def _install_canvas_route_guard(self, route: _CanvasAuthRoute) -> None:
+        self._canvas_route_error: CanvasTrustError | None = None
+
+        def observe_main_frame(request: Any) -> None:
+            if (
+                not request.is_navigation_request()
+                or request.frame is not self.page.main_frame
+            ):
+                return
+            try:
+                route.observe(request.url)
+            except CanvasTrustError as error:
+                self._canvas_route_error = error
+
+        self._canvas_route_callback: Callable[[Any], None] = observe_main_frame
+        self.page.on("request", observe_main_frame)
+
+    def _remove_canvas_route_guard(self) -> None:
+        callback = getattr(self, "_canvas_route_callback", None)
+        if callback is None:
+            return
+        try:
+            self.page.remove_listener("request", callback)
+        except Exception:
+            pass
+        finally:
+            self.__dict__.pop("_canvas_route_callback", None)
+
+    def _raise_canvas_route_error(self) -> None:
+        error = getattr(self, "_canvas_route_error", None)
+        if error is not None:
+            raise error
+
+    async def _run_canvas_auth_action(self, action: Awaitable[Any]) -> Any:
+        try:
+            result = await action
+        except Exception:
+            self._raise_canvas_route_error()
+            raise
+        self._raise_canvas_route_error()
+        return result
+
+    async def _submit_microsoft_credentials_once(self, route: _CanvasAuthRoute) -> None:
+        self._raise_canvas_route_error()
+        route.observe(self.page.url)
+        route.require_microsoft_credentials()
+        try:
+            await self.page.fill("input#username", self.sid, timeout=1000)
+        except PlaywrightTimeout:
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            await self.page.fill("input#i0116", self.sid, timeout=1000)
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            await self.page.fill("input#i0118", self.pw)
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            route.mark_password_submitted()
+            await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
+        else:
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            await self.page.fill("input#password", self.pw)
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_microsoft_credentials()
+            route.mark_password_submitted()
+            await self._run_canvas_auth_action(
+                self.page.locator('.form-group input[name="password"]').press("Enter")
+            )
+
+        await self._run_canvas_auth_action(
+            self.page.wait_for_load_state("domcontentloaded")
+        )
+
+        stay_signed_in = self.page.get_by_text("Stay signed in?")
+        if await stay_signed_in.count() > 0:
+            route.observe(self.page.url)
+            route.require_microsoft_continuation()
+            await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
+
     async def login(self, first_name: Optional[str] = None):
         """
         Fill creds, submit, and land in a valid post-login Canvas state.
         """
+        _ = first_name
+        self.__dict__.pop("_canvas_origin", None)
+        if not self.login_url:
+            raise LoginError("portal login rejected")
+
+        route = _CanvasAuthRoute(self.login_url)
+        self._install_canvas_route_guard(route)
         try:
-            if not self.login_url:
-                raise LoginError("Missing login_url for Canvas")
+            await self._prepare_login(route)
+            await self._submit_microsoft_credentials_once(route)
 
-            await self.page.goto(self.login_url, wait_until="domcontentloaded")
-            await self.page.wait_for_timeout(750)
-
-            await self._click_sso_entry_if_needed()
-
-            uid_sel = "#username"
-            pwd_sel = "#password"
-
-            native_user_visible = await exists(self.page.locator(uid_sel), timeout=1200)
-            native_pass_visible = await exists(self.page.locator(pwd_sel), timeout=1200)
-
-            if native_user_visible or native_pass_visible:
-                await universal_login_flow(
-                    self.page,
-                    self.login_url,
-                    self.sid,
-                    self.pw,
-                    uid_sel,
-                    pwd_sel,
-                    microsoft_callback=self.microsoft_login,
-                    google_callback=self.google_login,
-                    alt_sso_callback=self.alt_login,
-                )
-            else:
-                await self.alt_login()
-
-            login_ok = await self._wait_for_login_result(timeout_ms=14000)
-            await self.raise_login_error_if(
-                not login_ok,
-                f"Canvas bad username/password or login failed (url={self.page.url})",
+            login_ok = await self._run_canvas_auth_action(
+                self._wait_for_login_result(timeout_ms=14000)
             )
+            await self.raise_login_error_if(not login_ok)
 
-            await self.post_login()
+            await self._run_canvas_auth_action(self.post_login())
 
-            ok = await self._is_canvas_logged_in()
-            await self.raise_login_error_if(
-                not ok,
-                f"Canvas login did not reach a recognized post-login state (url={self.page.url})",
-            )
-
-            await self.post_login()
-        except Exception:
+            ok = await self._run_canvas_auth_action(self._is_canvas_logged_in())
+            await self.raise_login_error_if(not ok)
+            self._raise_canvas_route_error()
+            self._canvas_origin = route.verified_canvas_origin(self.page.url)
+        except CanvasTrustError:
+            raise
+        except PlaywrightTimeout:
+            self._raise_canvas_route_error()
+            raise
+        except LoginError:
+            self._raise_canvas_route_error()
             raise LoginError("portal login rejected") from None
+        except Exception:
+            self._raise_canvas_route_error()
+            raise LoginError("portal login rejected") from None
+        finally:
+            self._remove_canvas_route_guard()
 
     async def post_login(self):
         """
@@ -669,74 +911,10 @@ class CanvasEngine(PortalEngine):
 
         return out
 
-    async def get_agenda(self, get: Literal["upcoming", "missing"] = "upcoming"):
-        await self.page.wait_for_load_state("domcontentloaded")
+    async def get_agenda(self) -> list[AgendaRecord]:
+        canvas_origin = getattr(self, "_canvas_origin", None)
+        if not isinstance(canvas_origin, str):
+            from .canvas_agenda import CanvasAgendaError
 
-        agenda: dict[str, list[AgendaItem]] = {}
-        await self.page.locator('[data-testid="dashboard-options-button"]').click()
-        await self.page.locator('[data-testid="list-view-menu-item"]').click()
-        await self.page.wait_for_timeout(1500)
-        soup = await self.get_soup()
-
-        try:
-            all_days = soup.find_all("div", attrs={"data-testid": "day"})
-
-            today_passed = False
-
-            for i, day_block in enumerate(all_days):
-                if i > 7:
-                    break
-                assert isinstance(day_block, Tag)
-                today_reached = today_passed
-                date_elem = day_block.select_one('[data-testid="today-date"]')
-
-                if not today_passed:
-                    if date_elem is not None:
-                        today_reached = True
-                    else:
-                        continue
-
-                assert today_reached
-
-                if today_passed:
-                    date_elem = day_block.select_one('[data-testid="not-today"]')
-                else:
-                    today_passed = True
-
-                assert date_elem is not None
-                date_text = date_elem.get_text(strip=True)
-                day, _ = reconcile_day_time(date_text, reference=datetime.now())
-                due_date = day.strftime("%m/%d/%Y")
-
-                assignments: list[AgendaItem] = []
-                class_groups = day_block.select("div.planner-grouping")
-
-                for course in class_groups:
-                    title_elem = course.select_one("span.Grouping-styles__title")
-                    class_title = title_elem.get_text(strip=True) if title_elem else None
-
-                    if class_title is None:
-                        continue
-
-                    assignment_items = course.select('div[data-testid="planner-item-raw"]')
-
-                    for assignment in assignment_items:
-                        a = assignment.select_one("a")
-                        if not a:
-                            continue
-
-                        title_span = a.select_one('span[aria-hidden="true"]')
-                        assignment_title = title_span.get_text(strip=True) if title_span else "Unknown Assignment"
-
-                        due_time_elem = assignment.select_one(".PlannerItem-styles__due span[aria-hidden='true']")
-                        due_time = due_time_elem.get_text(strip=True) if due_time_elem else None
-
-                        assignments.append((class_title, assignment_title, due_time))
-
-                if len(assignments) > 0:
-                    agenda[due_date] = assignments
-
-        except Exception:
-            pass
-        finally:
-            return agenda
+            raise CanvasAgendaError("canvas_agenda_origin_unverified")
+        return await collect_canvas_agenda(self.page, canvas_origin)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -25,9 +26,20 @@ class GPS(PortalEngine):
         post_fill_wait=4000,
     )
 
+    async def validate_login(self) -> None:
+        config = type(self).login_config
+        assert config is not None
+        rejected = await self.page.locator(config.username_selector).is_visible()
+        if not rejected:
+            rejected = await self.page.locator(config.password_selector).is_visible()
+        await self.raise_login_error_if(rejected)
+
     async def after_login(self, first_name: str | None) -> None:
         _ = first_name
-        await self.do_gps_auth()
+        try:
+            await self.do_gps_auth()
+        except PlaywrightTimeout:
+            raise self.LoginError("portal login rejected") from None
 
     # Login Helper
     async def do_gps_auth(self):

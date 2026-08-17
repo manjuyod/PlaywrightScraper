@@ -176,11 +176,7 @@ async def test_portal(
                 diagnostic=debug,
             )
         if agenda:
-            context = await browser.new_context()
-            try:
-                _ = await fetch_student_agenda(context, student, "upcoming")
-            finally:
-                await context.close()
+            _ = await fetch_student_agenda(browser, student)
     except Exception as exc:
         exception_type = type(exc).__name__
         logger.error(

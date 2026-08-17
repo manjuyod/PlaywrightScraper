@@ -139,22 +139,17 @@ def test_portal_full_flow_is_explicit(monkeypatch) -> None:
 
 
 def test_portal_agenda_flow_is_explicit(monkeypatch) -> None:
-    observed: list[tuple[object, dict[str, object], str]] = []
-
-    class FakeContext:
-        async def close(self) -> None:
-            return None
-
-    class FakeBrowser:
-        async def new_context(self) -> FakeContext:
-            return FakeContext()
+    observed: list[tuple[object, dict[str, object]]] = []
 
     async def fake_scrape_one(*_args, **_kwargs):
         raise AssertionError("agenda-only tests should not fetch grades")
 
-    async def fake_fetch_agenda(context, student, target):
-        observed.append((context, student, target))
-        return {"2026-08-12": [("Math", "Homework", None)]}, student
+    async def fake_fetch_agenda(browser, student):
+        observed.append((browser, student))
+        return {
+            "agenda1": {"portal": "canvas", "weeks": {}},
+            "agenda2": {"portal": None, "weeks": {}},
+        }, student
 
     monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
     monkeypatch.setattr(test_portal, "fetch_student_agenda", fake_fetch_agenda)
@@ -162,7 +157,7 @@ def test_portal_agenda_flow_is_explicit(monkeypatch) -> None:
 
     result = asyncio.run(
         test_portal.test_portal(
-            cast(Browser, FakeBrowser()),
+            cast(Browser, object()),
             "canvas",
             student,
             agenda=True,
@@ -171,7 +166,7 @@ def test_portal_agenda_flow_is_explicit(monkeypatch) -> None:
 
     assert result.status == "passed"
     assert len(observed) == 1
-    assert observed[0][1:] == (student, "upcoming")
+    assert observed[0][1] == student
 
 
 def test_portal_debug_preserves_diagnostic_mode(monkeypatch) -> None:

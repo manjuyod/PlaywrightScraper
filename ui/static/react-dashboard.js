@@ -880,6 +880,152 @@
         );
     }
 
+    function AgendaClass({ classGroup }) {
+        return h(
+            "details",
+            { className: "tc-agenda-class rounded-lg border border-slate-200" },
+            h(
+                "summary",
+                { className: "tc-focus-ring flex items-center justify-between gap-3 rounded-lg px-3 py-3" },
+                h(
+                    "span",
+                    {
+                        className: "min-w-0 truncate font-bold text-slate-900",
+                        title: classGroup.name,
+                    },
+                    classGroup.name,
+                ),
+                h(
+                    "span",
+                    { className: "shrink-0 text-xs font-bold text-slate-500" },
+                    `${classGroup.count} ${classGroup.count === 1 ? "assignment" : "assignments"}`,
+                ),
+            ),
+            h(
+                "div",
+                { className: "grid gap-2 border-t border-slate-200 p-3" },
+                classGroup.assignments.map((assignment, index) =>
+                    h(
+                        "article",
+                        {
+                            key: `${assignment.status}-${assignment.dueDate}-${assignment.title}-${index}`,
+                            className: "tc-agenda-assignment",
+                        },
+                        h(
+                            "span",
+                            {
+                                className: cn(
+                                    "tc-agenda-marker",
+                                    `tc-agenda-marker--${assignment.status}`,
+                                ),
+                                "aria-label":
+                                    assignment.status === "missing"
+                                        ? "Missing assignment"
+                                        : "Upcoming assignment",
+                            },
+                            assignment.status === "missing" ? "M" : "DUE",
+                        ),
+                        h(
+                            "span",
+                            {
+                                className: "min-w-0 flex-1 truncate",
+                                title: assignment.title,
+                            },
+                            assignment.title,
+                        ),
+                        h(
+                            "time",
+                            {
+                                className: "shrink-0 text-xs text-slate-500",
+                                dateTime: assignment.dueDate,
+                            },
+                            assignment.dueDisplay,
+                        ),
+                    ),
+                ),
+            ),
+        );
+    }
+
+    function AgendaCard({ slot }) {
+        const heading = `Agenda ${slot.number}${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
+        return h(
+            Card,
+            { className: "tc-report-card tc-agenda-card p-5" },
+            h("h2", { className: "text-lg font-extrabold text-slate-900" }, heading),
+            h(
+                "div",
+                {
+                    className: "mt-2 flex gap-3 text-xs font-bold text-slate-500",
+                    "aria-label": "Assignment status legend",
+                },
+                h(
+                    "span",
+                    null,
+                    h("span", { className: "tc-agenda-marker tc-agenda-marker--missing" }, "M"),
+                    " Missing",
+                ),
+                h(
+                    "span",
+                    null,
+                    h("span", { className: "tc-agenda-marker tc-agenda-marker--due" }, "DUE"),
+                    " Upcoming",
+                ),
+            ),
+            h(
+                "div",
+                {
+                    className: "tc-report-card__scroll tc-scrollbar tc-focus-ring mt-4 grid content-start gap-4 rounded-md pr-2",
+                    tabIndex: 0,
+                    "aria-label": `${heading} assignments`,
+                },
+                (slot.weeks || []).map((week) =>
+                    h(
+                        "section",
+                        { key: week.weekStart, className: "grid gap-2" },
+                        h("h3", { className: "font-extrabold text-slate-900" }, week.label),
+                        week.classes.map((classGroup) =>
+                            h(AgendaClass, { key: classGroup.name, classGroup }),
+                        ),
+                    ),
+                ),
+            ),
+        );
+    }
+
+    function LegacyAgendaCard({ items }) {
+        return h(
+            Card,
+            { className: "p-5" },
+            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda"),
+            h(
+                "div",
+                { className: "mt-4 grid gap-3" },
+                items && items.length
+                    ? items.map((item, index) =>
+                          h(
+                              "article",
+                              {
+                                  key: `${item.dueDate}-${item.course}-${index}`,
+                                  className: "rounded-lg border border-slate-200 p-4",
+                              },
+                              h(
+                                  "p",
+                                  {
+                                      className:
+                                          "text-xs font-bold uppercase tracking-wide text-brand-orangeDark",
+                                  },
+                                  item.dueDate,
+                              ),
+                              h("h3", { className: "mt-1 font-bold text-slate-900" }, item.title),
+                              h("p", { className: "mt-1 text-sm text-slate-500" }, item.course),
+                          ),
+                      )
+                    : h("p", { className: "text-sm text-slate-500" }, "No agenda items yet."),
+            ),
+        );
+    }
+
     function StudentPage({ data }) {
         const student = data.student || {};
         const [activeTab, setActiveTab] = useState(
@@ -911,6 +1057,29 @@
                 ),
             );
         }
+        const currentGradesContent = [
+            h(
+                "div",
+                { key: "heading", className: "flex items-center justify-between gap-3" },
+                h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Current grades"),
+                h(Badge, { tone: statusTone(student.status) }, student.status || "never"),
+            ),
+            h(
+                "div",
+                { key: "grades", className: "mt-4" },
+                h(GradeList, { grades: student.gradesSnapshot }),
+            ),
+            h(
+                "p",
+                { key: "updated", className: "mt-4 text-xs text-slate-500" },
+                `Updated ${formatDate(student.updatedAt)}`,
+            ),
+        ];
+        const gradeHistoryHeading = h(
+            "h2",
+            { className: "text-lg font-extrabold text-slate-900" },
+            "Grade history",
+        );
         return h(
             Shell,
             {
@@ -953,52 +1122,42 @@
                       h("div", { className: "mt-5" }, h(GradeHeatmap, { history: student.grades })),
                   )
                 :
-            h(
-                "div",
-                { className: "grid gap-6 xl:grid-cols-[0.8fr_1.2fr]" },
-                h(
-                    "div",
-                    { className: "grid content-start gap-6" },
-                    h(
-                        Card,
-                        { className: "p-5" },
-                        h(
-                            "div",
-                            { className: "flex items-center justify-between gap-3" },
-                            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Current grades"),
-                            h(Badge, { tone: statusTone(student.status) }, student.status || "never"),
-                        ),
-                        h("div", { className: "mt-4" }, h(GradeList, { grades: student.gradesSnapshot })),
-                        h("p", { className: "mt-4 text-xs text-slate-500" }, `Updated ${formatDate(student.updatedAt)}`),
-                    ),
-                    h(
-                        Card,
-                        { className: "p-5" },
-                        h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda"),
-                        h(
-                            "div",
-                            { className: "mt-4 grid gap-3" },
-                            student.agendaItems && student.agendaItems.length
-                                ? student.agendaItems.map((item, index) =>
-                                      h(
-                                          "article",
-                                          { key: `${item.dueDate}-${item.course}-${index}`, className: "rounded-lg border border-slate-200 p-4" },
-                                          h("p", { className: "text-xs font-bold uppercase tracking-wide text-brand-orangeDark" }, item.dueDate),
-                                          h("h3", { className: "mt-1 font-bold text-slate-900" }, item.title),
-                                          h("p", { className: "mt-1 text-sm text-slate-500" }, item.course),
-                                      ),
-                                  )
-                                : h("p", { className: "text-sm text-slate-500" }, "No agenda items yet."),
-                        ),
-                    ),
-                ),
-                h(
-                    Card,
-                    { className: "p-5" },
-                    h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Grade history"),
-                    h("div", { className: "mt-4" }, h(GradeHistory, { history: student.grades })),
-                ),
-            ),
+                  h(
+                      "div",
+                      { className: "grid gap-6" },
+                      h(
+                          "div",
+                          { className: "tc-grade-row" },
+                          h(
+                              Card,
+                              { className: "tc-report-card tc-grade-card p-5" },
+                              currentGradesContent,
+                          ),
+                          h(
+                              Card,
+                              { className: "tc-report-card tc-grade-card p-5" },
+                              gradeHistoryHeading,
+                              h(
+                                  "div",
+                                  {
+                                      className: "tc-report-card__scroll tc-scrollbar tc-focus-ring mt-4 rounded-md pr-2",
+                                      tabIndex: 0,
+                                      "aria-label": "Grade history",
+                                  },
+                                  h(GradeHistory, { history: student.grades }),
+                              ),
+                          ),
+                      ),
+                      student.agendaSlots && student.agendaSlots.length === 2
+                          ? h(
+                                "div",
+                                { className: "tc-agenda-row" },
+                                student.agendaSlots.map((slot) =>
+                                    h(AgendaCard, { key: slot.number, slot }),
+                                ),
+                            )
+                          : h(LegacyAgendaCard, { items: student.agendaItems || [] }),
+                  ),
         );
     }
 
