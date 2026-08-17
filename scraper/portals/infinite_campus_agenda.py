@@ -217,6 +217,8 @@ async def _open_current_term_assignments(page: Page) -> Frame:
 
     missing = frame.get_by_role("button", name="Missing", exact=True)
     current_term = frame.get_by_role("button", name="Current Term", exact=True)
+    await missing.wait_for(state="visible", timeout=_READINESS_TIMEOUT_MS)
+    await current_term.wait_for(state="visible", timeout=_READINESS_TIMEOUT_MS)
     if await missing.count() != 1 or await current_term.count() != 1:
         raise InfiniteCampusAgendaError()
 
@@ -224,12 +226,6 @@ async def _open_current_term_assignments(page: Page) -> Frame:
         await current_term.click()
 
     return frame
-
-
-def _collect_action(page: Page, action: str) -> None:
-    actions = getattr(page, "actions", None)
-    if isinstance(actions, list):
-        actions.append(action)
 
 
 async def _set_missing(frame: Frame, enabled: bool) -> None:
@@ -265,7 +261,6 @@ async def collect_infinite_campus_agenda(
     effective_reference = reference or datetime.now()
     frame = await _open_current_term_assignments(page)
     await _set_missing(frame, True)
-    _collect_action(page, "capture-missing")
 
     missing_rows = parse_infinite_campus_list(
         await _visible_list_html(frame), missing_keys=frozenset()
@@ -273,7 +268,6 @@ async def collect_infinite_campus_agenda(
     missing_keys = frozenset(row.key for row in missing_rows)
 
     await _set_missing(frame, False)
-    _collect_action(page, "capture-current-term")
 
     captured = parse_infinite_campus_list(
         await _visible_list_html(frame), missing_keys=missing_keys
@@ -286,7 +280,6 @@ async def collect_infinite_campus_agenda(
         current = parse_infinite_campus_list(
             await _visible_list_html(frame), missing_keys=missing_keys
         )
-        _collect_action(page, f"validate-list:{assignment.ordinal}")
         if [row.key for row in current] != expected_keys:
             raise InfiniteCampusAgendaError()
 
@@ -297,7 +290,6 @@ async def collect_infinite_campus_agenda(
         await frame.wait_for_selector(_DETAIL_READY, timeout=_READINESS_TIMEOUT_MS)
 
         detail = parse_infinite_campus_detail(await frame.content())
-        _collect_action(page, f"capture-detail:{assignment.ordinal}")
         record = classify_infinite_campus_assignment(
             assignment, detail, reference=effective_reference
         )
@@ -308,6 +300,5 @@ async def collect_infinite_campus_agenda(
         if await back.count() != 1:
             raise InfiniteCampusAgendaError()
         await back.click()
-        _collect_action(page, f"back:{assignment.ordinal}")
 
     return records

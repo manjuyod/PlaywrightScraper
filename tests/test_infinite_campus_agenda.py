@@ -230,9 +230,10 @@ class FakeSelection:
         *,
         generation: int,
         rows: list[tuple[int, tuple[str, str, str, str], int]] | None = None,
-        count: int | None = None,
+        count: int | Callable[[], int] | None = None,
         on_click: Callable[[], None] | None = None,
         attribute: Callable[[], str | None] | None = None,
+        on_wait: Callable[[], None] | None = None,
     ) -> None:
         self._workspace = workspace
         self._generation = generation
@@ -240,6 +241,7 @@ class FakeSelection:
         self._count = count
         self._on_click = on_click
         self._attribute = attribute
+        self._on_wait = on_wait
 
     def _assert_fresh(self) -> None:
         if self._generation != self._workspace._generation():
@@ -248,7 +250,7 @@ class FakeSelection:
     async def count(self) -> int:
         self._assert_fresh()
         if self._count is not None:
-            return self._count
+            return self._count() if callable(self._count) else self._count
         return len(self._rows)
 
     @property
@@ -269,6 +271,7 @@ class FakeSelection:
             rows=[self._rows[index]],
             on_click=self._on_click,
             attribute=self._attribute,
+            on_wait=self._on_wait,
         )
 
     def locator(self, selector: str) -> "FakeSelection":
@@ -295,8 +298,24 @@ class FakeSelection:
             return None
         return self._attribute()
 
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        del timeout
+        self._assert_fresh()
+        if state != "visible":
+            raise InfiniteCampusAgendaError()
+        if self._on_wait is not None:
+            self._on_wait()
+        for _ in range(3):
+            if await self.count() != 0:
+                return
+            if self._on_wait is None:
+                break
+            self._on_wait()
+        raise InfiniteCampusAgendaError()
+
     async def evaluate_all(self, _script: str) -> list[str]:
         self._assert_fresh()
+        self._workspace._page._record_list_capture()
         return [self._workspace._row_html(index, row) for index, row, _ in self._rows]
 
     async def click(self) -> None:
@@ -316,8 +335,7 @@ class FakeWorkspace:
     def _current_rows(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
         rows: list[tuple[int, tuple[str, str, str, str], int]] = []
         for position, row in enumerate(self._page.rows):
-            _, _, score_text, _ = row
-            if self._page.missing_pressed and score_text != "Missing":
+            if self._page.missing_pressed and not self._page._is_missing(row):
                 continue
             rows.append((position, row, len(rows)))
         return rows
@@ -351,6 +369,8 @@ class FakeWorkspace:
                 rows=rows,
             )
         if selector == ".assignment__empty:visible":
+            if len(self._current_rows()) == 0:
+                self._page._record_list_capture()
             return FakeSelection(
                 self,
                 generation=self._generation(),
@@ -380,6 +400,8 @@ class FakeWorkspace:
                     rows=[(0, ("", "", "", ""), 0)],
                     on_click=self._page._open_current_term,
                     attribute=lambda: "true" if self._page.term_pressed else "false",
+                    count=lambda: 1 if self._page.controls_ready else 0,
+                    on_wait=lambda: self._page._wait_for_control(name),
                 )
             if name == "Missing":
                 return FakeSelection(
@@ -388,6 +410,8 @@ class FakeWorkspace:
                     rows=[(0, ("", "", "", ""), 0)],
                     on_click=self._page._toggle_missing,
                     attribute=lambda: "true" if self._page.missing_pressed else "false",
+                    count=lambda: 1 if self._page.controls_ready else 0,
+                    on_wait=lambda: self._page._wait_for_control(name),
                 )
             if name == "Back":
                 if self._page.hide_back_on_detail == self._page.active_detail_position:
@@ -408,6 +432,7 @@ class FakeWorkspace:
     async def content(self) -> str:
         if self._page.view != "assignments":
             if self._page.view == "detail":
+                self._page.actions.append(f"capture-detail:{self._page.active_detail_position}")
                 return self._page._detail_html()
             return "<div></div>"
 
@@ -434,13 +459,30 @@ class FakeWorkspace:
 
 
 class FakeInfiniteCampusPage:
-    def __init__(self, rows: list[tuple[str, str, str, str]]) -> None:
+    def __init__(
+        self,
+        rows: list[tuple[str, str, str, str]],
+        *,
+        missing_keys: set[tuple[str, str]] | None = None,
+    ) -> None:
         self.rows = rows
+        self.missing_keys = {
+            (title.casefold(), course.casefold())
+            for title, course in (missing_keys or set())
+        }
         self.actions: list[str] = []
         self.view = "home"
         self.missing_pressed = False
         self.term_pressed = False
         self.generation = 0
+        self.controls_ready = True
+        self.controls_ready_after_waits = 0
+        self.controls_never_ready = False
+        self.control_waits: list[str] = []
+        self._control_waits_for_navigation = 0
+        self._control_waited_names: set[str] = set()
+        self._current_list_captured = False
+        self._next_validation_ordinal = 0
         self.active_detail_position: int | None = None
         self._back_count = 0
         self.reorder_after_first_detail = False
@@ -483,7 +525,38 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         self._set_generation("assignments")
         self.term_pressed = False
+        self._control_waits_for_navigation = 0
+        self._control_waited_names = set()
+        self.controls_ready = self.controls_ready_after_waits == 0
         self.actions.append("open-assignments")
+
+    def _wait_for_control(self, name: str) -> None:
+        if name not in self._control_waited_names:
+            self.control_waits.append(name)
+            self._control_waited_names.add(name)
+        self._control_waits_for_navigation += 1
+        if (
+            not self.controls_never_ready
+            and self._control_waits_for_navigation >= self.controls_ready_after_waits
+        ):
+            self.controls_ready = True
+
+    def _is_missing(self, row: tuple[str, str, str, str]) -> bool:
+        title, course, score, _ = row
+        return (
+            (title.casefold(), course.casefold()) in self.missing_keys
+            or score.casefold() == "missing"
+        )
+
+    def _record_list_capture(self) -> None:
+        if self.missing_pressed:
+            self.actions.append("capture-missing")
+        elif not self._current_list_captured:
+            self.actions.append("capture-current-term")
+            self._current_list_captured = True
+        else:
+            self.actions.append(f"validate-list:{self._next_validation_ordinal}")
+            self._next_validation_ordinal += 1
 
     def _open_current_term(self) -> None:
         if self.view != "assignments":
@@ -500,10 +573,16 @@ class FakeInfiniteCampusPage:
         self.actions.append("enable-missing" if self.missing_pressed else "disable-missing")
 
     def _open_detail(self, visible_position: int) -> None:
-        rows = [row for row in self.rows if self.missing_pressed is False or row[2] == "Missing"]
+        rows = [
+            row
+            for row in self.rows
+            if self.missing_pressed is False
+            or self._is_missing(row)
+        ]
         if visible_position >= len(rows):
             raise InfiniteCampusAgendaError()
         self.active_detail_position = visible_position
+        self.actions.append(f"open-detail:{visible_position}")
         self._set_generation("detail")
 
     def _click_back(self) -> None:
@@ -511,6 +590,7 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         self.view = "home"
         self._back_count += 1
+        self.actions.append(f"back:{self.active_detail_position}")
         self._set_generation("home")
         if self._back_count == 1:
             if self.reorder_after_first_detail and not self._did_reorder and len(self.rows) >= 2:
@@ -530,7 +610,12 @@ class FakeInfiniteCampusPage:
     def _detail_html(self) -> str:
         if self.active_detail_position is None:
             raise InfiniteCampusAgendaError()
-        filtered = [row for row in self.rows if self.missing_pressed is False or row[2] == "Missing"]
+        filtered = [
+            row
+            for row in self.rows
+            if self.missing_pressed is False
+            or self._is_missing(row)
+        ]
         _, _, _, detail_html = filtered[self.active_detail_position]
         return detail_html
 
@@ -561,14 +646,51 @@ def test_collector_scrubs_every_current_term_assignment_sequentially() -> None:
         "open-assignments",
         "enable-current-term",
         "validate-list:0",
+        "open-detail:0",
         "capture-detail:0",
         "back:0",
         "open-assignments",
         "enable-current-term",
         "validate-list:1",
+        "open-detail:1",
         "capture-detail:1",
         "back:1",
     ]
+
+
+def test_collector_waits_for_exact_term_controls_before_transition() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.controls_ready_after_waits = 1
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert records[0]["status"] == "due"
+    assert page.control_waits[:2] == ["Missing", "Current Term"]
+
+
+def test_collector_rejects_term_controls_that_never_become_ready() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.controls_ready_after_waits = 1
+    page.controls_never_ready = True
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+    assert page.control_waits == ["Missing"]
+
+
+def test_missing_membership_overrides_numeric_score_integration() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Synthetic quiz", "Synthetic Algebra", "70%", LOW_DETAIL_HTML)],
+        missing_keys={("Synthetic quiz", "Synthetic Algebra")},
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["status"] for record in records] == ["missing"]
 
 
 def test_collector_rejects_row_reorder_without_partial_records() -> None:
