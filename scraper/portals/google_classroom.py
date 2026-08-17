@@ -143,7 +143,11 @@ class GoogleClassroom(PortalEngine):
     async def login(self, first_name: Optional[str] = None) -> None:
         _ = first_name
         try:
-            if _normalized_https_origin(self.login_url) != _CLASSROOM_ORIGIN:
+            configured_origin = _normalized_https_origin(self.login_url)
+            if configured_origin not in (
+                _CLASSROOM_ORIGIN,
+                _GOOGLE_CREDENTIAL_ORIGIN,
+            ):
                 raise LoginError("portal login rejected")
             if await _has_classroom_main_menu(self.page):
                 return
