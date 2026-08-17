@@ -248,6 +248,13 @@ async def _open_current_term_assignments(page: Page) -> Frame:
             state="visible", timeout=_READINESS_TIMEOUT_MS
         )
         await assignments.first.click()
+        if await assignments.first.is_visible():
+            if await menu.count() != 1:
+                raise InfiniteCampusAgendaError()
+            await menu.click()
+        await assignments.first.wait_for(
+            state="hidden", timeout=_READINESS_TIMEOUT_MS
+        )
         frame = _workspace(page)
     else:
         raise InfiniteCampusAgendaError()

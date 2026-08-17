@@ -396,6 +396,8 @@ class FakeSelection:
         visible: bool | Callable[[], bool] = True,
         strict: bool = False,
         on_wait: Callable[[], None] | None = None,
+        on_hidden_wait: Callable[[], None] | None = None,
+        live: bool = False,
     ) -> None:
         self._workspace = workspace
         self._generation = generation
@@ -406,6 +408,8 @@ class FakeSelection:
         self._visible = visible
         self._strict = strict
         self._on_wait = on_wait
+        self._on_hidden_wait = on_hidden_wait
+        self._live = live
 
     def _rows_now(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
         if callable(self._rows):
@@ -418,7 +422,7 @@ class FakeSelection:
         return len(self._rows_now())
 
     def _assert_fresh(self) -> None:
-        if self._generation != self._workspace._generation():
+        if not self._live and self._generation != self._workspace._generation():
             raise InfiniteCampusAgendaError()
 
     async def count(self) -> int:
@@ -437,6 +441,8 @@ class FakeSelection:
             visible=self._visible,
             strict=self._strict,
             on_wait=self._on_wait,
+            on_hidden_wait=self._on_hidden_wait,
+            live=self._live,
         )
 
     def nth(self, index: int) -> "FakeSelection":
@@ -457,6 +463,8 @@ class FakeSelection:
             visible=self._visible,
             strict=self._strict,
             on_wait=self._on_wait,
+            on_hidden_wait=self._on_hidden_wait,
+            live=self._live,
         )
 
     def locator(self, selector: str) -> "FakeSelection":
@@ -484,10 +492,18 @@ class FakeSelection:
             return None
         return self._attribute()
 
+    async def is_visible(self) -> bool:
+        self._assert_fresh()
+        if self._count_now() == 0:
+            return False
+        return self._visible() if callable(self._visible) else self._visible
+
     async def wait_for(self, *, state: str, timeout: int) -> None:
         del timeout
         self._assert_fresh()
         if state == "hidden":
+            if self._on_hidden_wait is not None:
+                self._on_hidden_wait()
             if self._strict and await self.count() > 1:
                 raise InfiniteCampusAgendaError()
             visible = self._visible() if callable(self._visible) else self._visible
@@ -591,7 +607,7 @@ class FakeWorkspace:
         if role == "link" and name == "Assignments":
             rows = [
                 (0, ("", "", "", ""), 0)
-            ] if self._page.view == "menu-open" and not self._page.use_page_level_assignments else []
+            ] if self._page._frame_assignments_visible() else []
             return FakeSelection(
                 self,
                 generation=self._generation(),
@@ -701,6 +717,11 @@ class FakeInfiniteCampusPage:
         assignments_link_ready_after_waits: int = 0,
         assignments_link_count: int = 1,
         assignments_link_never_ready: bool = False,
+        initial_frame_assignments: bool = True,
+        page_assignments_keep_menu_open: bool = False,
+        menu_toggle_count: int = 1,
+        menu_toggle_count_after_navigation: int | None = None,
+        drawer_never_hides: bool = False,
         back_button_count: int = 1,
         back_link_count: int = 0,
     ) -> None:
@@ -712,6 +733,7 @@ class FakeInfiniteCampusPage:
         }
         self.actions: list[str] = []
         self.view = "home"
+        self.menu_open = False
         self.missing_pressed = False
         self.term_pressed = False
         self.display_missing_pressed = False
@@ -728,6 +750,11 @@ class FakeInfiniteCampusPage:
         self.assignments_link_ready_after_waits = assignments_link_ready_after_waits
         self.assignments_link_count = assignments_link_count
         self.assignments_link_never_ready = assignments_link_never_ready
+        self.frame_assignments_available = initial_frame_assignments
+        self.page_assignments_keep_menu_open = page_assignments_keep_menu_open
+        self.menu_toggle_count = menu_toggle_count
+        self.menu_toggle_count_after_navigation = menu_toggle_count_after_navigation
+        self.drawer_never_hides = drawer_never_hides
         self._assignments_link_remaining = 0
         self.controls_ready = True
         self.controls_ready_after_waits = 0
@@ -770,8 +797,9 @@ class FakeInfiniteCampusPage:
             return FakeSelection(
                 FakeWorkspace(self),
                 generation=self.generation,
-                count=1 if self.view in {"home", "assignments", "detail"} else 0,
-                on_click=self._open_menu,
+                count=self._current_menu_toggle_count,
+                on_click=self._toggle_menu,
+                live=True,
             )
         return FakeSelection(
             FakeWorkspace(self),
@@ -787,39 +815,71 @@ class FakeInfiniteCampusPage:
                     FakeWorkspace(self),
                     generation=self.generation,
                     count=lambda: self.assignments_link_count
-                        if (
-                            self.view == "menu-open"
-                            and not self.assignments_link_never_ready
-                            and self._assignments_link_remaining == 0
-                        )
-                        else 0,
+                    if self._page_assignments_visible()
+                    else 0,
                     rows=lambda: [
                         (index, ("", "", "", ""), index)
                         for index in range(self.assignments_link_count)
                     ]
-                    if (
-                        self.view == "menu-open"
-                        and not self.assignments_link_never_ready
-                        and self._assignments_link_remaining == 0
-                    )
+                    if self._page_assignments_visible()
                     else [],
                     on_click=self._click_page_assignments,
+                    visible=self._page_assignments_visible,
                     on_wait=self._wait_for_assignments_link,
+                    on_hidden_wait=self._wait_for_assignments_hidden,
+                    live=True,
                 )
             return FakeWorkspace(self).get_by_role(role, name, exact=True)
 
         return FakeWorkspace(self).get_by_role(role, name, exact=True)
 
+    def _frame_assignments_visible(self) -> bool:
+        return self.frame_assignments_available or (
+            self.menu_open and not self.use_page_level_assignments
+        )
+
+    def _page_assignments_visible(self) -> bool:
+        return (
+            self.menu_open
+            and self.use_page_level_assignments
+            and not self.assignments_link_never_ready
+            and self._assignments_link_remaining == 0
+        )
+
+    def _current_menu_toggle_count(self) -> int:
+        if (
+            self.view == "assignments"
+            and self.menu_open
+            and self.menu_toggle_count_after_navigation is not None
+        ):
+            return self.menu_toggle_count_after_navigation
+        return self.menu_toggle_count
+
+    def _toggle_menu(self) -> None:
+        if self.menu_open:
+            self._close_menu()
+        else:
+            self._open_menu()
+
     def _open_menu(self) -> None:
-        if self.view == "menu-open":
+        if self.menu_open:
             raise InfiniteCampusAgendaError()
-        self._set_generation("menu-open")
+        self.menu_open = True
+        self._set_generation(self.view)
         self._assignments_link_remaining = self.assignments_link_ready_after_waits
         self.actions.append("open-menu")
 
-    def _open_assignments(self) -> None:
-        if self.view != "menu-open":
+    def _close_menu(self) -> None:
+        if not self.menu_open:
             raise InfiniteCampusAgendaError()
+        self.actions.append("close-menu")
+        if self.drawer_never_hides:
+            return
+        self.menu_open = False
+        self._set_generation(self.view)
+
+    def _open_assignments(self) -> None:
+        self.frame_assignments_available = False
         self._set_generation("assignments")
         self.term_pressed = False
         self.display_term_pressed = False
@@ -844,6 +904,11 @@ class FakeInfiniteCampusPage:
     def _click_page_assignments(self) -> None:
         self.actions.append("click-page-assignments")
         self._open_assignments()
+        if not self.page_assignments_keep_menu_open:
+            self.menu_open = False
+
+    def _wait_for_assignments_hidden(self) -> None:
+        self.actions.append("wait-page-assignments-hidden")
 
     def _wait_for_control(self, name: str) -> None:
         self.actions.append(f"wait-control:{name}")
@@ -945,6 +1010,8 @@ class FakeInfiniteCampusPage:
         )
 
     def _open_detail(self, visible_position: int) -> None:
+        if self.menu_open:
+            raise RuntimeError("synthetic drawer overlay interception")
         if self.detail_click_error is not None:
             raise RuntimeError(self.detail_click_error)
         rows = [
@@ -969,6 +1036,8 @@ class FakeInfiniteCampusPage:
         self._back_count += 1
         self.actions.append(f"back:{self.active_detail_position}")
         self._set_generation("home")
+        if not self.use_page_level_assignments:
+            self.frame_assignments_available = True
         if self._back_count == 1:
             if self.reorder_after_first_detail and not self._did_reorder and len(self.rows) >= 2:
                 self._did_reorder = True
@@ -1036,10 +1105,73 @@ def test_collector_waits_for_exact_term_controls_before_transition() -> None:
     assert page.control_waits[:2] == ["Missing", "Current Term"]
 
 
+def test_collector_closes_page_menu_overlay_before_second_detail() -> None:
+    page = FakeInfiniteCampusPage(
+        [
+            ("Synthetic quiz", "Synthetic Algebra", "70%", LOW_DETAIL_HTML),
+            ("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML),
+        ],
+        use_page_level_assignments=True,
+        initial_frame_assignments=True,
+        page_assignments_keep_menu_open=True,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["status"] for record in records] == ["low_score", "due"]
+    first_back = page.actions.index("back:0")
+    page_assignments = page.actions.index("click-page-assignments", first_back)
+    close_menu = page.actions.index("close-menu", page_assignments)
+    drawer_hidden = page.actions.index(
+        "wait-page-assignments-hidden", close_menu
+    )
+    filter_ready = page.actions.index("wait-control:Missing", drawer_hidden)
+    recovered_list = page.actions.index("validate-list:0", filter_ready)
+    second_detail = page.actions.index("open-detail:1", recovered_list)
+    assert (
+        first_back
+        < page_assignments
+        < close_menu
+        < drawer_hidden
+        < filter_ready
+        < recovered_list
+        < second_detail
+    )
+    assert page.actions.count("open-detail:0") == 1
+    assert page.actions.count("open-detail:1") == 1
+
+
+def test_page_level_assignments_closes_visible_menu_once_before_filters() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=False,
+        page_assignments_keep_menu_open=True,
+    )
+
+    returned = asyncio.run(_open_current_term_assignments(page))
+
+    assert returned._generation() == page.generation
+    assert page.actions.count("open-menu") == 1
+    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("close-menu") == 1
+    assert page.actions.count("wait-page-assignments-hidden") == 1
+    assert page.actions.index("click-page-assignments") < page.actions.index(
+        "close-menu"
+    )
+    assert page.actions.index("close-menu") < page.actions.index(
+        "wait-page-assignments-hidden"
+    )
+    assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
+        "wait-control:Missing"
+    )
+
+
 def test_navigation_uses_page_level_assignments_after_menu() -> None:
     page = FakeInfiniteCampusPage(
         [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
         use_page_level_assignments=True,
+        initial_frame_assignments=False,
         assignments_link_ready_after_waits=1,
     )
 
@@ -1060,6 +1192,9 @@ def test_navigation_uses_page_level_assignments_after_menu() -> None:
         page.get_by_role("link", name="Assignments", exact=True).count()
     ) == 0
     assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("open-menu") == 1
+    assert page.actions.count("close-menu") == 0
+    assert page.actions.count("wait-page-assignments-hidden") == 1
     assert page.actions.count("wait-page-assignments") == 2
     assert page.actions.index("open-menu") < page.actions.index(
         "wait-page-assignments"
@@ -1070,7 +1205,10 @@ def test_navigation_uses_page_level_assignments_after_menu() -> None:
         if action == "wait-page-assignments"
     ) < page.actions.index("click-page-assignments")
     assert page.actions.index("click-page-assignments") < page.actions.index(
-        "enable-current-term"
+        "wait-page-assignments-hidden"
+    )
+    assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
+        "wait-control:Missing"
     )
 
 
@@ -1078,6 +1216,7 @@ def test_page_level_assignments_first_is_not_clickable_before_readiness() -> Non
     page = FakeInfiniteCampusPage(
         [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
         use_page_level_assignments=True,
+        initial_frame_assignments=False,
         assignments_link_ready_after_waits=1,
     )
     asyncio.run(page.locator("#menu-toggle-button").click())
@@ -1099,6 +1238,7 @@ def test_collector_rejects_invalid_page_level_assignments_links_atomically(
     page = FakeInfiniteCampusPage(
         [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
         use_page_level_assignments=True,
+        initial_frame_assignments=False,
         assignments_link_count=assignments_link_count,
         assignments_link_never_ready=assignments_link_never_ready,
     )
@@ -1114,6 +1254,73 @@ def test_collector_rejects_invalid_page_level_assignments_links_atomically(
     assert not any(action.startswith("open-detail:") for action in page.actions)
     assert not any(action.startswith("wait-control:") for action in page.actions)
     assert not any(action.startswith("enable-") for action in page.actions)
+
+
+@pytest.mark.parametrize("menu_toggle_count", [0, 2], ids=["missing", "duplicate"])
+def test_collector_rejects_invalid_menu_toggle_after_page_navigation_atomically(
+    menu_toggle_count: int,
+) -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=False,
+        page_assignments_keep_menu_open=True,
+        menu_toggle_count_after_navigation=menu_toggle_count,
+    )
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    error = raised.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("close-menu") == 0
+    assert page.actions.count("wait-page-assignments-hidden") == 0
+    assert not any(action.startswith("wait-control:") for action in page.actions)
+    assert not any(action.startswith("capture-") for action in page.actions)
+    assert not any(action.startswith("open-detail:") for action in page.actions)
+
+
+def test_collector_rejects_drawer_that_never_hides_atomically() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=False,
+        page_assignments_keep_menu_open=True,
+        drawer_never_hides=True,
+    )
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    error = raised.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("close-menu") == 1
+    assert page.actions.count("wait-page-assignments-hidden") == 1
+    assert not any(action.startswith("wait-control:") for action in page.actions)
+    assert not any(action.startswith("capture-") for action in page.actions)
+    assert not any(action.startswith("open-detail:") for action in page.actions)
+
+
+def test_in_frame_assignments_path_never_toggles_page_menu() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=True,
+    )
+
+    returned = asyncio.run(_open_current_term_assignments(page))
+
+    assert returned._generation() == page.generation
+    assert page.view == "assignments"
+    assert page.menu_open is False
+    assert page.actions.count("open-menu") == 0
+    assert page.actions.count("close-menu") == 0
+    assert page.actions.count("click-page-assignments") == 0
+    assert page.actions.count("wait-page-assignments-hidden") == 0
 
 
 def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
