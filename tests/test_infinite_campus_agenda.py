@@ -181,6 +181,30 @@ def test_additional_excluded_score_states_are_not_due(score: str) -> None:
 
 @pytest.mark.parametrize(
     "score",
+    [
+        "Excused 0 / 10 (0%)",
+        "Exempt 0 / 10 (0%)",
+        "Not Graded 0 / 10 (0%)",
+        "Pass/Fail 0 / 10 (0%)",
+        "Ungraded 0 / 10 (0%)",
+    ],
+)
+def test_dual_points_and_percentage_excluded_states_are_not_low(score: str) -> None:
+    assert (
+        classify_infinite_campus_assignment(
+            listed(score),
+            AssignmentDetail(
+                start_at=datetime(2026, 8, 1, 8, 0),
+                end_at=datetime(2026, 8, 18, 23, 59),
+            ),
+            reference=REFERENCE,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "score",
     ["unexcused 0 / 10", "not excused 0%", "nonexempt 0%", "excusedness 0 / 10"],
 )
 def test_negated_or_larger_excluded_tokens_keep_numeric_low_score(score: str) -> None:
@@ -366,6 +390,7 @@ class FakeSelection:
         count: int | Callable[[], int] | None = None,
         on_click: Callable[[], None] | None = None,
         attribute: Callable[[], str | None] | None = None,
+        visible: bool | Callable[[], bool] = True,
         on_wait: Callable[[], None] | None = None,
     ) -> None:
         self._workspace = workspace
@@ -374,6 +399,7 @@ class FakeSelection:
         self._count = count
         self._on_click = on_click
         self._attribute = attribute
+        self._visible = visible
         self._on_wait = on_wait
 
     def _assert_fresh(self) -> None:
@@ -404,6 +430,7 @@ class FakeSelection:
             rows=[self._rows[index]],
             on_click=self._on_click,
             attribute=self._attribute,
+            visible=self._visible,
             on_wait=self._on_wait,
         )
 
@@ -434,6 +461,11 @@ class FakeSelection:
     async def wait_for(self, *, state: str, timeout: int) -> None:
         del timeout
         self._assert_fresh()
+        if state == "hidden":
+            visible = self._visible() if callable(self._visible) else self._visible
+            if await self.count() == 0 or not visible:
+                return
+            raise InfiniteCampusAgendaError()
         if state != "visible":
             raise InfiniteCampusAgendaError()
         if self._on_wait is not None:
@@ -505,11 +537,17 @@ class FakeWorkspace:
             return FakeSelection(
                 self,
                 generation=self._generation(),
-                count=(
-                    1
-                    if self._page.view == "detail" and not self._page.detail_never_ready
-                    else 0
-                ),
+                count=lambda: 1
+                if (
+                    self._page.view == "detail"
+                    or (
+                        self._page.view == "home"
+                        and self._page.detail_hidden_after_back
+                        and self._page._back_count > 0
+                    )
+                )
+                else 0,
+                visible=lambda: self._page.view == "detail",
             )
         if selector == _CANONICAL_ROWS:
             rows = self._current_rows()
@@ -653,6 +691,7 @@ class FakeInfiniteCampusPage:
         self.noop_back = False
         self.frame_missing = False
         self.detail_never_ready = False
+        self.detail_hidden_after_back = False
         self.detail_click_error: str | None = None
         self._did_reorder = False
         self._did_shrink = False
@@ -991,6 +1030,18 @@ def test_collector_rejects_noop_back_including_final_assignment() -> None:
 
     with pytest.raises(InfiniteCampusAgendaError):
         asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+
+def test_collector_accepts_hidden_detail_node_after_back() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.detail_hidden_after_back = True
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["title"] for record in records] == ["Future notes"]
+    assert page.actions[-1].startswith("validate-list:")
 
 
 def test_collector_rejects_term_controls_that_never_become_ready() -> None:

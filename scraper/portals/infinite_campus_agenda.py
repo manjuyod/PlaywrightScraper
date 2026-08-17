@@ -156,12 +156,18 @@ def _score_points(raw: str) -> float | None:
 
 
 def _excluded_score_state(raw: str) -> bool:
-    fragments = [*(_PERCENT.finditer(raw)), *(_POINTS.finditer(raw))]
-    if len(fragments) == 1:
-        match = fragments[0]
+    fragments = sorted(
+        [*(_PERCENT.finditer(raw)), *(_POINTS.finditer(raw))],
+        key=lambda match: match.start(),
+    )
+    non_overlapping: list[re.Match[str]] = []
+    end = -1
+    for match in fragments:
+        if match.start() >= end:
+            non_overlapping.append(match)
+            end = match.end()
+    for match in reversed(non_overlapping):
         raw = raw[: match.start()] + raw[match.end() :]
-    elif fragments:
-        return False
     normalized = re.sub(r"[^a-z0-9/]+", "", raw.casefold())
     return normalized in _EXCLUDED_SCORE_STATES
 
@@ -208,7 +214,6 @@ _READINESS_TIMEOUT_MS = 30_000
 _FILTER_POLL_INTERVAL_SECONDS = 0.01
 _FILTER_QUIET_INTERVAL_SECONDS = 0.1
 _FILTER_SETTLE_TIMEOUT_SECONDS = _READINESS_TIMEOUT_MS / 1000
-_BACK_EXIT_TIMEOUT_SECONDS = 1.0
 
 
 def _workspace(page: Page) -> Frame:
@@ -306,13 +311,11 @@ async def _wait_for_filter_settle(
 
 
 async def _wait_for_detail_exit(page: Page) -> Frame:
-    deadline = time.monotonic() + _BACK_EXIT_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        frame = _workspace(page)
-        if await frame.locator(_DETAIL_READY).count() == 0:
-            return frame
-        await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
-    raise InfiniteCampusAgendaError()
+    frame = _workspace(page)
+    await frame.locator(_DETAIL_READY).wait_for(
+        state="hidden", timeout=_READINESS_TIMEOUT_MS
+    )
+    return frame
 
 
 async def _visible_list_html(frame: Frame) -> str:
