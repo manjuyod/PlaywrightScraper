@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import re
+import time
 from typing import TypeAlias
 
 from bs4 import BeautifulSoup, Tag
@@ -155,8 +156,14 @@ def _score_points(raw: str) -> float | None:
 
 
 def _excluded_score_state(raw: str) -> bool:
-    normalized = re.sub(r"[\s-]+", "", raw.casefold())
-    return any(state in normalized for state in _EXCLUDED_SCORE_STATES)
+    fragments = [*(_PERCENT.finditer(raw)), *(_POINTS.finditer(raw))]
+    if len(fragments) == 1:
+        match = fragments[0]
+        raw = raw[: match.start()] + raw[match.end() :]
+    elif fragments:
+        return False
+    normalized = re.sub(r"[^a-z0-9/]+", "", raw.casefold())
+    return normalized in _EXCLUDED_SCORE_STATES
 
 
 def classify_infinite_campus_assignment(
@@ -198,6 +205,10 @@ _TITLE_CELL = ".assignment__largeScreen--cell-assignmentName"
 _COURSE_CELL = ".assignment__largeScreen--cell-courseDueDate"
 _DETAIL_READY = ".selcat-schedule-startdate, .selcat-schedule-enddate"
 _READINESS_TIMEOUT_MS = 30_000
+_FILTER_POLL_INTERVAL_SECONDS = 0.01
+_FILTER_QUIET_INTERVAL_SECONDS = 0.1
+_FILTER_SETTLE_TIMEOUT_SECONDS = _READINESS_TIMEOUT_MS / 1000
+_BACK_EXIT_TIMEOUT_SECONDS = 1.0
 
 
 def _workspace(page: Page) -> Frame:
@@ -256,9 +267,11 @@ async def _visible_list_fingerprint(frame: Frame) -> tuple[str, ...]:
     rows = frame.locator(_CANONICAL_ROWS)
     if await rows.count() == 0:
         empty = frame.locator(".assignment__empty:visible")
-        if await empty.count() == 0:
+        if await empty.count() != 0:
+            return ("<empty>",)
+        rows = frame.locator(_CANONICAL_ROWS)
+        if await rows.count() == 0:
             raise InfiniteCampusAgendaError()
-        return ("<empty>",)
     values = await rows.evaluate_all("rows => rows.map(row => row.textContent)")
     return tuple(str(value) for value in values)
 
@@ -270,24 +283,35 @@ async def _wait_for_filter_settle(
     enabled: bool,
 ) -> None:
     target = "true" if enabled else "false"
+    deadline = time.monotonic() + _FILTER_SETTLE_TIMEOUT_SECONDS
     previous: tuple[str, ...] | None = None
-    stable = 0
-    for _ in range(60):
+    last_changed: float | None = None
+    while time.monotonic() < deadline:
         pressed = await control.get_attribute("aria-pressed")
         if pressed != target:
-            stable = 0
             previous = None
-            await asyncio.sleep(0)
+            last_changed = None
+            await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
             continue
         fingerprint = await _visible_list_fingerprint(frame)
+        now = time.monotonic()
         if fingerprint == previous:
-            stable += 1
+            if last_changed is not None and now - last_changed >= _FILTER_QUIET_INTERVAL_SECONDS:
+                return
         else:
-            stable = 1
             previous = fingerprint
-        if stable >= 2:
-            return
-        await asyncio.sleep(0)
+            last_changed = now
+        await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
+    raise InfiniteCampusAgendaError()
+
+
+async def _wait_for_detail_exit(page: Page) -> Frame:
+    deadline = time.monotonic() + _BACK_EXIT_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        frame = _workspace(page)
+        if await frame.locator(_DETAIL_READY).count() == 0:
+            return frame
+        await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
     raise InfiniteCampusAgendaError()
 
 
@@ -325,12 +349,14 @@ async def _collect_infinite_campus_agenda(
     expected_keys = [row.key for row in captured]
     records: list[AgendaRecord] = []
 
-    for assignment in captured:
-        frame = await _open_current_term_assignments(page)
-        current = parse_infinite_campus_list(
-            await _visible_list_html(frame), missing_keys=missing_keys
-        )
-        if [row.key for row in current] != expected_keys:
+    for ordinal, assignment in enumerate(captured):
+        if ordinal > 0:
+            current = parse_infinite_campus_list(
+                await _visible_list_html(frame), missing_keys=missing_keys
+            )
+            if [row.key for row in current] != expected_keys:
+                raise InfiniteCampusAgendaError()
+        elif [row.key for row in captured] != expected_keys:
             raise InfiniteCampusAgendaError()
 
         row = frame.locator(_CANONICAL_ROWS).nth(assignment.ordinal)
@@ -351,6 +377,7 @@ async def _collect_infinite_campus_agenda(
             raise InfiniteCampusAgendaError()
         await back.click()
 
+        await _wait_for_detail_exit(page)
         frame = await _open_current_term_assignments(page)
         current = parse_infinite_campus_list(
             await _visible_list_html(frame), missing_keys=missing_keys

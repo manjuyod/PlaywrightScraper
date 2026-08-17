@@ -156,7 +156,14 @@ def test_blank_explicit_empty_marker_is_a_valid_boundary() -> None:
 
 @pytest.mark.parametrize(
     "score",
-    [" EXEMPT ", "Not - Graded", " UNGRADED ", "Excused 0 / 10", "Not Graded — 0%"],
+    [
+        " EXEMPT ",
+        "Not - Graded",
+        " UNGRADED ",
+        "Excused 0 / 10",
+        "Exempt (0%)",
+        "Not Graded — 0%",
+    ],
 )
 def test_additional_excluded_score_states_are_not_due(score: str) -> None:
     assert (
@@ -170,6 +177,24 @@ def test_additional_excluded_score_states_are_not_due(score: str) -> None:
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    "score",
+    ["unexcused 0 / 10", "not excused 0%", "nonexempt 0%", "excusedness 0 / 10"],
+)
+def test_negated_or_larger_excluded_tokens_keep_numeric_low_score(score: str) -> None:
+    record = classify_infinite_campus_assignment(
+        listed(score),
+        AssignmentDetail(
+            start_at=datetime(2026, 8, 1, 8, 0),
+            end_at=datetime(2026, 8, 18, 23, 59),
+        ),
+        reference=REFERENCE,
+    )
+
+    assert record is not None
+    assert record["status"] == "low_score"
 
 
 @pytest.mark.parametrize("score", ["79.5%", "Score: 7 / 10"])
@@ -444,9 +469,13 @@ class FakeWorkspace:
     def _current_rows(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
         self._page._advance_filter_transition()
         rows: list[tuple[int, tuple[str, str, str, str], int]] = []
-        source_rows = self._page.rows if self._page.term_pressed else self._page.pre_term_rows
+        source_rows = (
+            self._page.rows
+            if self._page.display_term_pressed
+            else self._page.pre_term_rows
+        )
         for position, row in enumerate(source_rows):
-            if self._page.missing_pressed and not self._page._is_missing(row):
+            if self._page.display_missing_pressed and not self._page._is_missing(row):
                 continue
             rows.append((position, row, len(rows)))
         return rows
@@ -472,6 +501,16 @@ class FakeWorkspace:
         raise InfiniteCampusAgendaError()
 
     def locator(self, selector: str) -> FakeSelection:
+        if selector == _DETAIL_READY:
+            return FakeSelection(
+                self,
+                generation=self._generation(),
+                count=(
+                    1
+                    if self._page.view == "detail" and not self._page.detail_never_ready
+                    else 0
+                ),
+            )
         if selector == _CANONICAL_ROWS:
             rows = self._current_rows()
             return FakeSelection(
@@ -480,8 +519,6 @@ class FakeWorkspace:
                 rows=rows,
             )
         if selector == ".assignment__empty:visible":
-            if len(self._current_rows()) == 0:
-                self._page._record_list_capture()
             return FakeSelection(
                 self,
                 generation=self._generation(),
@@ -576,7 +613,8 @@ class FakeInfiniteCampusPage:
         *,
         missing_keys: set[tuple[str, str]] | None = None,
         pre_term_rows: list[tuple[str, str, str, str]] | None = None,
-        filter_transition_delay: int = 0,
+        filter_control_delay: int = 0,
+        filter_row_delay: int = 0,
     ) -> None:
         self.rows = rows
         self.pre_term_rows = pre_term_rows if pre_term_rows is not None else rows
@@ -588,9 +626,14 @@ class FakeInfiniteCampusPage:
         self.view = "home"
         self.missing_pressed = False
         self.term_pressed = False
-        self.filter_transition_delay = filter_transition_delay
-        self._term_transition_remaining = 0
-        self._missing_transition_remaining: int | None = None
+        self.display_missing_pressed = False
+        self.display_term_pressed = False
+        self.filter_control_delay = filter_control_delay
+        self.filter_row_delay = filter_row_delay
+        self._term_control_remaining = 0
+        self._term_row_remaining = 0
+        self._missing_control_remaining = 0
+        self._missing_row_remaining = 0
         self._missing_transition_target = False
         self.generation = 0
         self.controls_ready = True
@@ -630,7 +673,7 @@ class FakeInfiniteCampusPage:
             return FakeSelection(
                 FakeWorkspace(self),
                 generation=self.generation,
-                count=1 if self.view in {"home", "assignments"} else 0,
+                count=1 if self.view in {"home", "assignments", "detail"} else 0,
                 on_click=self._open_menu,
             )
         return FakeSelection(
@@ -649,9 +692,13 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         self._set_generation("assignments")
         self.term_pressed = False
-        self._term_transition_remaining = 0
+        self.display_term_pressed = False
+        self._term_control_remaining = 0
+        self._term_row_remaining = 0
         self.missing_pressed = False
-        self._missing_transition_remaining = None
+        self.display_missing_pressed = False
+        self._missing_control_remaining = 0
+        self._missing_row_remaining = 0
         self._control_waits_for_navigation = 0
         self._control_waited_names = set()
         self.controls_ready = self.controls_ready_after_waits == 0
@@ -684,15 +731,22 @@ class FakeInfiniteCampusPage:
         return "true" if self.missing_pressed else "false"
 
     def _advance_filter_transition(self) -> None:
-        if self._term_transition_remaining:
-            self._term_transition_remaining -= 1
-            if self._term_transition_remaining == 0:
+        if self._term_control_remaining:
+            self._term_control_remaining -= 1
+            if self._term_control_remaining == 0:
                 self.term_pressed = True
-        if self._missing_transition_remaining is not None:
-            self._missing_transition_remaining -= 1
-            if self._missing_transition_remaining <= 0:
+        if self._term_row_remaining:
+            self._term_row_remaining -= 1
+            if self._term_row_remaining == 0:
+                self.display_term_pressed = True
+        if self._missing_control_remaining:
+            self._missing_control_remaining -= 1
+            if self._missing_control_remaining == 0:
                 self.missing_pressed = self._missing_transition_target
-                self._missing_transition_remaining = None
+        if self._missing_row_remaining:
+            self._missing_row_remaining -= 1
+            if self._missing_row_remaining == 0:
+                self.display_missing_pressed = self._missing_transition_target
 
     def _record_list_capture(self) -> None:
         if self.missing_pressed:
@@ -709,14 +763,24 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         if self.term_pressed:
             return
-        self._term_transition_remaining = self.filter_transition_delay or 1
+        self._term_control_remaining = self.filter_control_delay
+        self._term_row_remaining = self.filter_row_delay
+        if self._term_control_remaining == 0:
+            self.term_pressed = True
+        if self._term_row_remaining == 0:
+            self.display_term_pressed = True
         self.actions.append("enable-current-term")
 
     def _toggle_missing(self) -> None:
         if self.view != "assignments":
             raise InfiniteCampusAgendaError()
         self._missing_transition_target = not self.missing_pressed
-        self._missing_transition_remaining = self.filter_transition_delay or 1
+        self._missing_control_remaining = self.filter_control_delay
+        self._missing_row_remaining = self.filter_row_delay
+        if self._missing_control_remaining == 0:
+            self.missing_pressed = self._missing_transition_target
+        if self._missing_row_remaining == 0:
+            self.display_missing_pressed = self._missing_transition_target
         self.actions.append(
             "enable-missing" if self._missing_transition_target else "disable-missing"
         )
@@ -727,7 +791,7 @@ class FakeInfiniteCampusPage:
         rows = [
             row
             for row in self.rows
-            if self.missing_pressed is False
+            if self.display_missing_pressed is False
             or self._is_missing(row)
         ]
         if visible_position >= len(rows):
@@ -767,7 +831,7 @@ class FakeInfiniteCampusPage:
         filtered = [
             row
             for row in self.rows
-            if self.missing_pressed is False
+            if self.display_missing_pressed is False
             or self._is_missing(row)
         ]
         _, _, _, detail_html = filtered[self.active_detail_position]
@@ -794,8 +858,7 @@ def test_collector_scrubs_every_current_term_assignment_sequentially() -> None:
     assert page.actions.count("open-detail:1") == 1
     assert page.actions.count("back:0") == 1
     assert page.actions.count("back:1") == 1
-    assert page.actions.index("enable-missing") < page.actions.index("capture-missing")
-    assert page.actions.index("capture-missing") < page.actions.index("disable-missing")
+    assert page.actions.index("enable-missing") < page.actions.index("disable-missing")
     assert page.actions.index("disable-missing") < page.actions.index("capture-current-term")
     assert page.actions.index("back:0") < page.actions.index("open-detail:1")
     assert page.actions.index("back:1") < len(page.actions) - 1
@@ -823,13 +886,60 @@ def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
         current_rows,
         pre_term_rows=[("Stale term row", "Wrong term", "", FUTURE_DETAIL_HTML)],
         missing_keys={("Synthetic quiz", "Synthetic Algebra")},
-        filter_transition_delay=4,
+        filter_control_delay=0,
+        filter_row_delay=6,
     )
 
     records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
 
     assert [record["title"] for record in records] == ["Future notes", "Synthetic quiz"]
     assert "Stale term row" not in {record["title"] for record in records}
+
+
+def test_current_term_waits_for_rows_after_pressed_state() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        pre_term_rows=[("Stale term row", "Wrong term", "", FUTURE_DETAIL_HTML)],
+        filter_control_delay=0,
+        filter_row_delay=6,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["title"] for record in records] == ["Future notes"]
+    assert "Stale term row" not in {record["title"] for record in records}
+
+
+def test_missing_enable_waits_for_rows_after_pressed_state() -> None:
+    page = FakeInfiniteCampusPage(
+        [
+            ("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML),
+            ("Synthetic quiz", "Synthetic Algebra", "Missing", LOW_DETAIL_HTML),
+        ],
+        missing_keys={("Synthetic quiz", "Synthetic Algebra")},
+        filter_control_delay=0,
+        filter_row_delay=6,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["status"] for record in records] == ["due", "missing"]
+
+
+def test_missing_disable_waits_for_rows_after_pressed_state() -> None:
+    page = FakeInfiniteCampusPage(
+        [
+            ("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML),
+            ("Synthetic quiz", "Synthetic Algebra", "Missing", LOW_DETAIL_HTML),
+        ],
+        missing_keys={("Synthetic quiz", "Synthetic Algebra")},
+        filter_control_delay=0,
+        filter_row_delay=6,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert {record["title"] for record in records} == {"Future notes", "Synthetic quiz"}
 
 
 def test_collector_rejects_missing_workspace_frame_atomically() -> None:
@@ -855,6 +965,22 @@ def test_collector_rejects_detail_click_that_never_reaches_ready_view() -> None:
     rendered = "".join(traceback.format_exception(error))
     for value in (str(error), repr(error), repr(error.__cause__), repr(error.__context__), rendered):
         assert "DETAIL-SENTINEL-title-url-credential-html" not in value
+
+
+def test_collector_rejects_detail_view_that_never_reaches_ready_selector() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.detail_never_ready = True
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert "open-detail:0" in page.actions
+    assert "capture-detail:0" not in page.actions
+    assert page.actions[-1] == "open-detail:0"
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
 
 
 def test_collector_rejects_noop_back_including_final_assignment() -> None:
