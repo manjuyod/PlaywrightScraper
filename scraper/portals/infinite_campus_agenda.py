@@ -6,6 +6,7 @@ import re
 from typing import TypeAlias
 
 from bs4 import BeautifulSoup, Tag
+from playwright.async_api import Frame, Page
 
 from scraper.agenda_contract import AgendaRecord
 
@@ -180,3 +181,133 @@ def classify_infinite_campus_assignment(
         "dueTime": detail.end_at.strftime("%H:%M"),
         "status": status,
     }
+
+
+_WORKSPACE_FRAME = "main-workspace"
+_CANONICAL_ROWS = ".selcat-assignment-row:visible"
+_TITLE_CELL = ".assignment__largeScreen--cell-assignmentName"
+_COURSE_CELL = ".assignment__largeScreen--cell-courseDueDate"
+_DETAIL_READY = ".selcat-schedule-startdate, .selcat-schedule-enddate"
+_READINESS_TIMEOUT_MS = 30_000
+
+
+def _workspace(page: Page) -> Frame:
+    frame = page.frame(_WORKSPACE_FRAME)
+    if frame is None:
+        raise InfiniteCampusAgendaError()
+    return frame
+
+
+async def _open_current_term_assignments(page: Page) -> Frame:
+    frame = _workspace(page)
+    menu = page.locator("#menu-toggle-button")
+    assignments = frame.get_by_role("link", name="Assignments", exact=True)
+
+    if await assignments.count() == 0:
+        if await menu.count() != 1:
+            raise InfiniteCampusAgendaError()
+        await menu.click()
+        frame = _workspace(page)
+        assignments = frame.get_by_role("link", name="Assignments", exact=True)
+
+    if await assignments.count() != 1:
+        raise InfiniteCampusAgendaError()
+    await assignments.first.click()
+    frame = _workspace(page)
+
+    missing = frame.get_by_role("button", name="Missing", exact=True)
+    current_term = frame.get_by_role("button", name="Current Term", exact=True)
+    if await missing.count() != 1 or await current_term.count() != 1:
+        raise InfiniteCampusAgendaError()
+
+    if await current_term.get_attribute("aria-pressed") != "true":
+        await current_term.click()
+
+    return frame
+
+
+def _collect_action(page: Page, action: str) -> None:
+    actions = getattr(page, "actions", None)
+    if isinstance(actions, list):
+        actions.append(action)
+
+
+async def _set_missing(frame: Frame, enabled: bool) -> None:
+    missing = frame.get_by_role("button", name="Missing", exact=True)
+    if await missing.count() != 1:
+        raise InfiniteCampusAgendaError()
+
+    pressed = await missing.get_attribute("aria-pressed")
+    if pressed is None:
+        raise InfiniteCampusAgendaError()
+    target = "true" if enabled else "false"
+    if pressed != target:
+        await missing.click()
+
+
+async def _visible_list_html(frame: Frame) -> str:
+    rows = frame.locator(_CANONICAL_ROWS)
+    if await rows.count() == 0:
+        empty = frame.locator(".assignment__empty:visible")
+        if await empty.count() == 0:
+            raise InfiniteCampusAgendaError()
+        return '<div class="assignment__empty"></div>'
+
+    fragments = await rows.evaluate_all("rows => rows.map(row => row.outerHTML)")
+    return "<div>" + "".join(fragments) + "</div>"
+
+
+async def collect_infinite_campus_agenda(
+    page: Page,
+    *,
+    reference: datetime | None = None,
+) -> list[AgendaRecord]:
+    effective_reference = reference or datetime.now()
+    frame = await _open_current_term_assignments(page)
+    await _set_missing(frame, True)
+    _collect_action(page, "capture-missing")
+
+    missing_rows = parse_infinite_campus_list(
+        await _visible_list_html(frame), missing_keys=frozenset()
+    )
+    missing_keys = frozenset(row.key for row in missing_rows)
+
+    await _set_missing(frame, False)
+    _collect_action(page, "capture-current-term")
+
+    captured = parse_infinite_campus_list(
+        await _visible_list_html(frame), missing_keys=missing_keys
+    )
+    expected_keys = [row.key for row in captured]
+    records: list[AgendaRecord] = []
+
+    for assignment in captured:
+        frame = await _open_current_term_assignments(page)
+        current = parse_infinite_campus_list(
+            await _visible_list_html(frame), missing_keys=missing_keys
+        )
+        _collect_action(page, f"validate-list:{assignment.ordinal}")
+        if [row.key for row in current] != expected_keys:
+            raise InfiniteCampusAgendaError()
+
+        row = frame.locator(_CANONICAL_ROWS).nth(assignment.ordinal)
+        await row.locator(f"{_TITLE_CELL} a[href]").first.click()
+
+        frame = _workspace(page)
+        await frame.wait_for_selector(_DETAIL_READY, timeout=_READINESS_TIMEOUT_MS)
+
+        detail = parse_infinite_campus_detail(await frame.content())
+        _collect_action(page, f"capture-detail:{assignment.ordinal}")
+        record = classify_infinite_campus_assignment(
+            assignment, detail, reference=effective_reference
+        )
+        if record is not None:
+            records.append(record)
+
+        back = frame.get_by_role("button", name="Back", exact=True)
+        if await back.count() != 1:
+            raise InfiniteCampusAgendaError()
+        await back.click()
+        _collect_action(page, f"back:{assignment.ordinal}")
+
+    return records
