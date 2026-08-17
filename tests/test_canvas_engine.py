@@ -196,6 +196,42 @@ def test_canvas_postauth_broker_can_finish_on_exact_iad_return() -> None:
     )
 
 
+def test_canvas_return_can_reenter_approved_broker_before_final_return() -> None:
+    """Would fail if a late approved broker bounce poisons a valid Canvas return."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    approved_broker = (
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e."
+        "iad.login.instructure.com/sso"
+    )
+
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe(approved_broker)
+    route.observe("https://husd.instructure.com/")
+    route.observe(approved_broker)
+    route.observe("https://husd.instructure.com/dashboard")
+
+    assert route.verified_canvas_origin("https://husd.instructure.com/dashboard") == (
+        "https://husd.instructure.com"
+    )
+
+
+def test_canvas_return_still_rejects_unapproved_uuid_broker() -> None:
+    """Would fail if late-return recovery broadens beyond explicit broker hosts."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    route.observe("https://sso.canvaslms.com/login/saml")
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe("https://iad.login.instructure.com/dashboard")
+
+    with pytest.raises(canvas.CanvasTrustError, match="^canvas_auth_route_untrusted$"):
+        route.observe(
+            "https://12345678-1234-4234-8234-123456789abc."
+            "iad.login.instructure.com/sso"
+        )
+
+
 @pytest.mark.parametrize(
     "untrusted_url",
     [

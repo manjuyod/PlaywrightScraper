@@ -143,9 +143,14 @@ class _CanvasAuthRoute:
             if host in _CANVAS_PREAUTH_HOSTS:
                 self._current_host = host
                 return
-        elif self._phase == "canvas_return" and host in _CANVAS_RETURN_HOSTS:
-            self._current_host = host
-            return
+        elif self._phase == "canvas_return":
+            if host in _CANVAS_RETURN_HOSTS:
+                self._current_host = host
+                return
+            if self._password_submitted and host in _CANVAS_PREAUTH_HOSTS:
+                self._phase = "postauth_broker"
+                self._current_host = host
+                return
         raise CanvasTrustError()
 
     def require_microsoft_credentials(self) -> None:
