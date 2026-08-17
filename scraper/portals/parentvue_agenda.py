@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 
 from bs4 import BeautifulSoup, Tag
 
@@ -11,6 +12,12 @@ class ParentVueAgendaError(RuntimeError):
     def __init__(self, code: str = "parentvue_agenda_parse_failed") -> None:
         self.code = code
         super().__init__(code)
+
+
+_PERCENT = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*%")
+_POINTS = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)")
+_DUE_PREFIX = re.compile(r"^\s*due\s+date\s*:\s*", re.IGNORECASE)
+_ACADEMIC_YEAR_START_MONTH = 7
 
 
 def _text(element: Tag | None) -> str | None:
@@ -184,4 +191,218 @@ def parse_parentvue_agenda(html: str) -> list[AgendaRecord]:
         records.append(record)
     if rows and not records:
         raise ParentVueAgendaError()
+    return records
+
+
+def _academic_year_date(
+    value: str | None,
+    *,
+    reference: datetime,
+) -> tuple[str, str | None] | None:
+    if not value:
+        return None
+    normalized = _DUE_PREFIX.sub("", value).strip()
+    parsed = _date_and_time(normalized)
+    if parsed is not None:
+        return parsed
+    for pattern in ("%b %d", "%B %d"):
+        try:
+            month_day = datetime.strptime(normalized, pattern)
+        except ValueError:
+            continue
+        academic_start = (
+            reference.year
+            if reference.month >= _ACADEMIC_YEAR_START_MONTH
+            else reference.year - 1
+        )
+        year = (
+            academic_start
+            if month_day.month >= _ACADEMIC_YEAR_START_MONTH
+            else academic_start + 1
+        )
+        return date(year, month_day.month, month_day.day).isoformat(), None
+    return None
+
+
+def _live_upcoming_record(
+    row: Tag,
+    *,
+    reference: datetime,
+) -> AgendaRecord:
+    cell = row.select_one("td")
+    if cell is None:
+        raise ParentVueAgendaError()
+    visible_children = [
+        child
+        for child in cell.find_all(recursive=False)
+        if isinstance(child, Tag) and not _is_hidden(child)
+    ]
+    title = _text(row.select_one("a"))
+    course = _text(visible_children[1]) if len(visible_children) > 1 else None
+    due_text = _text(visible_children[2]) if len(visible_children) > 2 else None
+    due = _academic_year_date(due_text, reference=reference)
+    if not title or not course or due is None:
+        raise ParentVueAgendaError()
+    record: AgendaRecord = {
+        "course": course,
+        "title": title,
+        "dueDate": due[0],
+        "dueTime": due[1],
+        "status": "due",
+    }
+    source_id = row.get("data-guid")
+    if isinstance(source_id, str) and source_id.strip():
+        record["sourceId"] = f"parentvue:{source_id.strip()}"
+    return record
+
+
+def parse_parentvue_overview(
+    html: str,
+    *,
+    reference: datetime,
+) -> list[AgendaRecord]:
+    soup = BeautifulSoup(html, "html.parser")
+    live_rows = [
+        row
+        for row in soup.select("#gb-assignments tr.gb-upcoming-assignment")
+        if not _is_hidden(row)
+    ]
+    visible_no_data = any(
+        not _is_hidden(marker) for marker in soup.select("#gb-assignments .no-data")
+    )
+    if live_rows:
+        if visible_no_data:
+            raise ParentVueAgendaError()
+        return [
+            _live_upcoming_record(row, reference=reference) for row in live_rows
+        ]
+    try:
+        return parse_parentvue_agenda(html)
+    except ParentVueAgendaError:
+        visible_courses = any(
+            not _is_hidden(row)
+            for row in soup.select("div.gb-class-header.gb-class-row")
+        )
+        if soup.select_one("#gb-assignments") is not None and visible_courses:
+            return []
+        raise
+
+
+def _explicitly_missing(item: Tag) -> bool:
+    classes = item.get("class", [])
+    if isinstance(classes, list) and any(
+        str(value).strip().casefold() == "missing" for value in classes
+    ):
+        return True
+    status = item.get("data-status")
+    if isinstance(status, str) and status.strip().casefold() == "missing":
+        return True
+    return any(
+        not _is_hidden(marker) and (_text(marker) or "").strip().casefold() == "missing"
+        for marker in item.select(
+            ".item-text-small, .item-text-special, .status, [data-status]"
+        )
+    )
+
+
+def _assignment_percentage(item: Tag) -> float | None:
+    texts = [
+        text
+        for element in item.select(".item-text-special, .item-text-small")
+        if not _is_hidden(element)
+        for text in [(_text(element) or "").strip()]
+        if text
+    ]
+    for text in texts:
+        match = _PERCENT.search(text)
+        if match is not None:
+            return float(match.group(1))
+    for text in texts:
+        if text.count("/") != 1:
+            continue
+        match = _POINTS.search(text)
+        if match is None:
+            continue
+        earned, possible = (float(match.group(1)), float(match.group(2)))
+        if possible > 0:
+            return earned / possible * 100
+    return None
+
+
+def _course_item_date(
+    item: Tag,
+    *,
+    reference: datetime,
+) -> tuple[str, str | None] | None:
+    for element in item.select(".item-text-special, .item-text-small"):
+        if _is_hidden(element):
+            continue
+        parsed = _academic_year_date(_text(element), reference=reference)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def parse_parentvue_course_assignments(
+    html: str,
+    *,
+    course: str,
+    reference: datetime,
+) -> list[AgendaRecord]:
+    soup = BeautifulSoup(html, "html.parser")
+    root = soup.select_one(".pxp-course-content")
+    if root is None:
+        raise ParentVueAgendaError()
+    candidates = list(root.select(".item-container"))
+    visible_items = [item for item in candidates if not _is_hidden(item)]
+    visible_no_data = any(
+        not _is_hidden(marker) for marker in root.select(".no-data")
+    )
+    if visible_no_data:
+        if visible_items:
+            raise ParentVueAgendaError()
+        return []
+    if not candidates or not visible_items:
+        raise ParentVueAgendaError()
+
+    records: list[AgendaRecord] = []
+    for item in visible_items:
+        title = _text(item.select_one(".item-text-main"))
+        due = _course_item_date(item, reference=reference)
+        if not title or due is None:
+            raise ParentVueAgendaError()
+        missing = _explicitly_missing(item)
+        score_text = " ".join(
+            (_text(element) or "")
+            for element in item.select(".item-text-special, .item-text-small")
+            if not _is_hidden(element)
+        ).casefold()
+        excluded = any(
+            marker in score_text
+            for marker in ("excused", "not graded", "ungraded", "pass/fail")
+        )
+        percentage = _assignment_percentage(item)
+        status = (
+            "missing"
+            if missing
+            else "low_score"
+            if not excluded and percentage is not None and percentage < 80
+            else None
+        )
+        if status is None:
+            continue
+        record: AgendaRecord = {
+            "course": course.strip(),
+            "title": title,
+            "dueDate": due[0],
+            "dueTime": due[1],
+            "status": status,
+        }
+        source = item.get("data-guid")
+        if not isinstance(source, str):
+            source_element = item.select_one("[data-guid]")
+            source = source_element.get("data-guid") if source_element else None
+        if isinstance(source, str) and source.strip():
+            record["sourceId"] = f"parentvue:{source.strip()}"
+        records.append(record)
     return records

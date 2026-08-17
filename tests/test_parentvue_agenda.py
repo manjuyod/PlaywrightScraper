@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import wait_none
 
 from scraper.agenda_contract import normalize_agenda
+from scraper.portals import parentvue_agenda as pv_agenda
 from scraper.portals import utils as portal_utils
 from scraper.portals.parentvue import ParentVUE
 from scraper.portals.parentvue_agenda import ParentVueAgendaError, parse_parentvue_agenda
@@ -303,6 +305,187 @@ def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming(
     assert normalize_agenda(records)["2026-08-10"]["Algebra II"]["missing"][0] == {
         "title": "Linear review", "dueDate": "2026-08-11", "dueTime": None
     }
+
+
+LIVE_OVERVIEW_HTML = '''<div id="gb-assignments">
+  <section>
+    <h2 class="title">Upcoming Assignments</h2>
+    <div class="gb-student-assignments-grid">
+      <table><tbody>
+        <tr class="gb-upcoming-assignment" data-guid="pv-upcoming-1">
+          <td>
+            <div><a href="/assignment/details/1">Systems review</a></div>
+            <div>Algebra II</div>
+            <div>Due Date: 08/18/2026</div>
+            <div class="hide">internal</div>
+          </td>
+        </tr>
+      </tbody></table>
+    </div>
+  </section>
+  <section>
+    <h2 class="title">Recent History</h2>
+    <div class="gb-student-assignments-grid">
+      <table><tbody><tr><td><a>Completed history must not be inferred</a></td></tr></tbody></table>
+    </div>
+  </section>
+</div>'''
+
+
+def test_live_overview_parses_upcoming_rows_without_inferring_recent_history() -> None:
+    """Would fail if the live upcoming row or panel boundary is unsupported."""
+    records = pv_agenda.parse_parentvue_overview(
+        LIVE_OVERVIEW_HTML,
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Systems review",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+            "sourceId": "parentvue:pv-upcoming-1",
+        }
+    ]
+
+
+def test_live_overview_rejects_rows_conflicting_with_visible_empty_marker() -> None:
+    """Would fail if contradictory live overview states are silently accepted."""
+    html = LIVE_OVERVIEW_HTML.replace(
+        '<section>\n    <h2 class="title">Upcoming Assignments</h2>',
+        '<section><div class="no-data">No assignments</div>\n'
+        '    <h2 class="title">Upcoming Assignments</h2>',
+    )
+
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_overview(
+            html,
+            reference=datetime(2026, 8, 16, 12, 0),
+        )
+
+
+COURSE_DETAIL_HTML = '''<div class="pxp-course-content">
+  <div class="item-container">
+    <div class="item-text-main">Quiz One</div>
+    <div class="item-text-special">Aug 14</div>
+    <div class="item-text-special">72%</div>
+  </div>
+  <div class="item-container missing">
+    <div class="item-text-main">Worksheet</div>
+    <div class="item-text-special">Aug 15</div>
+    <div class="item-text-small">Missing</div>
+    <div class="item-text-special">0%</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Lab</div>
+    <div class="item-text-special">Aug 16</div>
+    <div class="item-text-small">7 / 10</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Boundary</div>
+    <div class="item-text-special">Aug 17</div>
+    <div class="item-text-special">80%</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Excused work</div>
+    <div class="item-text-special">Aug 18</div>
+    <div class="item-text-small">Excused</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Not graded work</div>
+    <div class="item-text-special">Aug 19</div>
+    <div class="item-text-small">Not Graded</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Zero denominator</div>
+    <div class="item-text-special">Aug 20</div>
+    <div class="item-text-small">0 / 0</div>
+  </div>
+</div>'''
+
+
+def test_course_detail_classifies_explicit_missing_and_below_eighty_scores() -> None:
+    """Would fail if live percentage/points fields are misclassified or overcollected."""
+    records = pv_agenda.parse_parentvue_course_assignments(
+        COURSE_DETAIL_HTML,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Quiz One",
+            "dueDate": "2026-08-14",
+            "dueTime": None,
+            "status": "low_score",
+        },
+        {
+            "course": "Algebra II",
+            "title": "Worksheet",
+            "dueDate": "2026-08-15",
+            "dueTime": None,
+            "status": "missing",
+        },
+        {
+            "course": "Algebra II",
+            "title": "Lab",
+            "dueDate": "2026-08-16",
+            "dueTime": None,
+            "status": "low_score",
+        },
+    ]
+
+
+def test_course_detail_accepts_explicit_empty_and_rejects_ambiguous_empty() -> None:
+    """Would fail if a blank course is treated as a complete empty snapshot."""
+    reference = datetime(2026, 8, 16, 12, 0)
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        '<div class="pxp-course-content"><div class="no-data">No assignments</div></div>',
+        course="Algebra II",
+        reference=reference,
+    ) == []
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_course_assignments(
+            '<div class="pxp-course-content"></div>',
+            course="Algebra II",
+            reference=reference,
+        )
+
+
+def test_course_detail_does_not_treat_a_slash_date_as_earned_points() -> None:
+    """Would fail if an ungraded MM/DD/YYYY row is classified as a low ratio."""
+    html = '''<div class="pxp-course-content">
+      <div class="item-container">
+        <div class="item-text-main">Ungraded worksheet</div>
+        <div class="item-text-special">08/18/2026</div>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        html,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
+
+
+def test_course_detail_rejects_any_malformed_assignment_row() -> None:
+    """Would fail if one malformed course item can yield a partial course snapshot."""
+    html = COURSE_DETAIL_HTML.replace(
+        '</div>\n</div>',
+        '</div><div class="item-container">'
+        '<div class="item-text-main">Undated work</div></div></div>',
+    )
+
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_course_assignments(
+            html,
+            course="Algebra II",
+            reference=datetime(2026, 8, 16, 12, 0),
+        )
 
 
 class FakePage:
