@@ -55,5 +55,6 @@ Thumbs.db
 # agentic items as a result of gitnexus
 .claude
 .codex/
+.worktrees/
 CLAUDE.md
 AGENTS.md
