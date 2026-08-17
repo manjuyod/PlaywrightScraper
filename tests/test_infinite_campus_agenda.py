@@ -386,7 +386,10 @@ class FakeSelection:
         workspace: "FakeWorkspace",
         *,
         generation: int,
-        rows: list[tuple[int, tuple[str, str, str, str], int]] | None = None,
+        rows:
+        list[tuple[int, tuple[str, str, str, str], int]]
+        | Callable[[], list[tuple[int, tuple[str, str, str, str], int]]]
+        | None = None,
         count: int | Callable[[], int] | None = None,
         on_click: Callable[[], None] | None = None,
         attribute: Callable[[], str | None] | None = None,
@@ -404,23 +407,42 @@ class FakeSelection:
         self._strict = strict
         self._on_wait = on_wait
 
+    def _rows_now(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
+        if callable(self._rows):
+            return self._rows()
+        return self._rows
+
+    def _count_now(self) -> int:
+        if self._count is not None:
+            return self._count() if callable(self._count) else self._count
+        return len(self._rows_now())
+
     def _assert_fresh(self) -> None:
         if self._generation != self._workspace._generation():
             raise InfiniteCampusAgendaError()
 
     async def count(self) -> int:
         self._assert_fresh()
-        if self._count is not None:
-            return self._count() if callable(self._count) else self._count
-        return len(self._rows)
+        return self._count_now()
 
     @property
     def first(self) -> "FakeSelection":
-        return self.nth(0)
+        return FakeSelection(
+            self._workspace,
+            generation=self._generation,
+            rows=lambda: self._rows_now()[:1],
+            count=lambda: min(1, self._count_now()),
+            on_click=self._on_click,
+            attribute=self._attribute,
+            visible=self._visible,
+            strict=self._strict,
+            on_wait=self._on_wait,
+        )
 
     def nth(self, index: int) -> "FakeSelection":
         self._assert_fresh()
-        if index < 0 or index >= len(self._rows):
+        rows = self._rows_now()
+        if index < 0 or index >= len(rows):
             return FakeSelection(
                 self._workspace,
                 generation=self._workspace._generation(),
@@ -429,7 +451,7 @@ class FakeSelection:
         return FakeSelection(
             self._workspace,
             generation=self._workspace._generation(),
-            rows=[self._rows[index]],
+            rows=[rows[index]],
             on_click=self._on_click,
             attribute=self._attribute,
             visible=self._visible,
@@ -439,12 +461,13 @@ class FakeSelection:
 
     def locator(self, selector: str) -> "FakeSelection":
         self._assert_fresh()
-        if selector == f"{_TITLE_CELL} a[href]" and len(self._rows) == 1:
-            visible_position = self._rows[0][2]
+        rows = self._rows_now()
+        if selector == f"{_TITLE_CELL} a[href]" and len(rows) == 1:
+            visible_position = rows[0][2]
             return FakeSelection(
                 self._workspace,
                 generation=self._workspace._generation(),
-                rows=[self._rows[0]],
+                rows=[rows[0]],
                 on_click=lambda: self._workspace._open_detail(visible_position),
             )
         return FakeSelection(
@@ -487,10 +510,15 @@ class FakeSelection:
         self._assert_fresh()
         if "outerHTML" in _script:
             self._workspace._page._record_list_capture()
-        return [self._workspace._row_html(index, row) for index, row, _ in self._rows]
+        return [
+            self._workspace._row_html(index, row)
+            for index, row, _ in self._rows_now()
+        ]
 
     async def click(self) -> None:
         self._assert_fresh()
+        if self._count_now() == 0:
+            raise InfiniteCampusAgendaError()
         if self._on_click is None:
             raise InfiniteCampusAgendaError()
         self._on_click()
@@ -651,6 +679,8 @@ class FakeInfiniteCampusPage:
         filter_row_delay: int = 0,
         use_page_level_assignments: bool = False,
         assignments_link_ready_after_waits: int = 0,
+        assignments_link_count: int = 1,
+        assignments_link_never_ready: bool = False,
     ) -> None:
         self.rows = rows
         self.pre_term_rows = pre_term_rows if pre_term_rows is not None else rows
@@ -674,6 +704,8 @@ class FakeInfiniteCampusPage:
         self.generation = 0
         self.use_page_level_assignments = use_page_level_assignments
         self.assignments_link_ready_after_waits = assignments_link_ready_after_waits
+        self.assignments_link_count = assignments_link_count
+        self.assignments_link_never_ready = assignments_link_never_ready
         self._assignments_link_remaining = 0
         self.controls_ready = True
         self.controls_ready_after_waits = 0
@@ -730,14 +762,24 @@ class FakeInfiniteCampusPage:
                 return FakeSelection(
                     FakeWorkspace(self),
                     generation=self.generation,
-                    count=lambda: 1
+                    count=lambda: self.assignments_link_count
+                        if (
+                            self.view == "menu-open"
+                            and not self.assignments_link_never_ready
+                            and self._assignments_link_remaining == 0
+                        )
+                        else 0,
+                    rows=lambda: [
+                        (index, ("", "", "", ""), index)
+                        for index in range(self.assignments_link_count)
+                    ]
                     if (
                         self.view == "menu-open"
+                        and not self.assignments_link_never_ready
                         and self._assignments_link_remaining == 0
                     )
-                    else 0,
-                    rows=[(0, ("", "", "", ""), 0)],
-                    on_click=self._open_assignments,
+                    else [],
+                    on_click=self._click_page_assignments,
                     on_wait=self._wait_for_assignments_link,
                 )
             return FakeWorkspace(self).get_by_role(role, name, exact=True)
@@ -749,6 +791,7 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         self._set_generation("menu-open")
         self._assignments_link_remaining = self.assignments_link_ready_after_waits
+        self.actions.append("open-menu")
 
     def _open_assignments(self) -> None:
         if self.view != "menu-open":
@@ -768,10 +811,18 @@ class FakeInfiniteCampusPage:
         self.actions.append("open-assignments")
 
     def _wait_for_assignments_link(self) -> None:
+        self.actions.append("wait-page-assignments")
+        if self.assignments_link_never_ready:
+            return
         if self._assignments_link_remaining > 0:
             self._assignments_link_remaining -= 1
 
+    def _click_page_assignments(self) -> None:
+        self.actions.append("click-page-assignments")
+        self._open_assignments()
+
     def _wait_for_control(self, name: str) -> None:
+        self.actions.append(f"wait-control:{name}")
         if name not in self._control_waited_names:
             self.control_waits.append(name)
             self._control_waited_names.add(name)
@@ -984,6 +1035,59 @@ def test_navigation_uses_page_level_assignments_after_menu() -> None:
     assert asyncio.run(
         page.get_by_role("link", name="Assignments", exact=True).count()
     ) == 0
+    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("wait-page-assignments") == 2
+    assert page.actions.index("open-menu") < page.actions.index(
+        "wait-page-assignments"
+    )
+    assert max(
+        index
+        for index, action in enumerate(page.actions)
+        if action == "wait-page-assignments"
+    ) < page.actions.index("click-page-assignments")
+    assert page.actions.index("click-page-assignments") < page.actions.index(
+        "enable-current-term"
+    )
+
+
+def test_page_level_assignments_first_is_not_clickable_before_readiness() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        assignments_link_ready_after_waits=1,
+    )
+    asyncio.run(page.locator("#menu-toggle-button").click())
+    assignments = page.get_by_role("link", name="Assignments", exact=True)
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        asyncio.run(assignments.first.click())
+
+
+@pytest.mark.parametrize(
+    ("assignments_link_count", "assignments_link_never_ready"),
+    [(0, False), (1, True), (2, False)],
+    ids=["absent", "permanently-not-ready", "duplicate"],
+)
+def test_collector_rejects_invalid_page_level_assignments_links_atomically(
+    assignments_link_count: int,
+    assignments_link_never_ready: bool,
+) -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        assignments_link_count=assignments_link_count,
+        assignments_link_never_ready=assignments_link_never_ready,
+    )
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    error = raised.value
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert page.actions.count("click-page-assignments") == 0
+    assert not any(action.startswith("capture-") for action in page.actions)
+    assert not any(action.startswith("open-detail:") for action in page.actions)
 
 
 def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
