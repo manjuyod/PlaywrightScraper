@@ -1,9 +1,11 @@
 from __future__ import annotations
 from datetime import datetime
 
+from scraper.agenda_contract import AgendaRecord
 from playwright.async_api import Frame, Page, expect
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from .infinite_campus_agenda import collect_infinite_campus_agenda
 from .base import GradeMap, PortalEngine, PlaywrightTimeout, UniversalLoginConfig
 from .utils import exists, grades_table_to_dict
 
@@ -12,6 +14,7 @@ class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
     portal_key = "infinite_campus"
     url_patterns = ("campus/portal", "infinitecampus")
+    agenda_capable = True
     login_config = UniversalLoginConfig(
         username_selector="#username",
         password_selector="#password",
@@ -164,3 +167,6 @@ class InfiniteCampus(PortalEngine):
     async def logout(self) -> None:
         # await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)
+
+    async def get_agenda(self) -> list[AgendaRecord]:
+        return await collect_infinite_campus_agenda(self.page)

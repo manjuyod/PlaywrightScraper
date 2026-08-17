@@ -6,6 +6,9 @@ from typing import Callable
 
 import pytest
 
+from scraper import agenda
+from scraper.portals import get_portal
+from scraper.portals.infinite_campus import InfiniteCampus
 from scraper.portals.infinite_campus_agenda import (
     AssignmentDetail,
     InfiniteCampusAgendaError,
@@ -61,6 +64,67 @@ def test_list_parser_uses_only_canonical_scored_rows() -> None:
     assert rows[0].course == "Synthetic Algebra"
     assert rows[0].score_text == "7 / 10 (70%)"
     assert rows[0].missing is False
+
+
+def test_engine_delegates_agenda_collection_once(monkeypatch) -> None:
+    calls: list[object] = []
+
+    async def collect(current_page) -> list[dict[str, str]]:
+        calls.append(current_page)
+        return [
+            {
+                "course": "Synthetic Algebra",
+                "title": "Synthetic quiz",
+                "dueDate": "2026-08-18",
+                "dueTime": "23:59",
+                "status": "low_score",
+            }
+        ]
+
+    import scraper.portals.infinite_campus as infinite_campus_module
+
+    monkeypatch.setattr(
+        infinite_campus_module,
+        "collect_infinite_campus_agenda",
+        collect,
+        raising=False,
+    )
+    engine = InfiniteCampus(
+        object(),
+        "student",
+        "password",
+        "https://ic.example/campus/portal",
+    )
+    records = asyncio.run(engine.get_agenda())
+
+    assert InfiniteCampus.agenda_capable is True
+    assert calls == [engine.page]
+    assert records[0]["status"] == "low_score"
+
+
+def test_infinite_campus_is_registered_as_capable_and_keeps_slot_order() -> None:
+    assert get_portal("infinite_campus") is InfiniteCampus
+    assert InfiniteCampus.agenda_capable is True
+
+    student = {
+        "login_url": "https://ic.example/campus/portal",
+        "id": "primary-user",
+        "password": "primary-secret",
+        "alt_login_url": "https://district.powerschool.example/login",
+        "alt_id": "alt-user",
+        "alt_password": "alt-secret",
+        "student_name": "Student 7",
+        "db_id": 7,
+    }
+    slots = agenda.resolve_agenda_slots(student)
+
+    assert [slot.key for slot in slots] == ["agenda1", "agenda2"]
+    assert slots[0].portal == "infinite_campus"
+    assert slots[0].username == "primary-user"
+    assert slots[0].password == "primary-secret"
+    assert slots[1].portal == "powerschool"
+    assert slots[1].username == "alt-user"
+    assert slots[1].password == "alt-secret"
 
 
 def test_detail_parser_reads_explicit_local_start_and_end_dates() -> None:
