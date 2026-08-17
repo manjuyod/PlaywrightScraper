@@ -450,7 +450,7 @@
                                       h(
                                           "div",
                                           { className: "flex items-center justify-between gap-3" },
-                                          h("h3", { className: "text-xl font-extrabold text-slate-900" }, `Franchise ${franchise.id}`),
+                                          h("h3", { className: "text-xl font-extrabold text-slate-900" }, `${franchise.name} (${franchise.id})`),
                                           h(Badge, { tone: franchise.errorCount ? "danger" : "success" }, `${franchise.synced}/${franchise.total} synced`),
                                       ),
                                       h("p", { className: "mt-3 text-sm text-slate-600" }, `${franchise.errorCount || 0} errors · ${franchise.badLogins || 0} bad logins`),

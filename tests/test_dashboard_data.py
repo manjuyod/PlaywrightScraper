@@ -9,11 +9,16 @@ from ui import dashboard_data
 
 
 def _crm_student(
-    student_id: int, *, franchise_id: int = 57, grade: object = 10
+    student_id: int,
+    *,
+    franchise_id: int = 57,
+    franchise_name: object = "Gilbert",
+    grade: object = 10,
 ) -> dict:
     return {
         "crmstudentid": student_id,
         "franchiseid": franchise_id,
+        "franchise_name": franchise_name,
         "firstname": "Ada",
         "lastname": f"Student {student_id}",
         "grade": grade,
@@ -268,6 +273,7 @@ def test_franchise_summary_counts_only_merged_students() -> None:
     summaries = dashboard_data.summarize_franchises(students)
 
     assert [summary["id"] for summary in summaries] == [57, 99]
+    assert summaries[0]["name"] == "Tutoring Club of Gilbert"
     assert summaries[0]["total"] == 2
     assert summaries[0]["synced"] == 1
     assert summaries[0]["errorCount"] == 1
@@ -282,6 +288,7 @@ class _FakeCursor:
         ("lastname",),
         ("grade",),
         ("portal_url",),
+        ("franchise_name",),
     ]
 
     def __init__(self) -> None:
@@ -293,7 +300,15 @@ class _FakeCursor:
 
     def fetchall(self) -> list[tuple[Any, ...]]:
         return [
-            (101, 57, " Ada ", " Lovelace ", 10, "https://grades.example.test/login")
+            (
+                101,
+                57,
+                " Ada ",
+                " Lovelace ",
+                10,
+                "https://grades.example.test/login",
+                " Gilbert ",
+            )
         ]
 
     def close(self) -> None:
@@ -336,6 +351,7 @@ def test_crm_reader_uses_read_intent_and_parameterized_scope(monkeypatch) -> Non
     assert rows[0]["franchiseid"] == 57
     assert rows[0]["firstname"] == "Ada"
     assert rows[0]["lastname"] == "Lovelace"
+    assert rows[0]["franchise_name"] == "Gilbert"
     assert "ApplicationIntent=ReadOnly" in captured["connection_string"]
     assert captured["timeout"] == 10
     assert connection.cursor_value.executed is not None

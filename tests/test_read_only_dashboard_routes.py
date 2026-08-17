@@ -22,6 +22,7 @@ def _student(
             {
                 "crmstudentid": student_id,
                 "franchiseid": franchise_id,
+                "franchise_name": "Gilbert",
                 "firstname": "Ada",
                 "lastname": f"Student {student_id}",
                 "grade": grade,
@@ -120,6 +121,7 @@ def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
     assert page_data["countAll"] == 3
     assert page_data["countSynced"] == 3
     assert page_data["franchises"][0]["id"] == 57
+    assert page_data["franchises"][0]["name"] == "Tutoring Club of Gilbert"
     assert page_data["jobs"] == [_job()]
     assert "Set-Cookie" not in response.headers
 

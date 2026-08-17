@@ -22,8 +22,10 @@ SELECT
     s.FirstName AS firstname,
     s.LastName AS lastname,
     s.Grade AS grade,
-    s.GradePortalURL AS portal_url
+    s.GradePortalURL AS portal_url,
+    f.FranchiesName AS franchise_name
 FROM dbo.tblStudents AS s
+LEFT JOIN dbo.tblFranchies AS f ON f.ID = s.FranchiseID
 WHERE (? IS NULL OR s.FranchiseID = ?)
   AND (? IS NULL OR s.Id = ?)
   AND s.IsTrail = 'Active'
@@ -303,6 +305,7 @@ class CourseGrade:
 class DashboardStudent:
     crmstudentid: int
     franchiseid: int
+    franchise_name: str
     first_name: str
     last_name: str
     grade_level: int | None
@@ -393,6 +396,9 @@ def merge_student_rows(
         student = DashboardStudent(
             crmstudentid=crmstudentid,
             franchiseid=franchiseid,
+            franchise_name=_format_franchise_name(
+                crm_row.get("franchise_name"), franchiseid
+            ),
             first_name=str(crm_row.get("firstname") or "").strip(),
             last_name=str(crm_row.get("lastname") or "").strip(),
             grade_level=_grade_level_int(crm_row.get("grade")),
@@ -521,6 +527,7 @@ def summarize_franchises(students: Sequence[DashboardStudent]) -> list[dict[str,
         summaries.append(
             {
                 "id": franchiseid,
+                "name": franchise_students[0].franchise_name,
                 "total": len(franchise_students),
                 "synced": sum(
                     student.status == "synced" for student in franchise_students
