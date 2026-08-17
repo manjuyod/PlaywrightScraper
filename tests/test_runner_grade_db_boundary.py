@@ -40,6 +40,62 @@ def test_context_mapping_preserves_legacy_scraper_shape_without_logging(capsys) 
     assert capsys.readouterr().out == ""
 
 
+def test_diagnostic_failure_pauses_before_browser_state_is_closed(
+    monkeypatch, capsys
+) -> None:
+    events: list[str] = []
+
+    class Page:
+        def set_default_timeout(self, _timeout):
+            return None
+
+        def set_default_navigation_timeout(self, _timeout):
+            return None
+
+        async def pause(self):
+            events.append("pause")
+
+        async def close(self):
+            events.append("page.close")
+
+    class Context:
+        async def new_page(self):
+            return Page()
+
+        async def close(self):
+            events.append("context.close")
+
+    class Browser:
+        async def new_context(self):
+            return Context()
+
+    class Engine:
+        sid = "test-user"
+        pw = "test-password"
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, *, first_name=None):
+            raise ValueError("original diagnostic error")
+
+    monkeypatch.setattr(runner, "get_portal", lambda _portal: Engine)
+    monkeypatch.setattr(runner.random, "uniform", lambda _start, _end: 0)
+    student = {
+        "db_id": 7,
+        "portal": "canvas",
+        "login_url": "https://portal.example/login",
+        "id": "test-user",
+        "password": "test-password",
+    }
+
+    with pytest.raises(ValueError, match="original diagnostic error"):
+        asyncio.run(runner.scrape_one(Browser(), student, diagnostic=True))
+
+    assert events == ["pause", "page.close", "context.close"]
+    assert "ValueError: original diagnostic error" in capsys.readouterr().err
+
+
 def test_each_success_is_posted_immediately(monkeypatch) -> None:
     posts: list[dict] = []
 

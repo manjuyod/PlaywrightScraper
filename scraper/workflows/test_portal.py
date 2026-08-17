@@ -21,6 +21,7 @@ from typing import Literal, cast
 
 from playwright.async_api import Browser, async_playwright
 
+from scraper.agenda import fetch_agenda as fetch_student_agenda
 from scraper.config.logging import configure_logging
 from scraper.portals import managed_portals
 from scraper.runner import StudentContext, scrape_one
@@ -47,6 +48,8 @@ class PortalTestArgs:
     seed: int | None
     headless: bool
     grades: bool
+    agenda: bool
+    debug: bool
 
 
 def _required_string(row: Mapping[str, object], field: str) -> str:
@@ -152,8 +155,10 @@ async def test_portal(
     student: StudentContext,
     *,
     grades: bool = False,
+    agenda: bool = False,
+    debug: bool = False,
 ) -> PortalTestResult:
-    """Exercise login, optionally followed by grade fetching, without persistence."""
+    """Exercise login and optionally fetch grades or agenda without persistence."""
     record_id_value = student.get("db_id")
     if not isinstance(record_id_value, int):
         raise RuntimeError("student context is missing its CRM record ID")
@@ -163,7 +168,19 @@ async def test_portal(
         extra={"portal": portal, "student_record_id": record_id},
     )
     try:
-        _ = await scrape_one(browser, student, login_only=not grades)
+        if grades or not agenda:
+            _ = await scrape_one(
+                browser,
+                student,
+                login_only=not grades,
+                diagnostic=debug,
+            )
+        if agenda:
+            context = await browser.new_context()
+            try:
+                _ = await fetch_student_agenda(context, student, "upcoming")
+            finally:
+                await context.close()
     except Exception as exc:
         exception_type = type(exc).__name__
         logger.error(
@@ -191,6 +208,8 @@ async def stress_test(
     sample_size: int,
     rng: random.Random,
     grades: bool = False,
+    agenda: bool = False,
+    debug: bool = False,
 ) -> list[PortalTestResult]:
     selected = select_students(students, portal, limit=sample_size, rng=rng)
     if not selected:
@@ -199,7 +218,14 @@ async def stress_test(
     return list(
         await asyncio.gather(
             *(
-                test_portal(browser, portal, student, grades=grades)
+                test_portal(
+                    browser,
+                    portal,
+                    student,
+                    grades=grades,
+                    agenda=agenda,
+                    debug=debug,
+                )
                 for student in selected
             )
         )
@@ -212,6 +238,8 @@ async def full_test(
     *,
     rng: random.Random,
     grades: bool = False,
+    agenda: bool = False,
+    debug: bool = False,
 ) -> list[PortalTestResult]:
     selected: list[tuple[str, StudentContext]] = []
     results: list[PortalTestResult] = []
@@ -228,7 +256,14 @@ async def full_test(
 
     tested = await asyncio.gather(
         *(
-            test_portal(browser, portal, student, grades=grades)
+            test_portal(
+                browser,
+                portal,
+                student,
+                grades=grades,
+                agenda=agenda,
+                debug=debug,
+            )
             for portal, student in selected
         )
     )
@@ -255,6 +290,7 @@ async def main(args: PortalTestArgs) -> int:
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             headless=args.headless,
+            devtools=args.debug,
             args=["--disable-blink-features=AutomationControlled"],
         )
         try:
@@ -269,10 +305,17 @@ async def main(args: PortalTestArgs) -> int:
                     sample_size=args.sample_size,
                     rng=rng,
                     grades=args.grades,
+                    agenda=args.agenda,
+                    debug=args.debug,
                 )
             else:
                 results = await full_test(
-                    browser, students, rng=rng, grades=args.grades
+                    browser,
+                    students,
+                    rng=rng,
+                    grades=args.grades,
+                    agenda=args.agenda,
+                    debug=args.debug,
                 )
         finally:
             await browser.close()
@@ -321,7 +364,23 @@ def _parse_args() -> PortalTestArgs:
         action="store_true",
         help="Fetch grades after login; by default the test stops after login succeeds.",
     )
+    _ = parser.add_argument(
+        "--agenda",
+        action="store_true",
+        help="Fetch the upcoming agenda using the student's configured agenda portal.",
+    )
+    _ = parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "On failure, pause the headed browser before cleanup and print the "
+            "original traceback to the terminal. Error text may contain private "
+            "portal data."
+        ),
+    )
     namespace = parser.parse_args()
+    if namespace.debug and namespace.headless:
+        parser.error("--debug cannot be combined with --headless")
     return PortalTestArgs(
         students_file=cast(Path, namespace.students_file),
         portal=cast(str | None, namespace.portal),
@@ -329,6 +388,8 @@ def _parse_args() -> PortalTestArgs:
         seed=cast(int | None, namespace.seed),
         headless=cast(bool, namespace.headless),
         grades=cast(bool, namespace.grades),
+        agenda=cast(bool, namespace.agenda),
+        debug=cast(bool, namespace.debug),
     )
 
 

@@ -56,8 +56,8 @@ def resolve_grade_db_cli(project_root: Path | None = None) -> Path:
     target = root / "grade_db" / "target"
     candidates.extend(
         [
-            target / "x86_64-pc-windows-msvc" / "release" / "grade-db.exe",
             target / "release" / "grade-db.exe",
+            target / "x86_64-pc-windows-msvc" / "release" / "grade-db.exe",
             target / "x86_64-pc-windows-msvc" / "debug" / "grade-db.exe",
             target / "debug" / "grade-db.exe",
         ]
@@ -147,9 +147,7 @@ class GradeDbClient:
             {"job_id": job_id, "lease_token": lease_token, "progress": dict(progress)},
         )
 
-    def fail_job(
-        self, *, job_id: str, lease_token: str, code: str
-    ) -> dict[str, Any]:
+    def fail_job(self, *, job_id: str, lease_token: str, code: str) -> dict[str, Any]:
         return self._invoke(
             ("job", "fail"),
             {"job_id": job_id, "lease_token": lease_token, "code": code},
@@ -161,7 +159,11 @@ class GradeDbClient:
     def _invoke(
         self, command: tuple[str, ...], payload: Mapping[str, Any] | None
     ) -> dict[str, Any]:
-        encoded = "" if payload is None else json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        encoded = (
+            ""
+            if payload is None
+            else json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        )
         try:
             completed = self._run(
                 [str(self.executable), *command],
@@ -177,7 +179,11 @@ class GradeDbClient:
         response = _decode_response(completed.stdout)
         if completed.returncode != 0:
             code = response.get("error")
-            safe_code = code if isinstance(code, str) and _SAFE_CODE.fullmatch(code) else "command_failed"
+            safe_code = (
+                code
+                if isinstance(code, str) and _SAFE_CODE.fullmatch(code)
+                else "command_failed"
+            )
             error_type = _EXIT_ERRORS.get(completed.returncode, GradeDbInternalError)
             raise error_type(f"grade-db command failed: {safe_code}")
         return response

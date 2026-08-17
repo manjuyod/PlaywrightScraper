@@ -96,10 +96,12 @@ def test_empty_portal_is_reported_as_skipped() -> None:
 
 
 def test_portal_defaults_to_login_only(monkeypatch) -> None:
-    observed: list[bool] = []
+    observed: list[tuple[bool, bool]] = []
 
-    async def fake_scrape_one(_browser, _student, *, login_only=False):
-        observed.append(login_only)
+    async def fake_scrape_one(
+        _browser, _student, *, login_only=False, diagnostic=False
+    ):
+        observed.append((login_only, diagnostic))
         return {"parsed_grades": None}
 
     monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
@@ -110,14 +112,16 @@ def test_portal_defaults_to_login_only(monkeypatch) -> None:
     )
 
     assert result.status == "passed"
-    assert observed == [True]
+    assert observed == [(True, False)]
 
 
 def test_portal_full_flow_is_explicit(monkeypatch) -> None:
-    observed: list[bool] = []
+    observed: list[tuple[bool, bool]] = []
 
-    async def fake_scrape_one(_browser, _student, *, login_only=False):
-        observed.append(login_only)
+    async def fake_scrape_one(
+        _browser, _student, *, login_only=False, diagnostic=False
+    ):
+        observed.append((login_only, diagnostic))
         return {"parsed_grades": {}}
 
     monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
@@ -131,4 +135,60 @@ def test_portal_full_flow_is_explicit(monkeypatch) -> None:
     )
 
     assert result.status == "passed"
-    assert observed == [False]
+    assert observed == [(False, False)]
+
+
+def test_portal_agenda_flow_is_explicit(monkeypatch) -> None:
+    observed: list[tuple[object, dict[str, object], str]] = []
+
+    class FakeContext:
+        async def close(self) -> None:
+            return None
+
+    class FakeBrowser:
+        async def new_context(self) -> FakeContext:
+            return FakeContext()
+
+    async def fake_scrape_one(*_args, **_kwargs):
+        raise AssertionError("agenda-only tests should not fetch grades")
+
+    async def fake_fetch_agenda(context, student, target):
+        observed.append((context, student, target))
+        return {"2026-08-12": [("Math", "Homework", None)]}, student
+
+    monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
+    monkeypatch.setattr(test_portal, "fetch_student_agenda", fake_fetch_agenda)
+    student = _students("canvas", 1)[0]
+
+    result = asyncio.run(
+        test_portal.test_portal(
+            cast(Browser, FakeBrowser()),
+            "canvas",
+            student,
+            agenda=True,
+        )
+    )
+
+    assert result.status == "passed"
+    assert len(observed) == 1
+    assert observed[0][1:] == (student, "upcoming")
+
+
+def test_portal_debug_preserves_diagnostic_mode(monkeypatch) -> None:
+    async def fake_scrape_one(
+        _browser, _student, *, login_only=False, diagnostic=False
+    ):
+        assert diagnostic is True
+        raise ValueError("local diagnostic detail")
+
+    monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
+    result = asyncio.run(
+        test_portal.test_portal(
+            cast(Browser, object()),
+            "canvas",
+            _students("canvas", 1)[0],
+            debug=True,
+        )
+    )
+
+    assert result.status == "failed"

@@ -9,6 +9,7 @@ import pathlib
 import random
 import sys
 import textwrap
+import traceback
 from time import time
 from typing import Any, Mapping
 
@@ -115,6 +116,7 @@ async def scrape_one(
     student: dict[str, Any],
     *,
     login_only: bool = False,
+    diagnostic: bool = False,
 ):
     """Log in and optionally collect grades without database reads or writes."""
     await asyncio.sleep(random.uniform(0, 1.0))
@@ -156,6 +158,8 @@ async def scrape_one(
                 "portal.login.failed",
                 extra={**log_context, "exception_type": type(exc).__name__},
             )
+            if diagnostic:
+                raise
             raise RuntimeError("portal login failed") from None
 
         logger.info("portal.login.succeeded", extra=log_context)
@@ -180,6 +184,21 @@ async def scrape_one(
             },
         )
         return result
+    except Exception as exc:
+        if diagnostic:
+            traceback.print_exception(exc)
+            logger.warning("portal.diagnostic.paused", extra=log_context)
+            try:
+                await page.pause()
+            except Exception as pause_exc:
+                logger.warning(
+                    "portal.diagnostic.pause_unavailable",
+                    extra={
+                        **log_context,
+                        "exception_type": type(pause_exc).__name__,
+                    },
+                )
+        raise
     finally:
         try:
             await page.close()

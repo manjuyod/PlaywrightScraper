@@ -229,7 +229,8 @@ Test that the changes worked by running the portal test:
 uv run python -m scraper.workflows.test_portal --portal {portal_key}
 ```
 
-Add the --grades flag if you need to test grade parsing as well.
+Add the `--grades` flag to test grade parsing or `--agenda` to test upcoming
+agenda fetching as well. The flags can be combined.
 
 ### Live portal diagnostics
 
@@ -240,7 +241,9 @@ completed and grade fetching is not attempted. Without `--portal`, it tests one
 random configured account for every registered portal. With `--portal`, it
 concurrently tests up to five configured accounts for that portal (or every
 available account when fewer exist). Pass `--grades` to continue through grade
-fetching after a successful login.
+fetching after a successful login. Pass `--agenda` to fetch the upcoming agenda
+through the student's configured Canvas or alternate Google Classroom portal;
+it can be combined with `--grades`.
 
 Create `config/students.portal-test.json` with owner-only permissions. This path is
 already covered by `.gitignore`'s `config/students.*` rule:
@@ -272,6 +275,20 @@ uv run python -m scraper.workflows.test_portal --portal powerschool
 uv run python -m scraper.workflows.test_portal --portal powerschool --seed 19 --headless
 uv run python -m scraper.workflows.test_portal --portal powerschool --grades
 ```
+
+For an interactive failure investigation, run one account in a headed browser:
+
+```bash
+uv run python -m scraper.workflows.test_portal --portal powerschool --sample-size 1 --debug
+```
+
+`--debug` opens Chromium DevTools from startup. On failure, it also opens Playwright
+Inspector and pauses before the page and browser context are closed. Inspect the DOM,
+console, network activity, action log, locators, and current page, then press Resume
+to finish cleanup. It also prints the original exception traceback to the terminal.
+This output is intentionally not added to the retained structured log fields because
+exception messages can contain portal URLs, page text, selectors, or other private
+data. Treat the terminal as sensitive while debugging.
 
 Runner events are retained as JSON lines in `logs/scraper.jsonl`; explicit portal
 diagnostics use `logs/portal-tests.jsonl`. Both rotate automatically. Terminal
