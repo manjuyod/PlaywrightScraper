@@ -335,6 +335,39 @@ def test_two_canvas_slots_use_distinct_pages_and_keep_duplicate_assignments(
     assert all(page.close_calls == 1 for page in browser.pages)
 
 
+def test_fetch_agenda_canonicalizes_courses_against_known_titles(monkeypatch) -> None:
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            return [
+                {
+                    "course": "Period 4, MKTG 1",
+                    "title": "Campaign brief",
+                    "dueDate": "2026-08-18",
+                    "dueTime": None,
+                    "status": "due",
+                }
+            ]
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    student = _student(7)
+    student["alt_login_url"] = None
+    student["alt_id"] = None
+    student["alt_password"] = None
+    student["known_course_titles"] = ["MARKETING 1"]
+
+    bundle, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), student))
+
+    assert list(bundle["agenda1"]["weeks"]["2026-08-17"]) == ["MARKETING 1"]
+
+
 def test_two_slots_are_independently_bounded_below_rust_result_limit(
     monkeypatch,
 ) -> None:

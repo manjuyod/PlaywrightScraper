@@ -23,6 +23,7 @@ def _context(student_id: int = 7) -> dict:
         "p2password": "alternate-secret",
         "portal": "gps",
         "track_agenda": True,
+        "known_course_titles": ["MARKETING 1", "ENGLISH 11"],
         "auth_type": "gps_pictograph",
         "auth_images": ["cat", "moon"],
         "status": "never",
@@ -39,6 +40,7 @@ def test_context_mapping_preserves_legacy_scraper_shape_without_logging(capsys) 
     assert student["alt_login_url"] == "https://classroom.google.com"
     assert student["alt_id"] == "ada-alt"
     assert student["auth_images"] == ["cat", "moon"]
+    assert student["known_course_titles"] == ["MARKETING 1", "ENGLISH 11"]
     assert capsys.readouterr().out == ""
 
 

@@ -26,6 +26,7 @@ fn doctor_schema_check_is_read_only_and_checks_required_columns() {
     }
 
     let states = sql::STATES_BY_IDS.to_ascii_lowercase();
+    assert!(states.contains("weeklydata"));
     for crm_owned_column in ["portal2", "p2username", "p2password"] {
         assert!(!states.contains(crm_owned_column));
     }

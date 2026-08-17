@@ -71,6 +71,7 @@ ON CONFLICT (crmstudentid) DO NOTHING
     pub const STATES_BY_IDS: &str = r#"
 SELECT crmstudentid, portal,
        COALESCE(track_agenda, false) AS track_agenda,
+       COALESCE(weeklydata, '{}'::jsonb) AS weeklydata,
        auth_type, COALESCE(auth_answers, '[]'::jsonb) AS auth_answers,
        status, passwordgood
 FROM students_grades_20262027
@@ -311,6 +312,7 @@ impl NeonGateway for PostgresNeonGateway {
                         crmstudentid,
                         portal: row.try_get("portal").map_err(neon_error)?,
                         track_agenda: row.try_get("track_agenda").map_err(neon_error)?,
+                        weeklydata: row.try_get("weeklydata").map_err(neon_error)?,
                         auth_type: row.try_get("auth_type").map_err(neon_error)?,
                         auth_answers: row.try_get("auth_answers").map_err(neon_error)?,
                         status: row.try_get("status").map_err(neon_error)?,

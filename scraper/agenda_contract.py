@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
+from difflib import SequenceMatcher
 from typing import Literal, NotRequired, TypedDict
 
 
@@ -72,12 +74,95 @@ def empty_agenda_bundle(portals: Sequence[str | None]) -> AgendaBundle:
 
 
 _TIME = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_NAMED_PERIOD_PREFIX = re.compile(
+    r"^\s*(?:period|per)\s*(\d+)\s*[,;:.\-\N{EN DASH}\N{EM DASH}]?\s*",
+    re.IGNORECASE,
+)
+_NUMBERED_PERIOD_PREFIX = re.compile(r"^\s*(\d+)\s*:\s*")
+_MATCH_TOKEN = re.compile(r"[A-Z0-9]+")
+_COURSE_ABBREVIATIONS = {
+    "ACCT": "ACCOUNTING",
+    "ALG": "ALGEBRA",
+    "BIO": "BIOLOGY",
+    "CHEM": "CHEMISTRY",
+    "ECON": "ECONOMICS",
+    "ENG": "ENGLISH",
+    "GEOM": "GEOMETRY",
+    "GOV": "GOVERNMENT",
+    "HIST": "HISTORY",
+    "MKTG": "MARKETING",
+}
 
 
 def _display_text(value: object) -> str:
     if not isinstance(value, str):
         return ""
     return " ".join(value.split())[:500]
+
+
+def _course_match_parts(title: str) -> tuple[str | None, str]:
+    normalized = unicodedata.normalize("NFKC", title).upper()
+    period: str | None = None
+    for pattern in (_NAMED_PERIOD_PREFIX, _NUMBERED_PERIOD_PREFIX):
+        match = pattern.match(normalized)
+        if match is not None:
+            period = match.group(1)
+            normalized = normalized[match.end() :]
+            break
+    tokens = [
+        _COURSE_ABBREVIATIONS.get(token, token)
+        for token in _MATCH_TOKEN.findall(normalized)
+    ]
+    return period, " ".join(tokens)
+
+
+def _canonical_course_title(source: str, known_titles: Sequence[object]) -> str:
+    source_period, source_key = _course_match_parts(source)
+    if not source_key:
+        return source
+
+    candidates: list[tuple[str, str | None, str]] = []
+    for raw_title in known_titles:
+        title = _display_text(raw_title)
+        if not title:
+            continue
+        period, key = _course_match_parts(title)
+        if key:
+            candidates.append((title, period, key))
+
+    exact = [candidate for candidate in candidates if candidate[2] == source_key]
+    if source_period is not None:
+        same_period = [candidate for candidate in exact if candidate[1] == source_period]
+        if len(same_period) == 1:
+            return same_period[0][0]
+    if len(exact) == 1:
+        return exact[0][0]
+    if exact:
+        return source
+
+    source_numbers = {token for token in source_key.split() if token.isdigit()}
+    scored: list[tuple[float, str]] = []
+    for title, candidate_period, candidate_key in candidates:
+        if (
+            source_period is not None
+            and candidate_period is not None
+            and source_period != candidate_period
+        ):
+            continue
+        candidate_numbers = {
+            token for token in candidate_key.split() if token.isdigit()
+        }
+        if source_numbers != candidate_numbers:
+            continue
+        score = SequenceMatcher(None, source_key, candidate_key).ratio()
+        scored.append((score, title))
+
+    scored.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))
+    if not scored or scored[0][0] < 0.88:
+        return source
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.08:
+        return source
+    return scored[0][1]
 
 
 def _json_value_nodes(value: object) -> int:
@@ -134,13 +219,18 @@ def _agenda_record_sort_key(
     )
 
 
-def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
+def normalize_agenda(
+    records: Iterable[Mapping[str, object]],
+    *,
+    known_course_titles: Sequence[object] = (),
+) -> AgendaWeeks:
     deduplicated: dict[
         tuple[object, ...],
         tuple[str, str, str, str | None, AgendaStatus],
     ] = {}
     for raw in records:
         course = _display_text(raw.get("course"))
+        course = _canonical_course_title(course, known_course_titles)
         title = _display_text(raw.get("title"))
         status = raw.get("status")
         if not course or not title or status not in AGENDA_STATUSES:

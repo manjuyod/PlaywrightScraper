@@ -189,7 +189,10 @@ async def _collect_slot(
             )
             await scraper.login(first_name=_optional_string(student.get("student_name")))
             records = await scraper.get_agenda()
-            weeks = normalize_agenda(records)
+            weeks = normalize_agenda(
+                records,
+                known_course_titles=student.get("known_course_titles", ()),
+            )
             body_succeeded = True
             return weeks
         except BaseException as exc:

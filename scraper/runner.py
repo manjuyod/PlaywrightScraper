@@ -69,6 +69,12 @@ def student_from_context(context: RawStudentContext) -> StudentContext:
     portal = str(context.get("portal") or "").strip().lower()
     if not portal:
         portal = get_portal_key_from_url(context.get("portal1") or "")
+    raw_known_course_titles = context.get("known_course_titles")
+    known_course_titles = (
+        raw_known_course_titles
+        if isinstance(raw_known_course_titles, list)
+        else []
+    )
     return {
         "db_id": int(context["crmstudentid"]),
         "student_name": str(context.get("firstname") or ""),
@@ -82,6 +88,11 @@ def student_from_context(context: RawStudentContext) -> StudentContext:
         "auth_images": list(context.get("auth_images") or []),
         "auth_type": context.get("auth_type"),
         "track_agenda": bool(context.get("track_agenda")),
+        "known_course_titles": [
+            title
+            for title in known_course_titles
+            if isinstance(title, str) and title.strip()
+        ],
         "status": context.get("status"),
         "passwordgood": context.get("passwordgood"),
         "franchise_id": context.get("franchiseid"),

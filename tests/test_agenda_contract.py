@@ -80,6 +80,82 @@ def test_normalize_skips_undated_and_malformed_records() -> None:
     ) == {}
 
 
+def test_normalize_uses_known_gradebook_title_for_agenda_abbreviation() -> None:
+    records = [
+        {
+            "course": "Period 4, MKTG 1",
+            "title": "Campaign brief",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+        }
+    ]
+
+    weeks = normalize_agenda(
+        records,
+        known_course_titles=["ENGLISH 11", "MARKETING 1"],
+    )
+
+    assert list(weeks["2026-08-17"]) == ["MARKETING 1"]
+
+
+def test_normalize_can_fuzzy_match_a_unique_minor_title_difference() -> None:
+    records = [
+        {
+            "course": "Environmental Scince",
+            "title": "Lab",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+        }
+    ]
+
+    weeks = normalize_agenda(
+        records,
+        known_course_titles=["Environmental Science", "English 11"],
+    )
+
+    assert list(weeks["2026-08-17"]) == ["Environmental Science"]
+
+
+def test_normalize_preserves_source_title_when_known_match_is_ambiguous() -> None:
+    records = [
+        {
+            "course": "English",
+            "title": "Essay",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+        }
+    ]
+
+    weeks = normalize_agenda(
+        records,
+        known_course_titles=["1: ENGLISH", "2: ENGLISH"],
+    )
+
+    assert list(weeks["2026-08-17"]) == ["English"]
+
+
+def test_normalize_uses_matching_period_to_resolve_duplicate_course_names() -> None:
+    records = [
+        {
+            "course": "Period 2 English",
+            "title": "Essay",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+        }
+    ]
+
+    weeks = normalize_agenda(
+        records,
+        known_course_titles=["1: ENGLISH", "2: ENGLISH"],
+    )
+
+    assert list(weeks["2026-08-17"]) == ["2: ENGLISH"]
+
+
 def test_empty_bundle_always_retains_both_slot_identities() -> None:
     assert empty_agenda_bundle(["canvas", None]) == {
         "agenda1": {"portal": "canvas", "weeks": {}},

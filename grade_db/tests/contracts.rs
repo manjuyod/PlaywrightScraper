@@ -53,6 +53,12 @@ fn runner_context_merges_crm_owned_portals_with_neon_owned_configuration() {
         crmstudentid: 42,
         portal: Some("canvas".into()),
         track_agenda: true,
+        weeklydata: json!({
+            "2026-08-03": {"OLD MARKETING": 91},
+            "2026-08-10": {},
+            "2026-08-17": {"MARKETING 1": 92, "ENGLISH 11": 88},
+            "2026-08-24": {}
+        }),
         auth_type: Some("gps_pictograph".into()),
         auth_answers: json!(["cat", "tree", "moon"]),
         status: Some("never".into()),
@@ -70,6 +76,10 @@ fn runner_context_merges_crm_owned_portals_with_neon_owned_configuration() {
     );
     assert_eq!(merged.p2username.as_deref(), Some("agenda-user"));
     assert!(merged.track_agenda);
+    assert_eq!(
+        merged.known_course_titles,
+        vec!["ENGLISH 11", "MARKETING 1"]
+    );
     assert_eq!(merged.status.as_deref(), Some("never"));
     assert_eq!(merged.passwordgood, Some(true));
     assert_eq!(merged.auth_images, vec!["cat", "tree", "moon"]);

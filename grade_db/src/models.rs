@@ -166,6 +166,7 @@ pub struct StudentGradeState {
     pub crmstudentid: i64,
     pub portal: Option<String>,
     pub track_agenda: bool,
+    pub weeklydata: Value,
     pub auth_type: Option<String>,
     pub auth_answers: Value,
     pub status: Option<String>,
@@ -187,10 +188,34 @@ pub struct RunnerStudent {
     pub p2password: Option<String>,
     pub portal: Option<String>,
     pub track_agenda: bool,
+    pub known_course_titles: Vec<String>,
     pub auth_type: Option<String>,
     pub auth_images: Vec<String>,
     pub status: Option<String>,
     pub passwordgood: Option<bool>,
+}
+
+fn latest_course_titles(weeklydata: &Value) -> Vec<String> {
+    let Some(weeks) = weeklydata.as_object() else {
+        return Vec::new();
+    };
+    let Some((_week, courses)) = weeks
+        .iter()
+        .filter(|(_week, courses)| courses.as_object().is_some_and(|value| !value.is_empty()))
+        .max_by_key(|(week, _courses)| *week)
+    else {
+        return Vec::new();
+    };
+
+    let mut titles = courses
+        .as_object()
+        .into_iter()
+        .flat_map(|courses| courses.keys())
+        .filter(|title| !title.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    titles.sort_by_cached_key(|title| (title.to_lowercase(), title.clone()));
+    titles
 }
 
 pub fn merge_runner_student(crm: &CrmStudent, state: Option<&StudentGradeState>) -> RunnerStudent {
@@ -219,6 +244,9 @@ pub fn merge_runner_student(crm: &CrmStudent, state: Option<&StudentGradeState>)
         p2password: crm.p2password.clone(),
         portal: state.and_then(|row| row.portal.clone()),
         track_agenda: state.is_some_and(|row| row.track_agenda),
+        known_course_titles: state
+            .map(|row| latest_course_titles(&row.weeklydata))
+            .unwrap_or_default(),
         auth_type: state.and_then(|row| row.auth_type.clone()),
         auth_images,
         status: state.and_then(|row| row.status.clone()),
