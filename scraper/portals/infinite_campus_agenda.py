@@ -36,9 +36,15 @@ class AssignmentDetail:
 
 
 _DATE_FORMAT = "%m/%d/%Y %I:%M %p"
-_PERCENT = re.compile(r"(\d{1,3})\s*%")
-_POINTS = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
-_EXCLUDED_SCORE_STATE = re.compile(r"^(?:excused|pass\s*/\s*fail)$", re.I)
+_PERCENT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%")
+_POINTS = re.compile(r"(?<![\d.])(\d+)\s*/\s*(\d+)(?![\d.])")
+_EXCLUDED_SCORE_STATES = frozenset({
+    "excused",
+    "pass/fail",
+    "exempt",
+    "notgraded",
+    "ungraded",
+})
 
 
 def _text(element: Tag | None) -> str:
@@ -74,9 +80,7 @@ def parse_infinite_campus_list(
         if empty_marker is not None and _text(empty_marker):
             raise InfiniteCampusAgendaError()
     elif empty_marker is not None:
-        if _text(empty_marker).strip():
-            return []
-        raise InfiniteCampusAgendaError()
+        return []
     else:
         raise InfiniteCampusAgendaError()
 
@@ -124,27 +128,25 @@ def parse_infinite_campus_detail(html: str) -> AssignmentDetail:
 
 
 def _score_percentage(raw: str) -> float | None:
-    match = _PERCENT.search(raw)
-    if not match:
+    matches = list(_PERCENT.finditer(raw))
+    if len(matches) != 1:
         return None
-    return int(match.group(1))
+    return float(matches[0].group(1))
 
 
 def _score_points(raw: str) -> float | None:
-    match = _POINTS.fullmatch(raw)
-    if not match:
+    matches = list(_POINTS.finditer(raw))
+    if len(matches) != 1:
         return None
-    try:
-        earned, possible = int(match.group(1)), int(match.group(2))
-    except ValueError as error:
-        raise InfiniteCampusAgendaError() from error
+    earned, possible = int(matches[0].group(1)), int(matches[0].group(2))
     if possible <= 0:
         return None
     return earned / possible * 100
 
 
 def _excluded_score_state(raw: str) -> bool:
-    return bool(_EXCLUDED_SCORE_STATE.fullmatch(raw.strip()))
+    normalized = re.sub(r"[\s-]+", "", raw.casefold())
+    return normalized in _EXCLUDED_SCORE_STATES
 
 
 def classify_infinite_campus_assignment(

@@ -62,6 +62,95 @@ def test_recognizable_explicit_empty_list_returns_no_rows() -> None:
     ) == []
 
 
+def test_blank_explicit_empty_marker_is_a_valid_boundary() -> None:
+    assert parse_infinite_campus_list(
+        '<div class="assignment__empty"></div>',
+        missing_keys=frozenset(),
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "score",
+    [" EXEMPT ", "Not - Graded", " UNGRADED "],
+)
+def test_additional_excluded_score_states_are_not_due(score: str) -> None:
+    assert (
+        classify_infinite_campus_assignment(
+            listed(score),
+            AssignmentDetail(
+                start_at=datetime(2026, 8, 1, 8, 0),
+                end_at=datetime(2026, 8, 18, 23, 59),
+            ),
+            reference=datetime(2026, 8, 16, 12, 0),
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("score", ["79.5%", "Score: 7 / 10"])
+def test_numeric_scores_below_80_are_low_score_with_decimal_or_label(score: str) -> None:
+    record = classify_infinite_campus_assignment(
+        listed(score),
+        AssignmentDetail(
+            start_at=datetime(2026, 8, 1, 8, 0),
+            end_at=datetime(2026, 8, 18, 23, 59),
+        ),
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert record is not None
+    assert record["status"] == "low_score"
+
+
+def test_multiple_points_pairs_are_not_accepted_as_a_score() -> None:
+    record = classify_infinite_campus_assignment(
+        listed("Scores: 7 / 10 and 8 / 10"),
+        AssignmentDetail(
+            start_at=datetime(2026, 8, 1, 8, 0),
+            end_at=datetime(2026, 8, 18, 23, 59),
+        ),
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert record is not None
+    assert record["status"] == "due"
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<div class="selcat-schedule-startdate">not a date</div>'
+        '<div class="selcat-schedule-enddate">08/18/2026 11:59 PM</div>',
+        '<div class="selcat-schedule-startdate">08/01/2026 8:00 AM</div>'
+        '<div class="selcat-schedule-enddate">not a date</div>',
+    ],
+)
+def test_detail_parser_rejects_malformed_nonblank_dates(html: str) -> None:
+    with pytest.raises(InfiniteCampusAgendaError):
+        parse_infinite_campus_detail(html)
+
+
+@pytest.mark.parametrize(
+    "cell_class",
+    [
+        "assignment__largeScreen--cell-assignmentName",
+        "assignment__largeScreen--cell-courseDueDate",
+    ],
+)
+def test_list_parser_rejects_missing_required_title_or_course_cell(cell_class: str) -> None:
+    cells = {
+        "assignment__largeScreen--cell-assignmentName": "Synthetic quiz",
+        "assignment__largeScreen--cell-courseDueDate": "Synthetic Algebra",
+    }
+    cells.pop(cell_class)
+    row = "<div class=\"selcat-assignment-row\">" + "".join(
+        f'<div class="{key}">{value}</div>' for key, value in cells.items()
+    ) + "</div>"
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        parse_infinite_campus_list(row, missing_keys=frozenset())
+
+
 def listed(score: str, *, missing: bool = False) -> ListedAssignment:
     return parse_infinite_campus_list(
         LIST_HTML.replace("7 / 10 (70%)", score),
