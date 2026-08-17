@@ -6,6 +6,7 @@ import traceback
 from typing import Callable
 
 import pytest
+from playwright.async_api import Error as PlaywrightError
 
 from scraper import agenda
 from scraper.portals import get_portal
@@ -399,6 +400,7 @@ class FakeSelection:
         on_wait: Callable[[], None] | None = None,
         on_hidden_wait: Callable[[], None] | None = None,
         timeout_after_click: bool | Callable[[], bool] = False,
+        wait_error: bool | Callable[[], bool] = False,
         live: bool = False,
     ) -> None:
         self._workspace = workspace
@@ -413,6 +415,7 @@ class FakeSelection:
         self._on_wait = on_wait
         self._on_hidden_wait = on_hidden_wait
         self._timeout_after_click = timeout_after_click
+        self._wait_error = wait_error
         self._live = live
 
     def _rows_now(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
@@ -448,6 +451,7 @@ class FakeSelection:
             on_wait=self._on_wait,
             on_hidden_wait=self._on_hidden_wait,
             timeout_after_click=self._timeout_after_click,
+            wait_error=self._wait_error,
             live=self._live,
         )
 
@@ -472,6 +476,7 @@ class FakeSelection:
             on_wait=self._on_wait,
             on_hidden_wait=self._on_hidden_wait,
             timeout_after_click=self._timeout_after_click,
+            wait_error=self._wait_error,
             live=self._live,
         )
 
@@ -520,6 +525,13 @@ class FakeSelection:
             raise InfiniteCampusAgendaError()
         if state != "visible":
             raise InfiniteCampusAgendaError()
+        wait_error = (
+            self._wait_error()
+            if callable(self._wait_error)
+            else self._wait_error
+        )
+        if wait_error:
+            raise PlaywrightError("synthetic frame detached")
         if self._on_wait is not None:
             self._on_wait()
         for _ in range(3):
@@ -671,6 +683,7 @@ class FakeWorkspace:
                     attribute=self._page._term_attribute,
                     count=lambda: 1 if self._page.controls_ready else 0,
                     on_wait=lambda: self._page._wait_for_control(name),
+                    wait_error=self._page._control_wait_error,
                 )
             if name == "Missing":
                 return FakeSelection(
@@ -681,6 +694,7 @@ class FakeWorkspace:
                     attribute=self._page._missing_attribute,
                     count=lambda: 1 if self._page.controls_ready else 0,
                     on_wait=lambda: self._page._wait_for_control(name),
+                    wait_error=self._page._control_wait_error,
                 )
             if name == "Back":
                 if self._page.hide_back_on_detail == self._page.active_detail_position:
@@ -747,6 +761,7 @@ class FakeInfiniteCampusPage:
         page_assignments_hide_on_click_number: int | None = None,
         page_assignments_timeout_on_click_number: int | None = None,
         workspace_missing_after_native_click_checks: int = 0,
+        workspace_control_wait_errors_after_native_click: int = 0,
         menu_toggle_count: int = 1,
         menu_toggle_count_after_navigation: int | None = None,
         drawer_never_hides: bool = False,
@@ -792,6 +807,11 @@ class FakeInfiniteCampusPage:
         )
         self._workspace_missing_remaining = 0
         self.transient_workspace_misses = 0
+        self.workspace_control_wait_errors_after_native_click = (
+            workspace_control_wait_errors_after_native_click
+        )
+        self._workspace_control_wait_errors_remaining = 0
+        self.transient_workspace_control_errors = 0
         self.menu_toggle_count = menu_toggle_count
         self.menu_toggle_count_after_navigation = menu_toggle_count_after_navigation
         self.drawer_never_hides = drawer_never_hides
@@ -973,6 +993,16 @@ class FakeInfiniteCampusPage:
         self._workspace_missing_remaining = (
             self.workspace_missing_after_native_click_checks
         )
+        self._workspace_control_wait_errors_remaining = (
+            self.workspace_control_wait_errors_after_native_click
+        )
+
+    def _control_wait_error(self) -> bool:
+        if self._workspace_control_wait_errors_remaining == 0:
+            return False
+        self._workspace_control_wait_errors_remaining -= 1
+        self.transient_workspace_control_errors += 1
+        return True
 
     def _wait_for_assignments_hidden(self) -> None:
         self.actions.append("wait-page-assignments-hidden")
@@ -1271,6 +1301,7 @@ def test_navigation_reclick_uses_native_click_after_locator_timeout() -> None:
         page_assignments_hide_on_click_number=2,
         page_assignments_timeout_on_click_number=2,
         workspace_missing_after_native_click_checks=1,
+        workspace_control_wait_errors_after_native_click=1,
         drawer_never_hides=True,
     )
 
@@ -1283,6 +1314,7 @@ def test_navigation_reclick_uses_native_click_after_locator_timeout() -> None:
     assert page.actions.count("close-menu") == 0
     assert page.actions.count("wait-page-assignments-hidden") == 1
     assert page.transient_workspace_misses == 1
+    assert page.transient_workspace_control_errors == 1
     page_clicks = [
         index
         for index, action in enumerate(page.actions)

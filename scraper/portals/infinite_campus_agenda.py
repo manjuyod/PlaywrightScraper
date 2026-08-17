@@ -264,11 +264,37 @@ async def _open_current_term_assignments(page: Page) -> Frame:
         await assignments.first.wait_for(
             state="hidden", timeout=_READINESS_TIMEOUT_MS
         )
+        from playwright.async_api import Error as PlaywrightError
+
         frame_deadline = time.monotonic() + (_READINESS_TIMEOUT_MS / 1000)
-        frame = page.frame(_WORKSPACE_FRAME)
-        while frame is None and time.monotonic() < frame_deadline:
-            await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
+        frame = None
+        while time.monotonic() < frame_deadline:
             frame = page.frame(_WORKSPACE_FRAME)
+            if frame is not None:
+                ready_missing = frame.get_by_role(
+                    "button", name="Missing", exact=True
+                )
+                ready_current_term = frame.get_by_role(
+                    "button", name="Current Term", exact=True
+                )
+                try:
+                    remaining = frame_deadline - time.monotonic()
+                    await ready_missing.wait_for(
+                        state="visible", timeout=max(1, int(remaining * 1000))
+                    )
+                    remaining = frame_deadline - time.monotonic()
+                    await ready_current_term.wait_for(
+                        state="visible", timeout=max(1, int(remaining * 1000))
+                    )
+                    if (
+                        await ready_missing.count() != 1
+                        or await ready_current_term.count() != 1
+                    ):
+                        raise InfiniteCampusAgendaError()
+                    break
+                except PlaywrightError:
+                    frame = None
+            await asyncio.sleep(_FILTER_POLL_INTERVAL_SECONDS)
         if frame is None:
             raise InfiniteCampusAgendaError()
     else:
