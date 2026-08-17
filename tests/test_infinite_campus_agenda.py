@@ -720,6 +720,7 @@ class FakeInfiniteCampusPage:
         initial_frame_assignments: bool = True,
         initial_menu_open: bool = False,
         page_assignments_keep_menu_open: bool = False,
+        page_assignments_hide_on_click_number: int | None = None,
         menu_toggle_count: int = 1,
         menu_toggle_count_after_navigation: int | None = None,
         drawer_never_hides: bool = False,
@@ -753,6 +754,10 @@ class FakeInfiniteCampusPage:
         self.assignments_link_never_ready = assignments_link_never_ready
         self.frame_assignments_available = initial_frame_assignments
         self.page_assignments_keep_menu_open = page_assignments_keep_menu_open
+        self.page_assignments_hide_on_click_number = (
+            page_assignments_hide_on_click_number
+        )
+        self._page_assignments_click_count = 0
         self.menu_toggle_count = menu_toggle_count
         self.menu_toggle_count_after_navigation = menu_toggle_count_after_navigation
         self.drawer_never_hides = drawer_never_hides
@@ -903,9 +908,17 @@ class FakeInfiniteCampusPage:
             self._assignments_link_remaining -= 1
 
     def _click_page_assignments(self) -> None:
+        self._page_assignments_click_count += 1
         self.actions.append("click-page-assignments")
         self._open_assignments()
-        if not self.page_assignments_keep_menu_open:
+        if (
+            not self.page_assignments_keep_menu_open
+            or (
+                self.page_assignments_hide_on_click_number is not None
+                and self._page_assignments_click_count
+                >= self.page_assignments_hide_on_click_number
+            )
+        ):
             self.menu_open = False
 
     def _wait_for_assignments_hidden(self) -> None:
@@ -1154,12 +1167,15 @@ def test_page_level_assignments_closes_visible_menu_once_before_filters() -> Non
 
     assert returned._generation() == page.generation
     assert page.actions.count("open-menu") == 1
-    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("click-page-assignments") == 2
     assert page.actions.count("close-menu") == 1
     assert page.actions.count("wait-page-assignments-hidden") == 1
-    assert page.actions.index("click-page-assignments") < page.actions.index(
-        "close-menu"
-    )
+    page_clicks = [
+        index
+        for index, action in enumerate(page.actions)
+        if action == "click-page-assignments"
+    ]
+    assert page_clicks[0] < page_clicks[1] < page.actions.index("close-menu")
     assert page.actions.index("close-menu") < page.actions.index(
         "wait-page-assignments-hidden"
     )
@@ -1186,6 +1202,37 @@ def test_navigation_clicks_assignments_when_page_menu_is_already_open() -> None:
     assert page.actions.count("click-page-assignments") == 1
     assert page.actions.count("wait-page-assignments-hidden") == 1
     assert page.actions.index("click-page-assignments") < page.actions.index(
+        "wait-page-assignments-hidden"
+    )
+    assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
+        "wait-control:Missing"
+    )
+
+
+def test_navigation_reclicks_assignments_before_toggle_fallback() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=False,
+        page_assignments_keep_menu_open=True,
+        page_assignments_hide_on_click_number=2,
+        drawer_never_hides=True,
+    )
+
+    returned = asyncio.run(_open_current_term_assignments(page))
+
+    assert returned._generation() == page.generation
+    assert page.view == "assignments"
+    assert page.menu_open is False
+    assert page.actions.count("click-page-assignments") == 2
+    assert page.actions.count("close-menu") == 0
+    assert page.actions.count("wait-page-assignments-hidden") == 1
+    page_clicks = [
+        index
+        for index, action in enumerate(page.actions)
+        if action == "click-page-assignments"
+    ]
+    assert page_clicks[0] < page_clicks[1] < page.actions.index(
         "wait-page-assignments-hidden"
     )
     assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
@@ -1300,7 +1347,7 @@ def test_collector_rejects_invalid_menu_toggle_after_page_navigation_atomically(
     error = raised.value
     assert error.__cause__ is None
     assert error.__context__ is None
-    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("click-page-assignments") == 2
     assert page.actions.count("close-menu") == 0
     assert page.actions.count("wait-page-assignments-hidden") == 0
     assert not any(action.startswith("wait-control:") for action in page.actions)
@@ -1323,7 +1370,7 @@ def test_collector_rejects_drawer_that_never_hides_atomically() -> None:
     error = raised.value
     assert error.__cause__ is None
     assert error.__context__ is None
-    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("click-page-assignments") == 2
     assert page.actions.count("close-menu") == 1
     assert page.actions.count("wait-page-assignments-hidden") == 1
     assert not any(action.startswith("wait-control:") for action in page.actions)
