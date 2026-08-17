@@ -1088,6 +1088,8 @@ def test_collector_rejects_invalid_page_level_assignments_links_atomically(
     assert page.actions.count("click-page-assignments") == 0
     assert not any(action.startswith("capture-") for action in page.actions)
     assert not any(action.startswith("open-detail:") for action in page.actions)
+    assert not any(action.startswith("wait-control:") for action in page.actions)
+    assert not any(action.startswith("enable-") for action in page.actions)
 
 
 def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
