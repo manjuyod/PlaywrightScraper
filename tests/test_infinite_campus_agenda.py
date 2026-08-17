@@ -397,6 +397,7 @@ class FakeSelection:
         strict: bool = False,
         on_wait: Callable[[], None] | None = None,
         on_hidden_wait: Callable[[], None] | None = None,
+        timeout_after_click: bool | Callable[[], bool] = False,
         live: bool = False,
     ) -> None:
         self._workspace = workspace
@@ -409,6 +410,7 @@ class FakeSelection:
         self._strict = strict
         self._on_wait = on_wait
         self._on_hidden_wait = on_hidden_wait
+        self._timeout_after_click = timeout_after_click
         self._live = live
 
     def _rows_now(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
@@ -442,6 +444,7 @@ class FakeSelection:
             strict=self._strict,
             on_wait=self._on_wait,
             on_hidden_wait=self._on_hidden_wait,
+            timeout_after_click=self._timeout_after_click,
             live=self._live,
         )
 
@@ -464,6 +467,7 @@ class FakeSelection:
             strict=self._strict,
             on_wait=self._on_wait,
             on_hidden_wait=self._on_hidden_wait,
+            timeout_after_click=self._timeout_after_click,
             live=self._live,
         )
 
@@ -531,13 +535,20 @@ class FakeSelection:
             for index, row, _ in self._rows_now()
         ]
 
-    async def click(self) -> None:
+    async def click(self, *, no_wait_after: bool = False) -> None:
         self._assert_fresh()
         if self._count_now() == 0:
             raise InfiniteCampusAgendaError()
         if self._on_click is None:
             raise InfiniteCampusAgendaError()
         self._on_click()
+        times_out = (
+            self._timeout_after_click()
+            if callable(self._timeout_after_click)
+            else self._timeout_after_click
+        )
+        if times_out and not no_wait_after:
+            raise TimeoutError()
 
 
 class FakeWorkspace:
@@ -721,6 +732,7 @@ class FakeInfiniteCampusPage:
         initial_menu_open: bool = False,
         page_assignments_keep_menu_open: bool = False,
         page_assignments_hide_on_click_number: int | None = None,
+        page_assignments_timeout_on_click_number: int | None = None,
         menu_toggle_count: int = 1,
         menu_toggle_count_after_navigation: int | None = None,
         drawer_never_hides: bool = False,
@@ -758,6 +770,9 @@ class FakeInfiniteCampusPage:
             page_assignments_hide_on_click_number
         )
         self._page_assignments_click_count = 0
+        self.page_assignments_timeout_on_click_number = (
+            page_assignments_timeout_on_click_number
+        )
         self.menu_toggle_count = menu_toggle_count
         self.menu_toggle_count_after_navigation = menu_toggle_count_after_navigation
         self.drawer_never_hides = drawer_never_hides
@@ -833,6 +848,7 @@ class FakeInfiniteCampusPage:
                     visible=self._page_assignments_visible,
                     on_wait=self._wait_for_assignments_link,
                     on_hidden_wait=self._wait_for_assignments_hidden,
+                    timeout_after_click=self._page_assignments_click_times_out,
                     live=True,
                 )
             return FakeWorkspace(self).get_by_role(role, name, exact=True)
@@ -920,6 +936,13 @@ class FakeInfiniteCampusPage:
             )
         ):
             self.menu_open = False
+
+    def _page_assignments_click_times_out(self) -> bool:
+        return (
+            self.page_assignments_timeout_on_click_number is not None
+            and self._page_assignments_click_count
+            == self.page_assignments_timeout_on_click_number
+        )
 
     def _wait_for_assignments_hidden(self) -> None:
         self.actions.append("wait-page-assignments-hidden")
@@ -1209,13 +1232,14 @@ def test_navigation_clicks_assignments_when_page_menu_is_already_open() -> None:
     )
 
 
-def test_navigation_reclicks_assignments_before_toggle_fallback() -> None:
+def test_navigation_reclick_ignores_successful_click_navigation_wait() -> None:
     page = FakeInfiniteCampusPage(
         [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
         use_page_level_assignments=True,
         initial_frame_assignments=False,
         page_assignments_keep_menu_open=True,
         page_assignments_hide_on_click_number=2,
+        page_assignments_timeout_on_click_number=2,
         drawer_never_hides=True,
     )
 

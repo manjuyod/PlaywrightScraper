@@ -256,7 +256,7 @@ async def _open_current_term_assignments(page: Page) -> Frame:
         )
         await assignments.first.click()
         if await assignments.first.is_visible():
-            await assignments.first.click()
+            await assignments.first.click(no_wait_after=True)
         if await assignments.first.is_visible():
             if await menu.count() != 1:
                 raise InfiniteCampusAgendaError()
