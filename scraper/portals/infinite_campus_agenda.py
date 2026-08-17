@@ -236,12 +236,19 @@ async def _open_current_term_assignments(page: Page) -> Frame:
     elif frame_count == 0:
         if await menu.count() != 1:
             raise InfiniteCampusAgendaError()
-        await menu.click()
         assignments = page.get_by_role("link", name="Assignments", exact=True)
         page_count = await assignments.count()
-        if page_count == 0:
-            await assignments.wait_for(state="visible", timeout=_READINESS_TIMEOUT_MS)
+        if page_count > 1:
+            raise InfiniteCampusAgendaError()
+        already_visible = page_count == 1 and await assignments.first.is_visible()
+        if not already_visible:
+            await menu.click()
             page_count = await assignments.count()
+            if page_count == 0:
+                await assignments.wait_for(
+                    state="visible", timeout=_READINESS_TIMEOUT_MS
+                )
+                page_count = await assignments.count()
         if page_count != 1:
             raise InfiniteCampusAgendaError()
         await assignments.first.wait_for(

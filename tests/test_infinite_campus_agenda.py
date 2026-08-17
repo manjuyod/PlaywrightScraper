@@ -718,6 +718,7 @@ class FakeInfiniteCampusPage:
         assignments_link_count: int = 1,
         assignments_link_never_ready: bool = False,
         initial_frame_assignments: bool = True,
+        initial_menu_open: bool = False,
         page_assignments_keep_menu_open: bool = False,
         menu_toggle_count: int = 1,
         menu_toggle_count_after_navigation: int | None = None,
@@ -733,7 +734,7 @@ class FakeInfiniteCampusPage:
         }
         self.actions: list[str] = []
         self.view = "home"
-        self.menu_open = False
+        self.menu_open = initial_menu_open
         self.missing_pressed = False
         self.term_pressed = False
         self.display_missing_pressed = False
@@ -1160,6 +1161,31 @@ def test_page_level_assignments_closes_visible_menu_once_before_filters() -> Non
         "close-menu"
     )
     assert page.actions.index("close-menu") < page.actions.index(
+        "wait-page-assignments-hidden"
+    )
+    assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
+        "wait-control:Missing"
+    )
+
+
+def test_navigation_clicks_assignments_when_page_menu_is_already_open() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
+        use_page_level_assignments=True,
+        initial_frame_assignments=False,
+        initial_menu_open=True,
+    )
+
+    returned = asyncio.run(_open_current_term_assignments(page))
+
+    assert returned._generation() == page.generation
+    assert page.view == "assignments"
+    assert page.menu_open is False
+    assert page.actions.count("open-menu") == 0
+    assert page.actions.count("close-menu") == 0
+    assert page.actions.count("click-page-assignments") == 1
+    assert page.actions.count("wait-page-assignments-hidden") == 1
+    assert page.actions.index("click-page-assignments") < page.actions.index(
         "wait-page-assignments-hidden"
     )
     assert page.actions.index("wait-page-assignments-hidden") < page.actions.index(
