@@ -209,7 +209,8 @@ _WORKSPACE_FRAME = "main-workspace"
 _CANONICAL_ROWS = ".selcat-assignment-row:visible"
 _TITLE_CELL = ".assignment__largeScreen--cell-assignmentName"
 _COURSE_CELL = ".assignment__largeScreen--cell-courseDueDate"
-_DETAIL_READY = ".selcat-schedule-startdate, .selcat-schedule-enddate"
+_DETAIL_START = ".selcat-schedule-startdate"
+_DETAIL_END = ".selcat-schedule-enddate"
 _READINESS_TIMEOUT_MS = 30_000
 _FILTER_POLL_INTERVAL_SECONDS = 0.01
 _FILTER_QUIET_INTERVAL_SECONDS = 0.1
@@ -312,10 +313,29 @@ async def _wait_for_filter_settle(
 
 async def _wait_for_detail_exit(page: Page) -> Frame:
     frame = _workspace(page)
-    await frame.locator(_DETAIL_READY).wait_for(
-        state="hidden", timeout=_READINESS_TIMEOUT_MS
-    )
+    deadline = time.monotonic() + (_READINESS_TIMEOUT_MS / 1000)
+    for selector in (_DETAIL_START, _DETAIL_END):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise InfiniteCampusAgendaError()
+        await frame.locator(selector).wait_for(
+            state="hidden", timeout=max(1, int(remaining * 1000))
+        )
     return frame
+
+
+async def _wait_for_detail_entry(frame: Frame) -> None:
+    deadline = time.monotonic() + (_READINESS_TIMEOUT_MS / 1000)
+    for selector in (_DETAIL_START, _DETAIL_END):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise InfiniteCampusAgendaError()
+        locator = frame.locator(selector)
+        await locator.wait_for(
+            state="visible", timeout=max(1, int(remaining * 1000))
+        )
+        if await locator.count() != 1:
+            raise InfiniteCampusAgendaError()
 
 
 async def _visible_list_html(frame: Frame) -> str:
@@ -366,7 +386,7 @@ async def _collect_infinite_campus_agenda(
         await row.locator(f"{_TITLE_CELL} a[href]").first.click()
 
         frame = _workspace(page)
-        await frame.wait_for_selector(_DETAIL_READY, timeout=_READINESS_TIMEOUT_MS)
+        await _wait_for_detail_entry(frame)
 
         detail = parse_infinite_campus_detail(await frame.content())
         record = classify_infinite_campus_assignment(

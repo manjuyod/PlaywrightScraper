@@ -15,7 +15,8 @@ from scraper.portals.infinite_campus_agenda import (
     InfiniteCampusAgendaError,
     ListedAssignment,
     _CANONICAL_ROWS,
-    _DETAIL_READY,
+    _DETAIL_END,
+    _DETAIL_START,
     _TITLE_CELL,
     _WORKSPACE_FRAME,
     collect_infinite_campus_agenda,
@@ -36,8 +37,6 @@ FUTURE_DETAIL_HTML = '''
 '''
 
 REFERENCE = datetime(2026, 8, 16, 12, 0)
-
-
 LIST_HTML = '''
 <div class="assignment__largeScreen--row">
   <div class="assignment__largeScreen--cell-assignmentName">Responsive duplicate</div>
@@ -391,6 +390,7 @@ class FakeSelection:
         on_click: Callable[[], None] | None = None,
         attribute: Callable[[], str | None] | None = None,
         visible: bool | Callable[[], bool] = True,
+        strict: bool = False,
         on_wait: Callable[[], None] | None = None,
     ) -> None:
         self._workspace = workspace
@@ -400,6 +400,7 @@ class FakeSelection:
         self._on_click = on_click
         self._attribute = attribute
         self._visible = visible
+        self._strict = strict
         self._on_wait = on_wait
 
     def _assert_fresh(self) -> None:
@@ -431,6 +432,7 @@ class FakeSelection:
             on_click=self._on_click,
             attribute=self._attribute,
             visible=self._visible,
+            strict=self._strict,
             on_wait=self._on_wait,
         )
 
@@ -462,6 +464,8 @@ class FakeSelection:
         del timeout
         self._assert_fresh()
         if state == "hidden":
+            if self._strict and await self.count() > 1:
+                raise InfiniteCampusAgendaError()
             visible = self._visible() if callable(self._visible) else self._visible
             if await self.count() == 0 or not visible:
                 return
@@ -526,28 +530,17 @@ class FakeWorkspace:
         self._page._open_detail(visible_position)
 
     async def wait_for_selector(self, selector: str, **_kwargs: object) -> None:
-        if selector == _DETAIL_READY:
-            if self._page.view != "detail" or self._page.detail_never_ready:
-                raise InfiniteCampusAgendaError()
-            return None
         raise InfiniteCampusAgendaError()
 
     def locator(self, selector: str) -> FakeSelection:
-        if selector == _DETAIL_READY:
+        if selector in {_DETAIL_START, _DETAIL_END}:
             return FakeSelection(
                 self,
                 generation=self._generation(),
                 count=lambda: 1
-                if (
-                    self._page.view == "detail"
-                    or (
-                        self._page.view == "home"
-                        and self._page.detail_hidden_after_back
-                        and self._page._back_count > 0
-                    )
-                )
+                if self._page._detail_node_attached(selector)
                 else 0,
-                visible=lambda: self._page.view == "detail",
+                visible=lambda: self._page._detail_node_visible(selector),
             )
         if selector == _CANONICAL_ROWS:
             rows = self._current_rows()
@@ -692,6 +685,7 @@ class FakeInfiniteCampusPage:
         self.frame_missing = False
         self.detail_never_ready = False
         self.detail_hidden_after_back = False
+        self.detail_partial_hidden_after_back = False
         self.detail_click_error: str | None = None
         self._did_reorder = False
         self._did_shrink = False
@@ -760,6 +754,23 @@ class FakeInfiniteCampusPage:
             (title.casefold(), course.casefold()) in self.missing_keys
             or score.casefold() == "missing"
         )
+
+    def _detail_node_attached(self, selector: str) -> bool:
+        del selector
+        return (self.view == "detail" and not self.detail_never_ready) or (
+            self.view == "home"
+            and (self.detail_hidden_after_back or self.detail_partial_hidden_after_back)
+            and self._back_count > 0
+        )
+
+    def _detail_node_visible(self, selector: str) -> bool:
+        if self.view == "detail":
+            return True
+        if self.view != "home" or self._back_count == 0:
+            return False
+        if self.detail_partial_hidden_after_back:
+            return selector == _DETAIL_END
+        return False
 
     def _term_attribute(self) -> str:
         self._advance_filter_transition()
@@ -1042,6 +1053,16 @@ def test_collector_accepts_hidden_detail_node_after_back() -> None:
 
     assert [record["title"] for record in records] == ["Future notes"]
     assert page.actions[-1].startswith("validate-list:")
+
+
+def test_collector_rejects_partially_visible_detail_nodes_after_back() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.detail_partial_hidden_after_back = True
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
 
 
 def test_collector_rejects_term_controls_that_never_become_ready() -> None:
