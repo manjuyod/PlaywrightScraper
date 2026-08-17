@@ -37,7 +37,7 @@ from scraper.runner import (
 
 load_dotenv()
 
-MAX_CONCURRENT_AGENDA_WORKERS = 2
+MAX_CONCURRENT_AGENDA_WORKERS = 6
 logger = logging.getLogger("scraper.agenda")
 
 AgendaExceptionKind = Literal["cancelled", "configuration", "timeout", "unexpected"]
