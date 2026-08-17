@@ -286,6 +286,13 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
                                 "dueTime": None,
                             }
                         ],
+                        "low_score": [
+                            {
+                                "title": "Earlier quiz",
+                                "dueDate": "2026-08-14",
+                                "dueTime": None,
+                            }
+                        ],
                         "due": [
                             {
                                 "title": "Reading response",
@@ -316,7 +323,7 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
                     "classes": [
                         {
                             "name": "English 11",
-                            "count": 2,
+                            "count": 3,
                             "assignments": [
                                 {
                                     "status": "missing",
@@ -324,6 +331,13 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
                                     "dueDate": "2026-08-11",
                                     "dueTime": None,
                                     "dueDisplay": "Aug 11",
+                                },
+                                {
+                                    "status": "low_score",
+                                    "title": "Earlier quiz",
+                                    "dueDate": "2026-08-14",
+                                    "dueTime": None,
+                                    "dueDisplay": "Aug 14",
                                 },
                                 {
                                     "status": "due",

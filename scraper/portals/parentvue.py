@@ -9,7 +9,7 @@ from scraper.portals.base import (
 )
 from scraper.agenda_contract import AgendaRecord
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from .parentvue_agenda import parse_parentvue_agenda
+from .parentvue_course_scrub import collect_parentvue_course_agenda
 from .utils import wait_after_nav
 
 class ParentVUE(PortalEngine):
@@ -48,11 +48,9 @@ class ParentVUE(PortalEngine):
             )
             await self.page.wait_for_selector("#gb-assignments", timeout=30000)
             await self.page.wait_for_selector(
-                "#gb-assignments .no-data:visible, "
-                "#gb-assignments .assignment-row:visible, "
-                "#gb-assignments .gb-assignment-row:visible, "
-                "#gb-assignments tr:has(.assignment-title, .assignment-name, "
-                '[data-label="Assignment"]):visible',
+                "#gb-assignments tr.gb-upcoming-assignment:visible, "
+                "div.gb-class-header.gb-class-row:visible, "
+                "#gb-assignments .no-data:visible",
                 timeout=30000,
             )
         except PlaywrightTimeout:
@@ -125,4 +123,4 @@ class ParentVUE(PortalEngine):
         await self.page.wait_for_timeout(300)
 
     async def get_agenda(self) -> list[AgendaRecord]:
-        return parse_parentvue_agenda(await self.page.content())
+        return await collect_parentvue_course_agenda(self.page)

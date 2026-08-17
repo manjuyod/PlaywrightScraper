@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from playwright.async_api import TimeoutError as PlaywrightTimeout
 from tenacity import wait_none
 
 from scraper.agenda_contract import normalize_agenda
+from scraper.portals import parentvue as parentvue_module
+from scraper.portals import parentvue_agenda as pv_agenda
 from scraper.portals import utils as portal_utils
 from scraper.portals.parentvue import ParentVUE
 from scraper.portals.parentvue_agenda import ParentVueAgendaError, parse_parentvue_agenda
@@ -305,6 +308,279 @@ def test_normalization_keeps_missing_when_same_parentvue_assignment_is_upcoming(
     }
 
 
+LIVE_OVERVIEW_HTML = '''<div id="gb-assignments">
+  <section>
+    <h2 class="title">Upcoming Assignments</h2>
+    <div class="gb-student-assignments-grid">
+      <table><tbody>
+        <tr class="gb-upcoming-assignment" data-guid="pv-upcoming-1">
+          <td>
+            <div><a href="/assignment/details/1">Systems review</a></div>
+            <div>Algebra II</div>
+            <div>Due Date: 08/18/2026</div>
+            <div class="hide">internal</div>
+          </td>
+        </tr>
+      </tbody></table>
+    </div>
+  </section>
+  <section>
+    <h2 class="title">Recent History</h2>
+    <div class="gb-student-assignments-grid">
+      <table><tbody><tr><td><a>Completed history must not be inferred</a></td></tr></tbody></table>
+    </div>
+  </section>
+</div>'''
+
+
+def test_live_overview_parses_upcoming_rows_without_inferring_recent_history() -> None:
+    """Would fail if the live upcoming row or panel boundary is unsupported."""
+    records = pv_agenda.parse_parentvue_overview(
+        LIVE_OVERVIEW_HTML,
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Systems review",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "due",
+            "sourceId": "parentvue:assignment:dba3ed0ea4addf0a34121412",
+        }
+    ]
+
+
+def test_live_overview_rejects_rows_conflicting_with_visible_empty_marker() -> None:
+    """Would fail if contradictory live overview states are silently accepted."""
+    html = LIVE_OVERVIEW_HTML.replace(
+        '<section>\n    <h2 class="title">Upcoming Assignments</h2>',
+        '<section><div class="no-data">No assignments</div>\n'
+        '    <h2 class="title">Upcoming Assignments</h2>',
+    )
+
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_overview(
+            html,
+            reference=datetime(2026, 8, 16, 12, 0),
+        )
+
+
+def test_live_overview_ignores_recent_history_empty_marker() -> None:
+    """Would fail if non-Upcoming panel state can invalidate current work."""
+    html = LIVE_OVERVIEW_HTML.replace(
+        '<h2 class="title">Recent History</h2>',
+        '<h2 class="title">Recent History</h2><div class="no-data">No history</div>',
+    )
+
+    records = pv_agenda.parse_parentvue_overview(
+        html,
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert [record["title"] for record in records] == ["Systems review"]
+
+
+def test_live_overview_never_falls_back_to_recent_history_rows() -> None:
+    """Would fail if a live empty Upcoming panel can infer old work as missing."""
+    html = '''<div id="gb-assignments">
+      <section>
+        <h2>Recent History</h2>
+        <div class="assignment-row missing" data-course-title="Algebra II">
+          <span class="assignment-title">Completed history</span>
+          <time datetime="2026-08-14"></time>
+        </div>
+      </section>
+      <div class="gb-class-header gb-class-row">
+        <button class="course-title">Algebra II</button>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_overview(
+        html,
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
+
+
+COURSE_DETAIL_HTML = '''<div class="pxp-course-content">
+  <div class="item-container">
+    <div class="item-text-main">Quiz One</div>
+    <div class="item-text-special">Aug 14</div>
+    <div class="item-text-special">72%</div>
+  </div>
+  <div class="item-container missing">
+    <div class="item-text-main">Worksheet</div>
+    <div class="item-text-special">Aug 15</div>
+    <div class="item-text-small">Missing</div>
+    <div class="item-text-special">0%</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Lab</div>
+    <div class="item-text-special">Aug 16</div>
+    <div class="item-text-small">7 / 10</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Boundary</div>
+    <div class="item-text-special">Aug 17</div>
+    <div class="item-text-special">80%</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Excused work</div>
+    <div class="item-text-special">Aug 18</div>
+    <div class="item-text-small">Excused</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Not graded work</div>
+    <div class="item-text-special">Aug 19</div>
+    <div class="item-text-small">Not Graded</div>
+  </div>
+  <div class="item-container">
+    <div class="item-text-main">Zero denominator</div>
+    <div class="item-text-special">Aug 20</div>
+    <div class="item-text-small">0 / 0</div>
+  </div>
+</div>'''
+
+
+def test_course_detail_classifies_explicit_missing_and_below_eighty_scores() -> None:
+    """Would fail if live percentage/points fields are misclassified or overcollected."""
+    records = pv_agenda.parse_parentvue_course_assignments(
+        COURSE_DETAIL_HTML,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Quiz One",
+            "dueDate": "2026-08-14",
+            "dueTime": None,
+            "status": "low_score",
+        },
+        {
+            "course": "Algebra II",
+            "title": "Worksheet",
+            "dueDate": "2026-08-15",
+            "dueTime": None,
+            "status": "missing",
+        },
+        {
+            "course": "Algebra II",
+            "title": "Lab",
+            "dueDate": "2026-08-16",
+            "dueTime": None,
+            "status": "low_score",
+        },
+    ]
+
+
+def test_overview_and_detail_share_assignment_link_identity_for_precedence() -> None:
+    """Would fail if the same assignment survives as both due and missing."""
+    overview = '''<div id="gb-assignments">
+      <tr class="gb-upcoming-assignment" data-guid="overview-only-guid"><td>
+        <div><a href="/assignment/details/1">Systems review</a></div>
+        <div>Algebra II</div>
+        <div>Due Date: 08/18/2026</div>
+      </td></tr>
+    </div>'''
+    detail = '''<div class="pxp-course-content">
+      <div class="item-container missing">
+        <a href="/assignment/details/1"><span class="item-text-main">Systems review</span></a>
+        <div class="item-text-special">Aug 18</div>
+        <div class="item-text-small">Missing</div>
+      </div>
+    </div>'''
+    reference = datetime(2026, 8, 16, 12, 0)
+
+    records = pv_agenda.parse_parentvue_overview(
+        overview,
+        reference=reference,
+    ) + pv_agenda.parse_parentvue_course_assignments(
+        detail,
+        course="Algebra II",
+        reference=reference,
+    )
+
+    buckets = normalize_agenda(records)["2026-08-17"]["Algebra II"]
+    assert buckets["missing"] == [
+        {"title": "Systems review", "dueDate": "2026-08-18", "dueTime": None}
+    ]
+    assert buckets["due"] == []
+
+
+def test_course_detail_accepts_explicit_empty_and_rejects_ambiguous_empty() -> None:
+    """Would fail if a blank course is treated as a complete empty snapshot."""
+    reference = datetime(2026, 8, 16, 12, 0)
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        '<div class="pxp-course-content"><div class="no-data">No assignments</div></div>',
+        course="Algebra II",
+        reference=reference,
+    ) == []
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_course_assignments(
+            '<div class="pxp-course-content"></div>',
+            course="Algebra II",
+            reference=reference,
+        )
+
+
+def test_course_detail_does_not_treat_a_slash_date_as_earned_points() -> None:
+    """Would fail if an ungraded MM/DD/YYYY row is classified as a low ratio."""
+    html = '''<div class="pxp-course-content">
+      <div class="item-container">
+        <div class="item-text-main">Ungraded worksheet</div>
+        <div class="item-text-special">08/18/2026</div>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        html,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
+
+
+def test_course_detail_excludes_pass_fail_and_blank_scores() -> None:
+    """Would fail if nonnumeric grade states are labeled Low."""
+    html = '''<div class="pxp-course-content">
+      <div class="item-container">
+        <div class="item-text-main">Pass-fail work</div>
+        <div class="item-text-special">Aug 18</div>
+        <div class="item-text-small">Pass/Fail</div>
+      </div>
+      <div class="item-container">
+        <div class="item-text-main">Blank grade</div>
+        <div class="item-text-special">Aug 19</div>
+        <div class="item-text-small"></div>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        html,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
+
+
+def test_course_detail_rejects_any_malformed_assignment_row() -> None:
+    """Would fail if one malformed course item can yield a partial course snapshot."""
+    html = COURSE_DETAIL_HTML.replace(
+        '</div>\n</div>',
+        '</div><div class="item-container">'
+        '<div class="item-text-main">Undated work</div></div></div>',
+    )
+
+    with pytest.raises(ParentVueAgendaError):
+        pv_agenda.parse_parentvue_course_assignments(
+            html,
+            course="Algebra II",
+            reference=datetime(2026, 8, 16, 12, 0),
+        )
+
+
 class FakePage:
     def __init__(self, html: str) -> None:
         self.html = html
@@ -315,16 +591,31 @@ class FakePage:
         return self.html
 
 
-def test_engine_collects_current_authenticated_gradebook_html() -> None:
-    """Would fail if agenda collection makes a separate request instead of parsing the page."""
+def test_engine_delegates_to_sequential_course_collector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if get_agenda bypasses the authenticated course scrub."""
     page = FakePage(FIXTURE.read_text(encoding="utf-8"))
+    calls: list[FakePage] = []
+
+    async def fake_collect(current_page: FakePage):
+        calls.append(current_page)
+        return [{"sourceId": "parentvue:sequential"}]
+
+    monkeypatch.setattr(
+        parentvue_module,
+        "collect_parentvue_course_agenda",
+        fake_collect,
+        raising=False,
+    )
 
     records = asyncio.run(
         ParentVUE(page, "student", "password", "https://parentvue.example/Login_Parent_PXP.aspx").get_agenda()
     )
 
-    assert page.content_calls == 1
-    assert records[0]["sourceId"] == "parentvue:pv-41"
+    assert calls == [page]
+    assert page.content_calls == 0
+    assert records == [{"sourceId": "parentvue:sequential"}]
     assert ParentVUE.agenda_capable is True
 
 
@@ -376,9 +667,9 @@ def test_after_login_selects_visible_href_specific_gradebook_link() -> None:
     assert page.selector == 'a[href*="Gradebook"]:visible, a[href*="GradeBook"]:visible'
     assert page.waited_for_selectors == [
         "#gb-assignments",
-        "#gb-assignments .no-data:visible, #gb-assignments .assignment-row:visible, "
-        "#gb-assignments .gb-assignment-row:visible, "
-        "#gb-assignments tr:has(.assignment-title, .assignment-name, [data-label=\"Assignment\"]):visible",
+        "#gb-assignments tr.gb-upcoming-assignment:visible, "
+        "div.gb-class-header.gb-class-row:visible, "
+        "#gb-assignments .no-data:visible",
     ]
 
 

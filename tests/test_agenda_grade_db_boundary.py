@@ -6,6 +6,8 @@ import logging
 import pytest
 
 from scraper import agenda
+from scraper.portals import get_portal
+from scraper.portals.infinite_campus import InfiniteCampus
 from scraper.config.logging import ContextFilter
 from scraper.db_cli import GradeDbUnavailable
 from scraper.runner import _new_progress
@@ -170,6 +172,73 @@ def test_resolve_agenda_slots_preserves_source_order_over_legacy_portal() -> Non
     assert slots[1].username == "alt-user-7"
 
 
+def test_infinite_campus_is_registered_as_agenda_capable_in_runner_slots() -> None:
+    assert get_portal("infinite_campus") is InfiniteCampus
+    assert InfiniteCampus.agenda_capable is True
+
+
+def test_infinite_campus_slot_stays_first_and_keeps_credentials(monkeypatch) -> None:
+    constructs: list[tuple[str, str, str, dict[str, object]]] = []
+
+    class InfiniteEngine:
+        agenda_capable = True
+
+        def __init__(self, _page, username, password, login_url, **kwargs):
+            constructs.append((username, password, login_url, kwargs))
+
+        async def login(self, first_name=None):
+            assert first_name == "Student 7"
+
+        async def get_agenda(self):
+            return []
+
+    class InactiveEngine:
+        agenda_capable = False
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            return []
+
+    def get_portal_override(portal):
+        return InfiniteEngine if portal == "infinite_campus" else InactiveEngine
+
+    monkeypatch.setattr(agenda, "get_portal", get_portal_override)
+    student = _student(7)
+    student.update(
+        login_url="https://ic.example/campus/portal",
+        id="user-7",
+        password="primary-secret",
+        alt_login_url="https://parentvue.example/Login_Parent_PXP.aspx",
+        alt_id="alt-user-7",
+        alt_password="alternate-secret",
+    )
+    browser = FakeBrowser()
+
+    bundle, returned_student = asyncio.run(agenda.fetch_agenda(browser, student))
+
+    assert returned_student is student
+    assert bundle["agenda1"]["portal"] == "infinite_campus"
+    assert bundle["agenda2"]["portal"] == "parentvue"
+    assert constructs == [
+        (
+            "user-7",
+            "primary-secret",
+            "https://ic.example/campus/portal",
+            {
+                "alt_portal_url": "https://parentvue.example/Login_Parent_PXP.aspx",
+                "alt_student_id": "alt-user-7",
+                "alt_password": "alternate-secret",
+                "student_name": "Student 7",
+            },
+        )
+    ]
+
+
 def test_resolve_agenda_slots_normalizes_blank_credentials() -> None:
     student = _student(7)
     student.update(
@@ -299,11 +368,11 @@ def test_two_slots_are_independently_bounded_below_rust_result_limit(
 
     for slot in ("agenda1", "agenda2"):
         rows = bundle[slot]["weeks"]["2026-08-10"]["Busy Course"]["due"]
-        assert len(rows) == 123
+        assert len(rows) == 122
         assert rows[0]["title"] == "Work 000"
-        assert rows[-1]["title"] == "Work 122"
+        assert rows[-1]["title"] == "Work 121"
     assert bundle["agenda1"]["weeks"] == bundle["agenda2"]["weeks"]
-    assert _json_value_nodes(bundle) == 999
+    assert _json_value_nodes(bundle) == 993
 
 
 def test_concurrent_same_origin_slots_use_isolated_contexts(monkeypatch) -> None:

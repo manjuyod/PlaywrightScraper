@@ -218,6 +218,26 @@ def test_login_rejects_substring_dispatched_config_before_credentials(
     assert page.fills == []
 
 
+def test_login_rejects_accounts_lookalike_config_before_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if an Accounts lookalike configured URL can receive credentials."""
+    page = CredentialPage("about:blank")
+    _configure_login_dependencies(monkeypatch)
+
+    with pytest.raises(GoogleClassroom.LoginError, match="^portal login rejected$"):
+        asyncio.run(
+            GoogleClassroom(
+                page,
+                "google-user",
+                "google-password",
+                "https://accounts.google.com.evil.example/signin",
+            ).login()
+        )
+
+    assert page.fills == []
+
+
 def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -229,6 +249,45 @@ def test_login_accepts_classroom_origin_only_when_main_menu_is_visible(
 
     assert page.goto_urls == []
     assert google_login_calls == []
+
+
+def test_login_accepts_exact_google_accounts_config_and_requires_classroom_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if a CRM-owned exact Accounts entry is rejected before login."""
+
+    class AccountsEntryPage(CredentialPage):
+        async def goto(self, url: str, *, wait_until: str) -> None:
+            await super().goto(url, wait_until=wait_until)
+            self.url = "https://accounts.google.com/signin/v2/identifier"
+
+        def get_by_role(self, role: str, name: str) -> CredentialControl:
+            assert (role, name) == ("button", "Next")
+
+            def finish_login() -> None:
+                self.url = "https://classroom.google.com/u/0/h"
+                self.main_menu_visible = True
+
+            return CredentialControl(finish_login)
+
+    configured_url = "https://accounts.google.com/signin/v2/identifier"
+    page = AccountsEntryPage("about:blank")
+    _configure_login_dependencies(monkeypatch)
+
+    asyncio.run(
+        GoogleClassroom(
+            page,
+            "google-user",
+            "google-password",
+            configured_url,
+        ).login()
+    )
+
+    assert page.goto_urls == [configured_url]
+    assert page.fills == [
+        ("input#identifierId", "google-user"),
+        ('input[name="Passwd"]', "google-password"),
+    ]
 
 
 @pytest.mark.parametrize(

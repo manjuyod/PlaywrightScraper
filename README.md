@@ -168,8 +168,10 @@ date, time, and title. A week or class is included only when at least one of
 its rows fits. Capacity is never borrowed across slots, and bounding does not
 deduplicate or reorder work between `agenda1` and `agenda2`.
 
-Canvas, ParentVUE, and Google Classroom are the currently supported agenda
-collectors, and each returns missing plus upcoming/due work in the same run.
+Canvas, ParentVUE, Google Classroom, and Infinite Campus are the currently
+supported agenda collectors, and each returns missing plus upcoming/due work in
+the same run. Infinite Campus uses a sequential Current Term assignment-detail
+scrub.
 An unconfigured, unsupported, or parserless portal is a valid blank slot:
 its `weeks` object stays empty. A capable collector that successfully finds no
 dated work is also a valid blank result. If any capable worker that starts

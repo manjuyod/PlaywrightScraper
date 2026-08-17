@@ -164,12 +164,19 @@ def _agenda_slots(
                 if not name or not isinstance(raw_buckets, dict):
                     continue
                 missing = raw_buckets.get("missing")
+                low_score = raw_buckets.get("low_score", [])
                 due = raw_buckets.get("due")
-                if not isinstance(missing, list) or not isinstance(due, list):
+                if not all(
+                    isinstance(rows, list) for rows in (missing, low_score, due)
+                ):
                     continue
 
                 assignments: list[dict[str, Any]] = []
-                for status, rows in (("missing", missing), ("due", due)):
+                for status, rows in (
+                    ("missing", missing),
+                    ("low_score", low_score),
+                    ("due", due),
+                ):
                     valid_rows: list[tuple[date, str, str, dict[str, Any]]] = []
                     for raw_row in rows:
                         if not isinstance(raw_row, dict):
