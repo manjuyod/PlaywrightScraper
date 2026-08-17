@@ -535,7 +535,7 @@ class FakeSelection:
             for index, row, _ in self._rows_now()
         ]
 
-    async def click(self, *, no_wait_after: bool = False) -> None:
+    async def click(self) -> None:
         self._assert_fresh()
         if self._count_now() == 0:
             raise InfiniteCampusAgendaError()
@@ -547,8 +547,16 @@ class FakeSelection:
             if callable(self._timeout_after_click)
             else self._timeout_after_click
         )
-        if times_out and not no_wait_after:
+        if times_out:
             raise TimeoutError()
+
+    async def evaluate(self, script: str) -> None:
+        self._assert_fresh()
+        if script != "element => element.click()" or self._count_now() == 0:
+            raise InfiniteCampusAgendaError()
+        if self._on_click is None:
+            raise InfiniteCampusAgendaError()
+        self._on_click()
 
 
 class FakeWorkspace:
@@ -1232,7 +1240,7 @@ def test_navigation_clicks_assignments_when_page_menu_is_already_open() -> None:
     )
 
 
-def test_navigation_reclick_ignores_successful_click_navigation_wait() -> None:
+def test_navigation_reclick_uses_native_click_after_locator_timeout() -> None:
     page = FakeInfiniteCampusPage(
         [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)],
         use_page_level_assignments=True,
