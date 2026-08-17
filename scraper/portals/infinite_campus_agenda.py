@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import re
 from typing import TypeAlias
 
 from bs4 import BeautifulSoup, Tag
-from playwright.async_api import Frame, Page
+from playwright.async_api import Frame, Locator, Page
 
 from scraper.agenda_contract import AgendaRecord
 
@@ -38,7 +39,9 @@ class AssignmentDetail:
 
 _DATE_FORMAT = "%m/%d/%Y %I:%M %p"
 _PERCENT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%")
-_POINTS = re.compile(r"(?<![\d.])(\d+)\s*/\s*(\d+)(?![\d.])")
+_POINTS = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)(?![\d.])"
+)
 _EXCLUDED_SCORE_STATES = frozenset({
     "excused",
     "pass/fail",
@@ -62,10 +65,16 @@ def _parse_infinite_campus_detail_date(element: Tag | None) -> datetime | None:
     raw = _text(element)
     if not raw:
         return None
+    failure: InfiniteCampusAgendaError | None = None
     try:
         return datetime.strptime(raw, _DATE_FORMAT)
-    except ValueError as error:
-        raise InfiniteCampusAgendaError() from error
+    except ValueError:
+        failure = InfiniteCampusAgendaError()
+    if failure is not None:
+        failure.__cause__ = None
+        failure.__context__ = None
+        raise failure
+    return None
 
 
 def parse_infinite_campus_list(
@@ -139,7 +148,7 @@ def _score_points(raw: str) -> float | None:
     matches = list(_POINTS.finditer(raw))
     if len(matches) != 1:
         return None
-    earned, possible = int(matches[0].group(1)), int(matches[0].group(2))
+    earned, possible = float(matches[0].group(1)), float(matches[0].group(2))
     if possible <= 0:
         return None
     return earned / possible * 100
@@ -147,7 +156,7 @@ def _score_points(raw: str) -> float | None:
 
 def _excluded_score_state(raw: str) -> bool:
     normalized = re.sub(r"[\s-]+", "", raw.casefold())
-    return normalized in _EXCLUDED_SCORE_STATES
+    return any(state in normalized for state in _EXCLUDED_SCORE_STATES)
 
 
 def classify_infinite_campus_assignment(
@@ -224,6 +233,7 @@ async def _open_current_term_assignments(page: Page) -> Frame:
 
     if await current_term.get_attribute("aria-pressed") != "true":
         await current_term.click()
+    await _wait_for_filter_settle(frame, current_term, enabled=True)
 
     return frame
 
@@ -239,6 +249,46 @@ async def _set_missing(frame: Frame, enabled: bool) -> None:
     target = "true" if enabled else "false"
     if pressed != target:
         await missing.click()
+    await _wait_for_filter_settle(frame, missing, enabled=enabled)
+
+
+async def _visible_list_fingerprint(frame: Frame) -> tuple[str, ...]:
+    rows = frame.locator(_CANONICAL_ROWS)
+    if await rows.count() == 0:
+        empty = frame.locator(".assignment__empty:visible")
+        if await empty.count() == 0:
+            raise InfiniteCampusAgendaError()
+        return ("<empty>",)
+    values = await rows.evaluate_all("rows => rows.map(row => row.textContent)")
+    return tuple(str(value) for value in values)
+
+
+async def _wait_for_filter_settle(
+    frame: Frame,
+    control: Locator,
+    *,
+    enabled: bool,
+) -> None:
+    target = "true" if enabled else "false"
+    previous: tuple[str, ...] | None = None
+    stable = 0
+    for _ in range(60):
+        pressed = await control.get_attribute("aria-pressed")
+        if pressed != target:
+            stable = 0
+            previous = None
+            await asyncio.sleep(0)
+            continue
+        fingerprint = await _visible_list_fingerprint(frame)
+        if fingerprint == previous:
+            stable += 1
+        else:
+            stable = 1
+            previous = fingerprint
+        if stable >= 2:
+            return
+        await asyncio.sleep(0)
+    raise InfiniteCampusAgendaError()
 
 
 async def _visible_list_html(frame: Frame) -> str:
@@ -253,7 +303,7 @@ async def _visible_list_html(frame: Frame) -> str:
     return "<div>" + "".join(fragments) + "</div>"
 
 
-async def collect_infinite_campus_agenda(
+async def _collect_infinite_campus_agenda(
     page: Page,
     *,
     reference: datetime | None = None,
@@ -301,4 +351,30 @@ async def collect_infinite_campus_agenda(
             raise InfiniteCampusAgendaError()
         await back.click()
 
+        frame = await _open_current_term_assignments(page)
+        current = parse_infinite_campus_list(
+            await _visible_list_html(frame), missing_keys=missing_keys
+        )
+        if [row.key for row in current] != expected_keys:
+            raise InfiniteCampusAgendaError()
+
     return records
+
+
+async def collect_infinite_campus_agenda(
+    page: Page,
+    *,
+    reference: datetime | None = None,
+) -> list[AgendaRecord]:
+    failure: InfiniteCampusAgendaError | None = None
+    try:
+        return await _collect_infinite_campus_agenda(page, reference=reference)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        failure = InfiniteCampusAgendaError()
+    if failure is not None:
+        failure.__cause__ = None
+        failure.__context__ = None
+        raise failure
+    return []

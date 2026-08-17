@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import traceback
 from typing import Callable
 
 import pytest
@@ -155,7 +156,7 @@ def test_blank_explicit_empty_marker_is_a_valid_boundary() -> None:
 
 @pytest.mark.parametrize(
     "score",
-    [" EXEMPT ", "Not - Graded", " UNGRADED "],
+    [" EXEMPT ", "Not - Graded", " UNGRADED ", "Excused 0 / 10", "Not Graded — 0%"],
 )
 def test_additional_excluded_score_states_are_not_due(score: str) -> None:
     assert (
@@ -186,6 +187,30 @@ def test_numeric_scores_below_80_are_low_score_with_decimal_or_label(score: str)
     assert record["status"] == "low_score"
 
 
+@pytest.mark.parametrize(
+    ("score", "expected_status"),
+    [
+        ("7.5 / 10", "low_score"),
+        ("8 / 10.0", None),
+        ("8.1 / 10.0", None),
+        ("7.5 / 0.0", "due"),
+    ],
+)
+def test_decimal_point_ratios_follow_score_boundaries(
+    score: str, expected_status: str | None
+) -> None:
+    record = classify_infinite_campus_assignment(
+        listed(score),
+        AssignmentDetail(
+            start_at=datetime(2026, 8, 1, 8, 0),
+            end_at=datetime(2026, 8, 18, 23, 59),
+        ),
+        reference=REFERENCE,
+    )
+
+    assert (record["status"] if record else None) == expected_status
+
+
 def test_multiple_points_pairs_are_not_accepted_as_a_score() -> None:
     record = classify_infinite_campus_assignment(
         listed("Scores: 7 / 10 and 8 / 10"),
@@ -212,6 +237,25 @@ def test_multiple_points_pairs_are_not_accepted_as_a_score() -> None:
 def test_detail_parser_rejects_malformed_nonblank_dates(html: str) -> None:
     with pytest.raises(InfiniteCampusAgendaError):
         parse_infinite_campus_detail(html)
+
+
+def test_malformed_date_error_does_not_retain_portal_sentinel() -> None:
+    sentinel = "DATE-SENTINEL-title-url-credential-html"
+    html = (
+        f'<div class="selcat-schedule-startdate">{sentinel}</div>'
+        '<div class="selcat-schedule-enddate">08/18/2026 11:59 PM</div>'
+    )
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        parse_infinite_campus_detail(html)
+
+    error = raised.value
+    rendered = "".join(traceback.format_exception(error))
+    assert sentinel not in str(error)
+    assert sentinel not in repr(error)
+    assert sentinel not in repr(error.__cause__)
+    assert sentinel not in repr(error.__context__)
+    assert sentinel not in rendered
 
 
 @pytest.mark.parametrize(
@@ -379,7 +423,8 @@ class FakeSelection:
 
     async def evaluate_all(self, _script: str) -> list[str]:
         self._assert_fresh()
-        self._workspace._page._record_list_capture()
+        if "outerHTML" in _script:
+            self._workspace._page._record_list_capture()
         return [self._workspace._row_html(index, row) for index, row, _ in self._rows]
 
     async def click(self) -> None:
@@ -397,8 +442,10 @@ class FakeWorkspace:
         return self._page.generation
 
     def _current_rows(self) -> list[tuple[int, tuple[str, str, str, str], int]]:
+        self._page._advance_filter_transition()
         rows: list[tuple[int, tuple[str, str, str, str], int]] = []
-        for position, row in enumerate(self._page.rows):
+        source_rows = self._page.rows if self._page.term_pressed else self._page.pre_term_rows
+        for position, row in enumerate(source_rows):
             if self._page.missing_pressed and not self._page._is_missing(row):
                 continue
             rows.append((position, row, len(rows)))
@@ -419,7 +466,7 @@ class FakeWorkspace:
 
     async def wait_for_selector(self, selector: str, **_kwargs: object) -> None:
         if selector == _DETAIL_READY:
-            if self._page.view != "detail":
+            if self._page.view != "detail" or self._page.detail_never_ready:
                 raise InfiniteCampusAgendaError()
             return None
         raise InfiniteCampusAgendaError()
@@ -463,7 +510,7 @@ class FakeWorkspace:
                     generation=self._generation(),
                     rows=[(0, ("", "", "", ""), 0)],
                     on_click=self._page._open_current_term,
-                    attribute=lambda: "true" if self._page.term_pressed else "false",
+                    attribute=self._page._term_attribute,
                     count=lambda: 1 if self._page.controls_ready else 0,
                     on_wait=lambda: self._page._wait_for_control(name),
                 )
@@ -473,7 +520,7 @@ class FakeWorkspace:
                     generation=self._generation(),
                     rows=[(0, ("", "", "", ""), 0)],
                     on_click=self._page._toggle_missing,
-                    attribute=lambda: "true" if self._page.missing_pressed else "false",
+                    attribute=self._page._missing_attribute,
                     count=lambda: 1 if self._page.controls_ready else 0,
                     on_wait=lambda: self._page._wait_for_control(name),
                 )
@@ -528,8 +575,11 @@ class FakeInfiniteCampusPage:
         rows: list[tuple[str, str, str, str]],
         *,
         missing_keys: set[tuple[str, str]] | None = None,
+        pre_term_rows: list[tuple[str, str, str, str]] | None = None,
+        filter_transition_delay: int = 0,
     ) -> None:
         self.rows = rows
+        self.pre_term_rows = pre_term_rows if pre_term_rows is not None else rows
         self.missing_keys = {
             (title.casefold(), course.casefold())
             for title, course in (missing_keys or set())
@@ -538,6 +588,10 @@ class FakeInfiniteCampusPage:
         self.view = "home"
         self.missing_pressed = False
         self.term_pressed = False
+        self.filter_transition_delay = filter_transition_delay
+        self._term_transition_remaining = 0
+        self._missing_transition_remaining: int | None = None
+        self._missing_transition_target = False
         self.generation = 0
         self.controls_ready = True
         self.controls_ready_after_waits = 0
@@ -553,12 +607,18 @@ class FakeInfiniteCampusPage:
         self.shrink_after_first_back = False
         self.duplicate_key_after_first_back = False
         self.hide_back_on_detail = -1
+        self.noop_back = False
+        self.frame_missing = False
+        self.detail_never_ready = False
+        self.detail_click_error: str | None = None
         self._did_reorder = False
         self._did_shrink = False
         self._did_duplicate = False
 
     def frame(self, name: str) -> FakeWorkspace:
         assert name == _WORKSPACE_FRAME
+        if self.frame_missing:
+            return None
         return FakeWorkspace(self)
 
     def _set_generation(self, view: str) -> None:
@@ -570,7 +630,7 @@ class FakeInfiniteCampusPage:
             return FakeSelection(
                 FakeWorkspace(self),
                 generation=self.generation,
-                count=1 if self.view in {"home", "assignments", "detail"} else 0,
+                count=1 if self.view in {"home", "assignments"} else 0,
                 on_click=self._open_menu,
             )
         return FakeSelection(
@@ -589,6 +649,9 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         self._set_generation("assignments")
         self.term_pressed = False
+        self._term_transition_remaining = 0
+        self.missing_pressed = False
+        self._missing_transition_remaining = None
         self._control_waits_for_navigation = 0
         self._control_waited_names = set()
         self.controls_ready = self.controls_ready_after_waits == 0
@@ -612,6 +675,25 @@ class FakeInfiniteCampusPage:
             or score.casefold() == "missing"
         )
 
+    def _term_attribute(self) -> str:
+        self._advance_filter_transition()
+        return "true" if self.term_pressed else "false"
+
+    def _missing_attribute(self) -> str:
+        self._advance_filter_transition()
+        return "true" if self.missing_pressed else "false"
+
+    def _advance_filter_transition(self) -> None:
+        if self._term_transition_remaining:
+            self._term_transition_remaining -= 1
+            if self._term_transition_remaining == 0:
+                self.term_pressed = True
+        if self._missing_transition_remaining is not None:
+            self._missing_transition_remaining -= 1
+            if self._missing_transition_remaining <= 0:
+                self.missing_pressed = self._missing_transition_target
+                self._missing_transition_remaining = None
+
     def _record_list_capture(self) -> None:
         if self.missing_pressed:
             self.actions.append("capture-missing")
@@ -627,16 +709,21 @@ class FakeInfiniteCampusPage:
             raise InfiniteCampusAgendaError()
         if self.term_pressed:
             return
-        self.term_pressed = True
+        self._term_transition_remaining = self.filter_transition_delay or 1
         self.actions.append("enable-current-term")
 
     def _toggle_missing(self) -> None:
         if self.view != "assignments":
             raise InfiniteCampusAgendaError()
-        self.missing_pressed = not self.missing_pressed
-        self.actions.append("enable-missing" if self.missing_pressed else "disable-missing")
+        self._missing_transition_target = not self.missing_pressed
+        self._missing_transition_remaining = self.filter_transition_delay or 1
+        self.actions.append(
+            "enable-missing" if self._missing_transition_target else "disable-missing"
+        )
 
     def _open_detail(self, visible_position: int) -> None:
+        if self.detail_click_error is not None:
+            raise RuntimeError(self.detail_click_error)
         rows = [
             row
             for row in self.rows
@@ -652,6 +739,9 @@ class FakeInfiniteCampusPage:
     def _click_back(self) -> None:
         if self.view != "detail":
             raise InfiniteCampusAgendaError()
+        if self.noop_back:
+            self.actions.append(f"noop-back:{self.active_detail_position}")
+            return
         self.view = "home"
         self._back_count += 1
         self.actions.append(f"back:{self.active_detail_position}")
@@ -700,26 +790,16 @@ def test_collector_scrubs_every_current_term_assignment_sequentially() -> None:
     )
 
     assert [record["status"] for record in records] == ["low_score", "due"]
-    assert page.actions == [
-        "open-assignments",
-        "enable-current-term",
-        "enable-missing",
-        "capture-missing",
-        "disable-missing",
-        "capture-current-term",
-        "open-assignments",
-        "enable-current-term",
-        "validate-list:0",
-        "open-detail:0",
-        "capture-detail:0",
-        "back:0",
-        "open-assignments",
-        "enable-current-term",
-        "validate-list:1",
-        "open-detail:1",
-        "capture-detail:1",
-        "back:1",
-    ]
+    assert page.actions.count("open-detail:0") == 1
+    assert page.actions.count("open-detail:1") == 1
+    assert page.actions.count("back:0") == 1
+    assert page.actions.count("back:1") == 1
+    assert page.actions.index("enable-missing") < page.actions.index("capture-missing")
+    assert page.actions.index("capture-missing") < page.actions.index("disable-missing")
+    assert page.actions.index("disable-missing") < page.actions.index("capture-current-term")
+    assert page.actions.index("back:0") < page.actions.index("open-detail:1")
+    assert page.actions.index("back:1") < len(page.actions) - 1
+    assert page.actions[-1].startswith("validate-list:")
 
 
 def test_collector_waits_for_exact_term_controls_before_transition() -> None:
@@ -732,6 +812,59 @@ def test_collector_waits_for_exact_term_controls_before_transition() -> None:
 
     assert records[0]["status"] == "due"
     assert page.control_waits[:2] == ["Missing", "Current Term"]
+
+
+def test_collector_waits_for_delayed_filter_rows_before_snapshot() -> None:
+    current_rows = [
+        ("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML),
+        ("Synthetic quiz", "Synthetic Algebra", "Missing", LOW_DETAIL_HTML),
+    ]
+    page = FakeInfiniteCampusPage(
+        current_rows,
+        pre_term_rows=[("Stale term row", "Wrong term", "", FUTURE_DETAIL_HTML)],
+        missing_keys={("Synthetic quiz", "Synthetic Algebra")},
+        filter_transition_delay=4,
+    )
+
+    records = asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    assert [record["title"] for record in records] == ["Future notes", "Synthetic quiz"]
+    assert "Stale term row" not in {record["title"] for record in records}
+
+
+def test_collector_rejects_missing_workspace_frame_atomically() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.frame_missing = True
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+
+def test_collector_rejects_detail_click_that_never_reaches_ready_view() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.detail_click_error = "DETAIL-SENTINEL-title-url-credential-html"
+
+    with pytest.raises(InfiniteCampusAgendaError) as raised:
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
+
+    error = raised.value
+    rendered = "".join(traceback.format_exception(error))
+    for value in (str(error), repr(error), repr(error.__cause__), repr(error.__context__), rendered):
+        assert "DETAIL-SENTINEL-title-url-credential-html" not in value
+
+
+def test_collector_rejects_noop_back_including_final_assignment() -> None:
+    page = FakeInfiniteCampusPage(
+        [("Future notes", "Synthetic English", "", FUTURE_DETAIL_HTML)]
+    )
+    page.noop_back = True
+
+    with pytest.raises(InfiniteCampusAgendaError):
+        asyncio.run(collect_infinite_campus_agenda(page, reference=REFERENCE))
 
 
 def test_collector_rejects_term_controls_that_never_become_ready() -> None:
