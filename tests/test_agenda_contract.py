@@ -50,12 +50,14 @@ def test_normalize_groups_by_monday_class_and_status_with_missing_winning() -> N
                         "dueTime": "23:59",
                     }
                 ],
+                "low_score": [],
                 "due": [],
             },
         },
         "2026-08-17": {
             "Algebra II": {
                 "missing": [],
+                "low_score": [],
                 "due": [
                     {
                         "title": "Practice set",
@@ -140,9 +142,10 @@ def test_normalize_truncates_canonical_rows_at_the_weeks_node_boundary() -> None
     assert list(forward["2026-08-10"]) == ["Alpha"]
     assert [
         row["title"] for row in forward["2026-08-10"]["Alpha"]["missing"]
-    ] == [f"Missing {index:03d}" for index in range(123)]
+    ] == [f"Missing {index:03d}" for index in range(122)]
+    assert forward["2026-08-10"]["Alpha"]["low_score"] == []
     assert forward["2026-08-10"]["Alpha"]["due"] == []
-    assert _json_value_nodes(forward) == 497
+    assert _json_value_nodes(forward) == 494
 
 
 def test_boundary_truncation_is_deterministic_for_casefold_equal_titles() -> None:
@@ -176,10 +179,10 @@ def test_boundary_truncation_is_deterministic_for_casefold_equal_titles() -> Non
     retained_titles = [row["title"] for row in retained_titles]
 
     assert serialized[0] == serialized[1] == serialized[2]
-    assert len(retained_titles) == 123
+    assert len(retained_titles) == 122
     assert retained_titles == sorted(retained_titles)
-    assert set(variants) - set(retained_titles) == {max(variants)}
-    assert _json_value_nodes(outputs[0]) == 497
+    assert set(variants) - set(retained_titles) == set(sorted(variants)[-2:])
+    assert _json_value_nodes(outputs[0]) == 494
 
 
 def test_casefold_equal_courses_use_exact_display_value_as_secondary_order() -> None:
@@ -250,6 +253,7 @@ def test_same_status_duplicates_choose_a_deterministic_display_representative() 
                             "dueTime": None,
                         }
                     ],
+                    "low_score": [],
                 }
             }
         }
@@ -284,7 +288,60 @@ def test_missing_precedence_survives_deterministic_duplicate_selection() -> None
                         "dueTime": None,
                     }
                 ],
+                "low_score": [],
                 "due": [],
             }
         }
     }
+
+
+def test_normalize_adds_low_score_bucket_and_prefers_it_over_due() -> None:
+    """Would fail if low-scoring work is discarded or duplicated as upcoming."""
+    due = {
+        "sourceId": "pv-7",
+        "course": "Algebra II",
+        "title": "Systems practice",
+        "dueDate": "2026-08-14",
+        "dueTime": None,
+        "status": "due",
+    }
+    low = {**due, "status": "low_score"}
+
+    assert normalize_agenda([due, low]) == {
+        "2026-08-10": {
+            "Algebra II": {
+                "missing": [],
+                "low_score": [
+                    {
+                        "title": "Systems practice",
+                        "dueDate": "2026-08-14",
+                        "dueTime": None,
+                    }
+                ],
+                "due": [],
+            }
+        }
+    }
+
+
+def test_missing_precedes_low_score_for_same_assignment() -> None:
+    """Would fail if an explicit missing marker can be weakened to Low."""
+    base = {
+        "sourceId": "pv-9",
+        "course": "Biology",
+        "title": "Cell transport",
+        "dueDate": "2026-08-13",
+        "dueTime": None,
+    }
+
+    result = normalize_agenda(
+        [
+            {**base, "status": "low_score"},
+            {**base, "status": "missing"},
+        ]
+    )
+
+    buckets = result["2026-08-10"]["Biology"]
+    assert [row["title"] for row in buckets["missing"]] == ["Cell transport"]
+    assert buckets["low_score"] == []
+    assert buckets["due"] == []

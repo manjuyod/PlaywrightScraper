@@ -116,6 +116,11 @@ fn agenda_result_accepts_portal_slot_bundle() {
                     "2026-08-10": {
                         "English 11": {
                             "missing": [],
+                            "low_score": [{
+                                "title": "Earlier quiz",
+                                "dueDate": "2026-08-14",
+                                "dueTime": null
+                            }],
                             "due": [{
                                 "title": "Reading response",
                                 "dueDate": "2026-08-16",

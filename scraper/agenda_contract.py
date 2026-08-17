@@ -6,7 +6,13 @@ from datetime import date, timedelta
 from typing import Literal, NotRequired, TypedDict
 
 
-AgendaStatus = Literal["missing", "due"]
+AgendaStatus = Literal["missing", "low_score", "due"]
+AGENDA_STATUSES: tuple[AgendaStatus, ...] = ("missing", "low_score", "due")
+_STATUS_PRIORITY: dict[AgendaStatus, int] = {
+    "due": 0,
+    "low_score": 1,
+    "missing": 2,
+}
 
 
 class AgendaRecord(TypedDict):
@@ -26,6 +32,7 @@ class StoredAgendaItem(TypedDict):
 
 class AgendaBuckets(TypedDict):
     missing: list[StoredAgendaItem]
+    low_score: list[StoredAgendaItem]
     due: list[StoredAgendaItem]
 
 
@@ -88,7 +95,7 @@ def _bounded_weeks(weeks: AgendaWeeks) -> AgendaWeeks:
     retained_nodes = 1  # The root weeks object itself.
     for week, courses in weeks.items():
         for course, buckets in courses.items():
-            for status in ("missing", "due"):
+            for status in AGENDA_STATUSES:
                 for item in buckets[status]:
                     has_week = week in retained
                     has_course = has_week and course in retained[week]
@@ -96,13 +103,17 @@ def _bounded_weeks(weeks: AgendaWeeks) -> AgendaWeeks:
                     if not has_week:
                         added_nodes += 1  # The week object.
                     if not has_course:
-                        added_nodes += 3  # Course object plus both status arrays.
+                        added_nodes += 4  # Course object plus all status arrays.
                     if retained_nodes + added_nodes > MAX_AGENDA_WEEKS_NODES:
                         return retained
                     if not has_week:
                         retained[week] = {}
                     if not has_course:
-                        retained[week][course] = {"missing": [], "due": []}
+                        retained[week][course] = {
+                            "missing": [],
+                            "low_score": [],
+                            "due": [],
+                        }
                     retained[week][course][status].append(item)
                     retained_nodes += added_nodes
     return retained
@@ -132,7 +143,7 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
         course = _display_text(raw.get("course"))
         title = _display_text(raw.get("title"))
         status = raw.get("status")
-        if not course or not title or status not in ("missing", "due"):
+        if not course or not title or status not in AGENDA_STATUSES:
             continue
         raw_date = raw.get("dueDate")
         if not isinstance(raw_date, str):
@@ -169,7 +180,7 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
         existing = deduplicated.get(identity)
         if (
             existing is None
-            or (status == "missing" and existing[4] == "due")
+            or _STATUS_PRIORITY[status] > _STATUS_PRIORITY[existing[4]]
             or (
                 status == existing[4]
                 and _agenda_record_sort_key(candidate)
@@ -183,7 +194,7 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
         week = monday_for(date.fromisoformat(due_date))
         buckets = grouped.setdefault(week, {}).setdefault(
             course,
-            {"missing": [], "due": []},
+            {"missing": [], "low_score": [], "due": []},
         )
         buckets[status].append(
             {"title": title, "dueDate": due_date, "dueTime": due_time}
@@ -207,6 +218,6 @@ def normalize_agenda(records: Iterable[Mapping[str, object]]) -> AgendaWeeks:
                         item["title"],
                     ),
                 )
-                for status in ("missing", "due")
+                for status in AGENDA_STATUSES
             }
     return _bounded_weeks(ordered)

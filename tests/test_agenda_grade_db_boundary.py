@@ -299,11 +299,11 @@ def test_two_slots_are_independently_bounded_below_rust_result_limit(
 
     for slot in ("agenda1", "agenda2"):
         rows = bundle[slot]["weeks"]["2026-08-10"]["Busy Course"]["due"]
-        assert len(rows) == 123
+        assert len(rows) == 122
         assert rows[0]["title"] == "Work 000"
-        assert rows[-1]["title"] == "Work 122"
+        assert rows[-1]["title"] == "Work 121"
     assert bundle["agenda1"]["weeks"] == bundle["agenda2"]["weeks"]
-    assert _json_value_nodes(bundle) == 999
+    assert _json_value_nodes(bundle) == 993
 
 
 def test_concurrent_same_origin_slots_use_isolated_contexts(monkeypatch) -> None:
