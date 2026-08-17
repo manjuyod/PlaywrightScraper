@@ -20,6 +20,7 @@ class InfiniteCampus(PortalEngine):
         password_selector="#password",
         microsoft_sso=True,
         google_sso=True,
+        pre_fill_wait=5000,
     )
 
     async def validate_login(self) -> None:
