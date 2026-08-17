@@ -24,7 +24,8 @@ _OVERVIEW_READY = (
     "div.gb-class-header.gb-class-row:visible, "
     "#gb-assignments .no-data:visible"
 )
-_READINESS_TIMEOUT_MS = 30_000
+_READINESS_TIMEOUT_MS = 90_000
+_OVERVIEW_SETTLE_MS = 3_000
 
 
 @dataclass(frozen=True)
@@ -50,10 +51,11 @@ async def _wait_for_course_detail(page: Page) -> None:
     await page.wait_for_selector(_COURSE_READY, timeout=_READINESS_TIMEOUT_MS)
 
 
-async def _wait_for_overview(page: Page, expected_courses: int):
+async def _wait_for_overview(page: Page, expected_courses: int | None):
     await page.wait_for_selector(_OVERVIEW_READY, timeout=_READINESS_TIMEOUT_MS)
+    await page.wait_for_timeout(_OVERVIEW_SETTLE_MS)
     rows = page.locator(_COURSE_ROWS)
-    if await rows.count() != expected_courses:
+    if expected_courses is not None and await rows.count() != expected_courses:
         raise ParentVueAgendaError()
     return rows
 
@@ -64,6 +66,7 @@ async def collect_parentvue_course_agenda(
     reference: datetime | None = None,
 ) -> list[AgendaRecord]:
     effective_reference = reference or datetime.now()
+    await _wait_for_overview(page, None)
     records = parse_parentvue_overview(
         await page.content(),
         reference=effective_reference,

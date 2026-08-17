@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from hashlib import sha256
 import re
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -25,6 +27,28 @@ def _text(element: Tag | None) -> str | None:
         return None
     value = element.get_text(" ", strip=True)
     return value or None
+
+
+def _assignment_source_id(element: Tag) -> str | None:
+    link = element.select_one("a[href]")
+    if link is not None:
+        href = link.get("href")
+        if isinstance(href, str) and href.strip():
+            parsed = urlsplit(href.strip())
+            if parsed.scheme.casefold() in {"", "http", "https"}:
+                canonical = parsed.path
+                if parsed.query:
+                    canonical = f"{canonical}?{parsed.query}"
+                if canonical:
+                    digest = sha256(canonical.encode("utf-8")).hexdigest()[:24]
+                    return f"parentvue:assignment:{digest}"
+    source = element.get("data-guid")
+    if not isinstance(source, str):
+        source_element = element.select_one("[data-guid]")
+        source = source_element.get("data-guid") if source_element else None
+    if isinstance(source, str) and source.strip():
+        return f"parentvue:{source.strip()}"
+    return None
 
 
 def _date_and_time(value: str | None) -> tuple[str, str | None] | None:
@@ -250,10 +274,18 @@ def _live_upcoming_record(
         "dueTime": due[1],
         "status": "due",
     }
-    source_id = row.get("data-guid")
-    if isinstance(source_id, str) and source_id.strip():
-        record["sourceId"] = f"parentvue:{source_id.strip()}"
+    source_id = _assignment_source_id(row)
+    if source_id is not None:
+        record["sourceId"] = source_id
     return record
+
+
+def _live_upcoming_panel(root: Tag) -> Tag:
+    for section in root.select("section"):
+        heading = _text(section.select_one("h1, h2, h3, h4, h5, h6"))
+        if heading and heading.casefold() == "upcoming assignments":
+            return section
+    return root
 
 
 def parse_parentvue_overview(
@@ -262,13 +294,17 @@ def parse_parentvue_overview(
     reference: datetime,
 ) -> list[AgendaRecord]:
     soup = BeautifulSoup(html, "html.parser")
+    live_root = soup.select_one("#gb-assignments")
+    if live_root is None:
+        return parse_parentvue_agenda(html)
+    upcoming_panel = _live_upcoming_panel(live_root)
     live_rows = [
         row
-        for row in soup.select("#gb-assignments tr.gb-upcoming-assignment")
+        for row in upcoming_panel.select("tr.gb-upcoming-assignment")
         if not _is_hidden(row)
     ]
     visible_no_data = any(
-        not _is_hidden(marker) for marker in soup.select("#gb-assignments .no-data")
+        not _is_hidden(marker) for marker in upcoming_panel.select(".no-data")
     )
     if live_rows:
         if visible_no_data:
@@ -276,16 +312,13 @@ def parse_parentvue_overview(
         return [
             _live_upcoming_record(row, reference=reference) for row in live_rows
         ]
-    try:
-        return parse_parentvue_agenda(html)
-    except ParentVueAgendaError:
-        visible_courses = any(
-            not _is_hidden(row)
-            for row in soup.select("div.gb-class-header.gb-class-row")
-        )
-        if soup.select_one("#gb-assignments") is not None and visible_courses:
-            return []
-        raise
+    visible_courses = any(
+        not _is_hidden(row)
+        for row in soup.select("div.gb-class-header.gb-class-row")
+    )
+    if visible_no_data or visible_courses:
+        return []
+    raise ParentVueAgendaError()
 
 
 def _explicitly_missing(item: Tag) -> bool:
@@ -398,11 +431,8 @@ def parse_parentvue_course_assignments(
             "dueTime": due[1],
             "status": status,
         }
-        source = item.get("data-guid")
-        if not isinstance(source, str):
-            source_element = item.select_one("[data-guid]")
-            source = source_element.get("data-guid") if source_element else None
-        if isinstance(source, str) and source.strip():
-            record["sourceId"] = f"parentvue:{source.strip()}"
+        source_id = _assignment_source_id(item)
+        if source_id is not None:
+            record["sourceId"] = source_id
         records.append(record)
     return records

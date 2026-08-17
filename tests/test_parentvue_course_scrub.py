@@ -147,7 +147,11 @@ class FakeCoursePage:
         return self.course_html[index]
 
     async def wait_for_selector(self, _selector: str, *, timeout: int) -> None:
-        assert timeout == 30_000
+        assert timeout == 90_000
+
+    async def wait_for_timeout(self, timeout: int) -> None:
+        assert timeout == 3_000
+        self.actions.append("settle-overview")
 
 
 def _collect(page: FakeCoursePage):
@@ -172,16 +176,20 @@ def test_collects_overview_and_courses_in_strict_sequence() -> None:
         "missing",
     ]
     assert page.actions == [
+        "settle-overview",
+        "locate-courses",
         "capture-overview",
         "locate-courses",
         "locate-courses",
         "open-course:0",
         "capture-course:0",
         "all-classes",
+        "settle-overview",
         "locate-courses",
         "open-course:1",
         "capture-course:1",
         "all-classes",
+        "settle-overview",
         "locate-courses",
     ]
     assert page.course_open is False
@@ -204,7 +212,9 @@ def test_one_malformed_course_fails_without_returning_partial_output() -> None:
     with pytest.raises(ParentVueAgendaError):
         _collect(page)
 
-    assert page.actions[:6] == [
+    assert page.actions[:8] == [
+        "settle-overview",
+        "locate-courses",
         "capture-overview",
         "locate-courses",
         "locate-courses",

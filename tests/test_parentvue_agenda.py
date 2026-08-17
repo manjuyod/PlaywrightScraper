@@ -347,7 +347,7 @@ def test_live_overview_parses_upcoming_rows_without_inferring_recent_history() -
             "dueDate": "2026-08-18",
             "dueTime": None,
             "status": "due",
-            "sourceId": "parentvue:pv-upcoming-1",
+            "sourceId": "parentvue:assignment:dba3ed0ea4addf0a34121412",
         }
     ]
 
@@ -365,6 +365,42 @@ def test_live_overview_rejects_rows_conflicting_with_visible_empty_marker() -> N
             html,
             reference=datetime(2026, 8, 16, 12, 0),
         )
+
+
+def test_live_overview_ignores_recent_history_empty_marker() -> None:
+    """Would fail if non-Upcoming panel state can invalidate current work."""
+    html = LIVE_OVERVIEW_HTML.replace(
+        '<h2 class="title">Recent History</h2>',
+        '<h2 class="title">Recent History</h2><div class="no-data">No history</div>',
+    )
+
+    records = pv_agenda.parse_parentvue_overview(
+        html,
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert [record["title"] for record in records] == ["Systems review"]
+
+
+def test_live_overview_never_falls_back_to_recent_history_rows() -> None:
+    """Would fail if a live empty Upcoming panel can infer old work as missing."""
+    html = '''<div id="gb-assignments">
+      <section>
+        <h2>Recent History</h2>
+        <div class="assignment-row missing" data-course-title="Algebra II">
+          <span class="assignment-title">Completed history</span>
+          <time datetime="2026-08-14"></time>
+        </div>
+      </section>
+      <div class="gb-class-header gb-class-row">
+        <button class="course-title">Algebra II</button>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_overview(
+        html,
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
 
 
 COURSE_DETAIL_HTML = '''<div class="pxp-course-content">
@@ -440,6 +476,40 @@ def test_course_detail_classifies_explicit_missing_and_below_eighty_scores() -> 
     ]
 
 
+def test_overview_and_detail_share_assignment_link_identity_for_precedence() -> None:
+    """Would fail if the same assignment survives as both due and missing."""
+    overview = '''<div id="gb-assignments">
+      <tr class="gb-upcoming-assignment" data-guid="overview-only-guid"><td>
+        <div><a href="/assignment/details/1">Systems review</a></div>
+        <div>Algebra II</div>
+        <div>Due Date: 08/18/2026</div>
+      </td></tr>
+    </div>'''
+    detail = '''<div class="pxp-course-content">
+      <div class="item-container missing">
+        <a href="/assignment/details/1"><span class="item-text-main">Systems review</span></a>
+        <div class="item-text-special">Aug 18</div>
+        <div class="item-text-small">Missing</div>
+      </div>
+    </div>'''
+    reference = datetime(2026, 8, 16, 12, 0)
+
+    records = pv_agenda.parse_parentvue_overview(
+        overview,
+        reference=reference,
+    ) + pv_agenda.parse_parentvue_course_assignments(
+        detail,
+        course="Algebra II",
+        reference=reference,
+    )
+
+    buckets = normalize_agenda(records)["2026-08-17"]["Algebra II"]
+    assert buckets["missing"] == [
+        {"title": "Systems review", "dueDate": "2026-08-18", "dueTime": None}
+    ]
+    assert buckets["due"] == []
+
+
 def test_course_detail_accepts_explicit_empty_and_rejects_ambiguous_empty() -> None:
     """Would fail if a blank course is treated as a complete empty snapshot."""
     reference = datetime(2026, 8, 16, 12, 0)
@@ -463,6 +533,28 @@ def test_course_detail_does_not_treat_a_slash_date_as_earned_points() -> None:
       <div class="item-container">
         <div class="item-text-main">Ungraded worksheet</div>
         <div class="item-text-special">08/18/2026</div>
+      </div>
+    </div>'''
+
+    assert pv_agenda.parse_parentvue_course_assignments(
+        html,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    ) == []
+
+
+def test_course_detail_excludes_pass_fail_and_blank_scores() -> None:
+    """Would fail if nonnumeric grade states are labeled Low."""
+    html = '''<div class="pxp-course-content">
+      <div class="item-container">
+        <div class="item-text-main">Pass-fail work</div>
+        <div class="item-text-special">Aug 18</div>
+        <div class="item-text-small">Pass/Fail</div>
+      </div>
+      <div class="item-container">
+        <div class="item-text-main">Blank grade</div>
+        <div class="item-text-special">Aug 19</div>
+        <div class="item-text-small"></div>
       </div>
     </div>'''
 
