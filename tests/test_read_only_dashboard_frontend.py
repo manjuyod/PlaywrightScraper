@@ -21,6 +21,8 @@ def _run_franchise_sorting_scenario(scenario: str) -> object:
             typeof filterAndSortStudents === "function" ? filterAndSortStudents : null,
         nextSortConfig: typeof nextSortConfig === "function" ? nextSortConfig : null,
         SortableHeading: typeof SortableHeading === "function" ? SortableHeading : null,
+        GradeList: typeof GradeList === "function" ? GradeList : null,
+        standingTone: typeof standingTone === "function" ? standingTone : null,
         StudentTable,
     };
     return;
@@ -76,6 +78,7 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
         StudentPage: typeof StudentPage === "function" ? StudentPage : null,
         AgendaCard: typeof AgendaCard === "function" ? AgendaCard : null,
         AgendaClass: typeof AgendaClass === "function" ? AgendaClass : null,
+        GradeHistory: typeof GradeHistory === "function" ? GradeHistory : null,
     };
     return;
 
@@ -392,6 +395,39 @@ console.log(JSON.stringify({ headings: collect(tree, "h2").map(textOf), tables: 
     assert heatmap == {"headings": ["Grade Heatmap"], "tables": 1}
 
 
+def test_grade_history_only_shows_the_most_recent_completed_week() -> None:
+    result = _run_student_page_scenario(
+        """
+if (!hooks.GradeHistory) {
+    throw new Error("GradeHistory is not implemented");
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+const history = hooks.GradeHistory({ history: {
+    "2026-08-04": { "Fictional Studies": 72 },
+    "2026-08-18": { "Fictional Studies": 91 },
+    "2026-08-11": { "Fictional Studies": 84 },
+} });
+const currentOnly = hooks.GradeHistory({ history: {
+    "2026-08-18": { "Fictional Studies": 91 },
+} });
+console.log(JSON.stringify({
+    historyText: textOf(history),
+    currentOnlyText: textOf(currentOnly),
+}));
+"""
+    )
+
+    assert result == {
+        "historyText": "2026-08-11Fictional Studies84.0",
+        "currentOnlyText": "No completed grade history yet.",
+    }
+
+
 def test_franchise_and_student_headers_omit_overview_actions() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
@@ -545,6 +581,71 @@ console.log(JSON.stringify({ ascending, descending }));
     assert result == {
         "ascending": [2, 5, 3, 4, 1, 6],
         "descending": [1, 6, 4, 3, 2, 5],
+    }
+
+
+def test_grade_standing_and_movement_use_semantic_colors() -> None:
+    result = _run_franchise_sorting_scenario(
+        """
+if (!hooks.GradeList || !hooks.standingTone) {
+    throw new Error("grade color helpers are not implemented");
+}
+const gradeList = hooks.GradeList({
+    grades: [
+        { course: "Improving", grade: 91, change: "+" },
+        { course: "Declining", grade: 68, change: "-" },
+        { course: "Unchanged", grade: 82, change: null },
+    ],
+});
+function collect(node, type, found = []) {
+    if (Array.isArray(node)) {
+        for (const child of node) {
+            collect(child, type, found);
+        }
+        return found;
+    }
+    if (!node || typeof node !== "object") {
+        return found;
+    }
+    if (node.type === type) {
+        found.push(node);
+    }
+    const children = Array.isArray(node.children) ? node.children : [node.children];
+    for (const child of children) {
+        collect(child, type, found);
+    }
+    return found;
+}
+const movements = collect(gradeList, "span")
+    .filter((span) => span.props["aria-label"])
+    .map((span) => ({
+        marker: span.children[0],
+        className: span.props.className,
+        label: span.props["aria-label"],
+    }));
+console.log(JSON.stringify({
+    standingTones: ["Good", "Fair", "Poor", "Unexpected", null].map(
+        (standing) => hooks.standingTone(standing),
+    ),
+    movements,
+}));
+"""
+    )
+
+    assert result == {
+        "standingTones": ["success", "warning", "danger", "slate", "slate"],
+        "movements": [
+            {
+                "marker": "+",
+                "className": "ml-1 font-extrabold text-emerald-600",
+                "label": "Grade increased",
+            },
+            {
+                "marker": "-",
+                "className": "ml-1 font-extrabold text-red-600",
+                "label": "Grade decreased",
+            },
+        ],
     }
 
 

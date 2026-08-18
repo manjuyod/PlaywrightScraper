@@ -212,6 +212,34 @@
         return "slate";
     }
 
+    function standingTone(standing) {
+        const tones = {
+            Good: "success",
+            Fair: "warning",
+            Poor: "danger",
+        };
+        return tones[standing] || "slate";
+    }
+
+    function GradeMovement({ change }) {
+        if (change !== "+" && change !== "-") {
+            return null;
+        }
+        const increased = change === "+";
+        return h(
+            "span",
+            {
+                className: cn(
+                    "ml-1 font-extrabold",
+                    increased ? "text-emerald-600" : "text-red-600",
+                ),
+                title: increased ? "Grade increased" : "Grade decreased",
+                "aria-label": increased ? "Grade increased" : "Grade decreased",
+            },
+            change,
+        );
+    }
+
     function fuzzyNameMatch(student, query) {
         const normalize = (value) =>
             String(value || "")
@@ -483,7 +511,8 @@
                     h(
                         "span",
                         { className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900" },
-                        `${Number(grade.grade).toFixed(1)}${grade.change ? ` ${grade.change}` : ""}`,
+                        Number(grade.grade).toFixed(1),
+                        h(GradeMovement, { change: grade.change }),
                     ),
                 ),
             ),
@@ -668,7 +697,11 @@
                                 h(
                                     "td",
                                     { className: cellClass },
-                                    h(Badge, { tone: "slate" }, student.standing || "Unknown"),
+                                    h(
+                                        Badge,
+                                        { tone: standingTone(student.standing) },
+                                        student.standing || "Unknown",
+                                    ),
                                 ),
                                 h(
                                     "td",
@@ -777,9 +810,15 @@
     }
 
     function GradeHistory({ history }) {
-        const weeks = Object.entries(history || {}).sort(([left], [right]) => right.localeCompare(left));
+        const weeks = Object.entries(history || {})
+            .sort(([left], [right]) => right.localeCompare(left))
+            .slice(1, 2);
         if (!weeks.length) {
-            return h("p", { className: "text-sm text-slate-500" }, "No grade history yet.");
+            return h(
+                "p",
+                { className: "text-sm text-slate-500" },
+                "No completed grade history yet.",
+            );
         }
         return h(
             "div",
@@ -883,7 +922,7 @@
     function AgendaClass({ classGroup }) {
         const statuses = {
             missing: { marker: "M", label: "Missing assignment" },
-            low_score: { marker: "LOW", label: "Low-scoring assignment" },
+            low_score: { marker: "LOW GRADE", label: "Low-grade assignment" },
             due: { marker: "DUE", label: "Upcoming assignment" },
         };
         return h(
@@ -959,7 +998,7 @@
             h(
                 "div",
                 {
-                    className: "mt-2 flex gap-3 text-xs font-bold text-slate-500",
+                    className: "mt-2 flex flex-wrap gap-3 text-xs font-bold text-slate-500",
                     "aria-label": "Assignment status legend",
                 },
                 h(
@@ -971,12 +1010,8 @@
                 h(
                     "span",
                     null,
-                    h(
-                        "span",
-                        { className: "tc-agenda-marker tc-agenda-marker--low_score" },
-                        "LOW",
-                    ),
-                    " Low",
+                    h( "span", { className: "tc-agenda-marker tc-agenda-marker--low_score" }, "LOW"),
+                    " Low Grade",
                 ),
                 h(
                     "span",
