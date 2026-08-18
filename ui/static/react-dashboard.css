@@ -879,6 +879,12 @@ summary:focus-visible {
     color: var(--tc-blue-dark);
 }
 
+.tc-agenda-card--empty {
+    border-color: #cbd5e1 !important;
+    background: #f1f5f9 !important;
+    box-shadow: none !important;
+}
+
 @media (min-width: 1280px) {
     .tc-grade-row {
         grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);

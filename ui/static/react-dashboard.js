@@ -989,6 +989,25 @@
         );
     }
 
+    const PRIMARY_AGENDA_PORTALS = new Set(["google_classroom", "canvas"]);
+
+    function displayAgendaSlots(slots) {
+        return (slots || [])
+            .filter(
+                (slot) =>
+                    slot &&
+                    (slot.portal || (Array.isArray(slot.weeks) && slot.weeks.length)),
+            )
+            .map((slot, sourceIndex) => ({ slot, sourceIndex }))
+            .sort((left, right) => {
+                const leftPreferred = PRIMARY_AGENDA_PORTALS.has(left.slot.portal) ? 0 : 1;
+                const rightPreferred = PRIMARY_AGENDA_PORTALS.has(right.slot.portal) ? 0 : 1;
+                return leftPreferred - rightPreferred || left.sourceIndex - right.sourceIndex;
+            })
+            .slice(0, 2)
+            .map(({ slot }, index) => Object.assign({}, slot, { number: index + 1 }));
+    }
+
     function AgendaCard({ slot }) {
         const heading = `Agenda ${slot.number}${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
         return h(
@@ -1041,11 +1060,31 @@
         );
     }
 
-    function LegacyAgendaCard({ items }) {
+    function EmptyAgendaCard({ number }) {
         return h(
             Card,
-            { className: "p-5" },
-            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda"),
+            { className: "tc-report-card tc-agenda-card tc-agenda-card--empty p-5" },
+            h("h2", { className: "text-lg font-extrabold text-slate-500" }, `Agenda ${number}`),
+            h(
+                "div",
+                {
+                    className: "mt-4 flex min-h-32 items-center justify-center rounded-lg border border-dashed border-slate-300 p-5 text-center",
+                    "aria-label": `Agenda ${number} unavailable`,
+                },
+                h(
+                    "p",
+                    { className: "text-sm font-semibold text-slate-500" },
+                    number === 1 ? "No agenda available." : "No second agenda configured.",
+                ),
+            ),
+        );
+    }
+
+    function LegacyAgendaCard({ items, number = 1 }) {
+        return h(
+            Card,
+            { className: "tc-report-card tc-agenda-card p-5" },
+            h("h2", { className: "text-lg font-extrabold text-slate-900" }, `Agenda ${number}`),
             h(
                 "div",
                 { className: "mt-4 grid gap-3" },
@@ -1076,6 +1115,23 @@
 
     function StudentPage({ data }) {
         const student = data.student || {};
+        const agendaSlots = displayAgendaSlots(student.agendaSlots);
+        const agendaCards = agendaSlots.map((slot) =>
+            h(AgendaCard, { key: `portal-${slot.number}`, slot }),
+        );
+        if (!agendaCards.length && student.agendaItems && student.agendaItems.length) {
+            agendaCards.push(
+                h(LegacyAgendaCard, {
+                    key: "legacy-1",
+                    items: student.agendaItems,
+                    number: 1,
+                }),
+            );
+        }
+        while (agendaCards.length < 2) {
+            const number = agendaCards.length + 1;
+            agendaCards.push(h(EmptyAgendaCard, { key: `empty-${number}`, number }));
+        }
         const [activeTab, setActiveTab] = useState(
             studentTabFromHash(window.location.hash),
         );
@@ -1196,15 +1252,7 @@
                               ),
                           ),
                       ),
-                      student.agendaSlots && student.agendaSlots.length === 2
-                          ? h(
-                                "div",
-                                { className: "tc-agenda-row" },
-                                student.agendaSlots.map((slot) =>
-                                    h(AgendaCard, { key: slot.number, slot }),
-                                ),
-                            )
-                          : h(LegacyAgendaCard, { items: student.agendaItems || [] }),
+                      h("div", { className: "tc-agenda-row" }, agendaCards),
                   ),
         );
     }

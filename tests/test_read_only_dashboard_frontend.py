@@ -79,6 +79,8 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
         AgendaCard: typeof AgendaCard === "function" ? AgendaCard : null,
         AgendaClass: typeof AgendaClass === "function" ? AgendaClass : null,
         GradeHistory: typeof GradeHistory === "function" ? GradeHistory : null,
+        displayAgendaSlots:
+            typeof displayAgendaSlots === "function" ? displayAgendaSlots : null,
     };
     return;
 
@@ -390,9 +392,91 @@ console.log(JSON.stringify({ headings: collect(tree, "h2").map(textOf), tables: 
         hash_value="#heatmap",
     )
 
-    assert "Agenda2026-08-14Archive responseFictional Studies" in legacy["text"]
-    assert legacy["text"].count("Agenda") == 1
+    assert "Agenda 12026-08-14Archive responseFictional Studies" in legacy["text"]
+    assert "Agenda 2No second agenda configured." in legacy["text"]
+    assert legacy["text"].count("Agenda") == 2
     assert heatmap == {"headings": ["Grade Heatmap"], "tables": 1}
+
+
+def test_agenda_display_prefers_classroom_portals_and_pads_empty_slots() -> None:
+    result = _run_student_page_scenario(
+        """
+if (!hooks.displayAgendaSlots || !hooks.StudentPage) {
+    throw new Error("agenda display helpers are not implemented");
+}
+function collect(node, predicate, found = []) {
+    if (node === null || node === undefined || node === false) return found;
+    if (Array.isArray(node)) {
+        for (const child of node) collect(child, predicate, found);
+        return found;
+    }
+    if (typeof node === "object") {
+        if (predicate(node)) found.push(node);
+        for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+            collect(child, predicate, found);
+        }
+    }
+    return found;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+function studentWith(slots) {
+    return hooks.StudentPage({ data: {
+        backUrl: "#back",
+        logoUrl: "/static/imgs/tc_logo.webp",
+        student: {
+            id: 80,
+            firstName: "Agenda",
+            lastName: "Learner",
+            gradeLevel: 8,
+            status: "synced",
+            gradesSnapshot: [],
+            grades: {},
+            agendaItems: [],
+            agendaSlots: slots,
+        },
+    } });
+}
+const reordered = studentWith([
+    { number: 1, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
+    { number: 2, portal: "canvas", portalLabel: "Canvas", weeks: [] },
+]);
+const single = studentWith([
+    { number: 2, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
+]);
+console.log(JSON.stringify({
+    preferredPortals: ["canvas", "google_classroom"].map((portal) =>
+        hooks.displayAgendaSlots([
+            { number: 1, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
+            { number: 2, portal, portalLabel: portal, weeks: [] },
+        ])[0].portal,
+    ),
+    reorderedHeadings: collect(reordered, (node) => node.type === "h2")
+        .map(textOf).filter((text) => text.startsWith("Agenda")),
+    singleHeadings: collect(single, (node) => node.type === "h2")
+        .map(textOf).filter((text) => text.startsWith("Agenda")),
+    unavailable: collect(single, (node) =>
+        String(node.props?.["aria-label"] || "").endsWith(" unavailable"),
+    ).map((node) => ({ label: node.props["aria-label"], text: textOf(node) })),
+}));
+"""
+    )
+
+    assert result == {
+        "preferredPortals": ["canvas", "google_classroom"],
+        "reorderedHeadings": ["Agenda 1 · Canvas", "Agenda 2 · ParentVUE"],
+        "singleHeadings": ["Agenda 1 · ParentVUE", "Agenda 2"],
+        "unavailable": [
+            {
+                "label": "Agenda 2 unavailable",
+                "text": "No second agenda configured.",
+            }
+        ],
+    }
 
 
 def test_grade_history_only_shows_the_most_recent_completed_week() -> None:
