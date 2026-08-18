@@ -129,6 +129,10 @@ uv run python -m scraper.runner --franchise-id 19
 uv run python -m scraper.runner --franchise-id 19 --student-id 123
 ```
 
+Grade concurrency is controlled by the single
+`MAX_CONCURRENT_GRADE_WORKERS` constant in `scraper/runner.py` (currently
+`1`). It does not affect agenda concurrency.
+
 Run agenda collection:
 
 ```powershell

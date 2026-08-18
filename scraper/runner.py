@@ -30,6 +30,7 @@ from scraper.portals.utils import get_portal_key_from_url
 load_dotenv()
 
 HEARTBEAT_INTERVAL_SECONDS = 60.0
+MAX_CONCURRENT_GRADE_WORKERS = 1
 logger = logging.getLogger("scraper.runner")
 StudentContext = dict[str, Any]
 RawStudentContext = Mapping[str, Any]
@@ -246,65 +247,126 @@ async def _process_grade_students(
     progress: dict[str, int],
     lease_failed: asyncio.Event,
 ) -> str | None:
+    if not student_list:
+        return None
+    if lease_failed.is_set():
+        return "lease_renewal_failed"
+
+    worker_count = min(MAX_CONCURRENT_GRADE_WORKERS, len(student_list))
+    student_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    result_queue: asyncio.Queue[
+        tuple[
+            dict[str, Any],
+            dict[str, Any],
+            bool,
+            asyncio.Future[None],
+        ]
+    ] = asyncio.Queue()
     for student in student_list:
-        if lease_failed.is_set():
-            return "lease_renewal_failed"
-        try:
-            result = await scrape_one(browser, student)
-            parsed_grades = result.get("parsed_grades")
-            if isinstance(parsed_grades, dict) and parsed_grades:
-                outcome = {"kind": "grade_success", "parsed_grades": parsed_grades}
-                scrape_succeeded = True
-            else:
-                outcome = {
-                    "kind": "failure",
-                    "code": "no_grades",
-                    "passwordgood": None,
-                }
-                scrape_succeeded = False
-        except LoginError:
-            outcome = {
-                "kind": "failure",
-                "code": "bad_login",
-                "passwordgood": False,
-            }
-            scrape_succeeded = False
-        except Exception as exc:
-            logger.error(
-                "portal.scrape.failed",
-                extra={
-                    "portal": student["portal"],
-                    "student_record_id": student["db_id"],
-                    "exception_type": type(exc).__name__,
-                },
-            )
-            outcome = {
-                "kind": "failure",
-                "code": "scrape_failed",
-                "passwordgood": None,
-            }
-            scrape_succeeded = False
+        student_queue.put_nowait(student)
+    for _ in range(worker_count):
+        student_queue.put_nowait(None)
 
-        if lease_failed.is_set():
-            return "lease_renewal_failed"
-        try:
-            response = await asyncio.to_thread(
-                client.post_result,
-                job_id=session["job_id"],
-                lease_token=session["lease_token"],
-                crmstudentid=student["db_id"],
-                outcome=outcome,
-            )
-        except GradeDbLeaseExpired:
-            return "lease_expired"
-        except GradeDbUnavailable:
-            return "neon_unavailable"
-        except GradeDbError:
-            return "result_post_failed"
+    async def collect_students() -> None:
+        while True:
+            student = await student_queue.get()
+            try:
+                if student is None or lease_failed.is_set():
+                    return
+                try:
+                    result = await scrape_one(browser, student)
+                    parsed_grades = result.get("parsed_grades")
+                    if isinstance(parsed_grades, dict) and parsed_grades:
+                        outcome = {
+                            "kind": "grade_success",
+                            "parsed_grades": parsed_grades,
+                        }
+                        scrape_succeeded = True
+                    else:
+                        outcome = {
+                            "kind": "failure",
+                            "code": "no_grades",
+                            "passwordgood": None,
+                        }
+                        scrape_succeeded = False
+                except LoginError:
+                    outcome = {
+                        "kind": "failure",
+                        "code": "bad_login",
+                        "passwordgood": False,
+                    }
+                    scrape_succeeded = False
+                except Exception as exc:
+                    logger.error(
+                        "portal.scrape.failed",
+                        extra={
+                            "portal": student["portal"],
+                            "student_record_id": student["db_id"],
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+                    outcome = {
+                        "kind": "failure",
+                        "code": "scrape_failed",
+                        "passwordgood": None,
+                    }
+                    scrape_succeeded = False
 
-        applied_success = scrape_succeeded and bool(response.get("applied"))
-        _advance_progress(progress, success=applied_success)
-    return None
+                acknowledged = asyncio.get_running_loop().create_future()
+                await result_queue.put(
+                    (student, outcome, scrape_succeeded, acknowledged)
+                )
+                await acknowledged
+            finally:
+                student_queue.task_done()
+
+    workers = {asyncio.create_task(collect_students()) for _ in range(worker_count)}
+    posted_results = 0
+    try:
+        while posted_results < len(student_list):
+            if lease_failed.is_set():
+                return "lease_renewal_failed"
+            try:
+                (
+                    student,
+                    outcome,
+                    scrape_succeeded,
+                    acknowledged,
+                ) = await asyncio.wait_for(result_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+
+            try:
+                if lease_failed.is_set():
+                    return "lease_renewal_failed"
+                try:
+                    response = await asyncio.to_thread(
+                        client.post_result,
+                        job_id=session["job_id"],
+                        lease_token=session["lease_token"],
+                        crmstudentid=student["db_id"],
+                        outcome=outcome,
+                    )
+                except GradeDbLeaseExpired:
+                    return "lease_expired"
+                except GradeDbUnavailable:
+                    return "neon_unavailable"
+                except GradeDbError:
+                    return "result_post_failed"
+
+                applied_success = scrape_succeeded and bool(response.get("applied"))
+                _advance_progress(progress, success=applied_success)
+                posted_results += 1
+                acknowledged.set_result(None)
+            finally:
+                result_queue.task_done()
+
+        await asyncio.gather(*workers)
+        return None
+    finally:
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
 
 
 async def _heartbeat_loop(
