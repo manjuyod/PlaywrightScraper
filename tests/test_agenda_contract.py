@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from scraper.agenda_contract import empty_agenda_bundle, normalize_agenda
 
 
@@ -116,6 +118,53 @@ def test_normalize_can_fuzzy_match_a_unique_minor_title_difference() -> None:
     )
 
     assert list(weeks["2026-08-17"]) == ["Environmental Science"]
+
+
+@pytest.mark.parametrize(
+    ("source", "known_titles", "expected"),
+    [
+        (
+            "SCI320A-29 - ENVIRONMENTAL SYSTEMS SCIENCE - P2",
+            ["ENVIRONMENTAL SYSTEMS SCIENCE"],
+            "ENVIRONMENTAL SYSTEMS SCIENCE",
+        ),
+        ("ENG300A-53 - ENGLISH 11 - P5", ["ENGLISH 11"], "ENGLISH 11"),
+        (
+            "SCI320A-29 - ENVIRONMENTAL SYSTEMS SCINCE - P2",
+            ["ENVIRONMENTAL SYSTEMS SCIENCE", "ENGLISH 11"],
+            "ENVIRONMENTAL SYSTEMS SCIENCE",
+        ),
+        (
+            "ENG300A-53 - AP ENGLISH 11 - P5",
+            ["ENGLISH 11", "AP ENGLISH 11"],
+            "AP ENGLISH 11",
+        ),
+        (
+            "ENG300A-53 - ENGLISH 12 - P5",
+            ["ENGLISH 11"],
+            "ENG300A-53 - ENGLISH 12 - P5",
+        ),
+    ],
+)
+def test_normalize_matches_the_best_course_window_inside_portal_metadata(
+    source: str,
+    known_titles: list[str],
+    expected: str,
+) -> None:
+    weeks = normalize_agenda(
+        [
+            {
+                "course": source,
+                "title": "Assignment",
+                "dueDate": "2026-08-18",
+                "dueTime": None,
+                "status": "due",
+            }
+        ],
+        known_course_titles=known_titles,
+    )
+
+    assert list(weeks["2026-08-17"]) == [expected]
 
 
 def test_normalize_preserves_source_title_when_known_match_is_ambiguous() -> None:

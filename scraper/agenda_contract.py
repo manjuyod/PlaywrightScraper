@@ -65,8 +65,16 @@ def monday_for(due_date: date) -> str:
 
 
 def empty_agenda_bundle(portals: Sequence[str | None]) -> AgendaBundle:
-    first = portals[0] if len(portals) > 0 and _PORTAL_KEY.fullmatch(portals[0] or "") else None
-    second = portals[1] if len(portals) > 1 and _PORTAL_KEY.fullmatch(portals[1] or "") else None
+    first = (
+        portals[0]
+        if len(portals) > 0 and _PORTAL_KEY.fullmatch(portals[0] or "")
+        else None
+    )
+    second = (
+        portals[1]
+        if len(portals) > 1 and _PORTAL_KEY.fullmatch(portals[1] or "")
+        else None
+    )
     return {
         "agenda1": {"portal": first, "weeks": {}},
         "agenda2": {"portal": second, "weeks": {}},
@@ -116,6 +124,43 @@ def _course_match_parts(title: str) -> tuple[str | None, str]:
     return period, " ".join(tokens)
 
 
+def _contains_token_sequence(source: Sequence[str], candidate: Sequence[str]) -> bool:
+    if not candidate or len(candidate) > len(source):
+        return False
+    width = len(candidate)
+    return any(
+        tuple(source[start : start + width]) == tuple(candidate)
+        for start in range(len(source) - width + 1)
+    )
+
+
+def _best_course_window_score(source_key: str, candidate_key: str) -> float:
+    source_tokens = source_key.split()
+    candidate_tokens = candidate_key.split()
+    if not source_tokens or not candidate_tokens:
+        return 0.0
+
+    candidate_numbers = {token for token in candidate_tokens if token.isdigit()}
+    candidate_width = len(candidate_tokens)
+    scores: list[float] = []
+    for width in range(max(1, candidate_width - 1), candidate_width + 2):
+        if width > len(source_tokens):
+            continue
+        for start in range(len(source_tokens) - width + 1):
+            window_tokens = source_tokens[start : start + width]
+            window_numbers = {token for token in window_tokens if token.isdigit()}
+            if window_numbers != candidate_numbers:
+                continue
+            scores.append(
+                SequenceMatcher(
+                    None,
+                    " ".join(window_tokens),
+                    candidate_key,
+                ).ratio()
+            )
+    return max(scores, default=0.0)
+
+
 def _canonical_course_title(source: str, known_titles: Sequence[object]) -> str:
     source_period, source_key = _course_match_parts(source)
     if not source_key:
@@ -132,7 +177,9 @@ def _canonical_course_title(source: str, known_titles: Sequence[object]) -> str:
 
     exact = [candidate for candidate in candidates if candidate[2] == source_key]
     if source_period is not None:
-        same_period = [candidate for candidate in exact if candidate[1] == source_period]
+        same_period = [
+            candidate for candidate in exact if candidate[1] == source_period
+        ]
         if len(same_period) == 1:
             return same_period[0][0]
     if len(exact) == 1:
@@ -140,7 +187,29 @@ def _canonical_course_title(source: str, known_titles: Sequence[object]) -> str:
     if exact:
         return source
 
-    source_numbers = {token for token in source_key.split() if token.isdigit()}
+    source_tokens = source_key.split()
+    contained: list[tuple[int, int, str]] = []
+    for title, candidate_period, candidate_key in candidates:
+        if (
+            source_period is not None
+            and candidate_period is not None
+            and source_period != candidate_period
+        ):
+            continue
+        candidate_tokens = candidate_key.split()
+        if _contains_token_sequence(source_tokens, candidate_tokens):
+            contained.append((len(candidate_tokens), len(candidate_key), title))
+
+    contained.sort(key=lambda item: (-item[0], -item[1], item[2].casefold(), item[2]))
+    if contained:
+        top_specificity = contained[0][:2]
+        equally_specific = [
+            candidate for candidate in contained if candidate[:2] == top_specificity
+        ]
+        if len(equally_specific) == 1:
+            return contained[0][2]
+        return source
+
     scored: list[tuple[float, str]] = []
     for title, candidate_period, candidate_key in candidates:
         if (
@@ -149,12 +218,7 @@ def _canonical_course_title(source: str, known_titles: Sequence[object]) -> str:
             and source_period != candidate_period
         ):
             continue
-        candidate_numbers = {
-            token for token in candidate_key.split() if token.isdigit()
-        }
-        if source_numbers != candidate_numbers:
-            continue
-        score = SequenceMatcher(None, source_key, candidate_key).ratio()
+        score = _best_course_window_score(source_key, candidate_key)
         scored.append((score, title))
 
     scored.sort(key=lambda item: (-item[0], item[1].casefold(), item[1]))

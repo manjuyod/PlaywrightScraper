@@ -492,29 +492,85 @@
         );
     }
 
-    function GradeList({ grades, empty = "No grade data yet." }) {
-        if (!grades || !grades.length) {
+    function gradeCourseKey(course) {
+        return String(course || "")
+            .replace(/^\s*\d+\s*:\s*/, "")
+            .trim()
+            .replace(/\s+/g, " ")
+            .toLowerCase();
+    }
+
+    function GradeRow({ grade, agenda }) {
+        const course = grade.course;
+        const rowContent = [
+            h(
+                "span",
+                {
+                    key: "course",
+                    className: "min-w-0 flex-1 truncate text-sm font-semibold text-slate-700",
+                    title: course,
+                },
+                course,
+            ),
+            agenda
+                ? h(
+                      "span",
+                      { key: "count", className: "shrink-0 text-xs font-bold text-brand-blueDark" },
+                      `${agenda.assignments.length} ${agenda.assignments.length === 1 ? "assignment" : "assignments"}`,
+                  )
+                : null,
+            h(
+                "span",
+                {
+                    key: "grade",
+                    className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900",
+                },
+                Number(grade.grade).toFixed(1),
+                h(GradeMovement, { change: grade.change }),
+            ),
+        ];
+        if (!agenda) {
+            return h(
+                "div",
+                { className: "flex min-w-0 items-center gap-3 rounded-md bg-slate-50 px-3 py-2" },
+                rowContent,
+            );
+        }
+        return h(
+            "details",
+            { className: "tc-grade-agenda rounded-md border border-slate-200 bg-slate-50" },
+            h(
+                "summary",
+                { className: "tc-focus-ring flex min-w-0 items-center gap-3 rounded-md px-3 py-2" },
+                rowContent,
+            ),
+            h(
+                "div",
+                { className: "grid gap-2 border-t border-slate-200 p-3" },
+                agenda.assignments.map((assignment, index) =>
+                    h(AgendaAssignment, {
+                        key: `${assignment.status}-${assignment.dueDate}-${assignment.title}-${index}`,
+                        assignment,
+                    }),
+                ),
+            ),
+        );
+    }
+
+    function GradeList({ grades, empty = "No grade data yet.", agendaByCourse }) {
+        const gradeItems = grades || [];
+        if (!gradeItems.length) {
             return h("p", { className: "text-sm text-slate-500" }, empty);
         }
         return h(
             "div",
             { className: "grid gap-2" },
-            grades.map((grade) =>
-                h(
-                    "div",
-                    { key: grade.course, className: "flex min-w-0 items-center gap-3 rounded-md bg-slate-50 px-3 py-2" },
-                    h(
-                        "span",
-                        { className: "min-w-0 flex-1 truncate text-sm font-semibold text-slate-700", title: grade.course },
-                        grade.course,
-                    ),
-                    h(
-                        "span",
-                        { className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900" },
-                        Number(grade.grade).toFixed(1),
-                        h(GradeMovement, { change: grade.change }),
-                    ),
-                ),
+            gradeItems.map((grade) =>
+                h(GradeRow, {
+                    key: grade.course,
+                    grade,
+                    agenda: agendaByCourse && agendaByCourse.get(gradeCourseKey(grade.course)),
+                }),
             ),
         );
     }
@@ -919,12 +975,45 @@
         );
     }
 
+    const AGENDA_STATUSES = {
+        missing: { marker: "M", label: "Missing assignment" },
+        low_score: { marker: "LOW GRADE", label: "Low-grade assignment" },
+        due: { marker: "DUE", label: "Upcoming assignment" },
+    };
+
+    function AgendaAssignment({ assignment }) {
+        const status = AGENDA_STATUSES[assignment.status] || AGENDA_STATUSES.due;
+        return h(
+            "article",
+            { className: "tc-agenda-assignment" },
+            h(
+                "span",
+                {
+                    className: cn(
+                        "tc-agenda-marker",
+                        `tc-agenda-marker--${assignment.status}`,
+                    ),
+                    "aria-label": status.label,
+                },
+                status.marker,
+            ),
+            h(
+                "span",
+                { className: "min-w-0 flex-1 truncate", title: assignment.title },
+                assignment.title,
+            ),
+            h(
+                "time",
+                {
+                    className: "shrink-0 text-xs text-slate-500",
+                    dateTime: assignment.dueDate,
+                },
+                assignment.dueDisplay,
+            ),
+        );
+    }
+
     function AgendaClass({ classGroup }) {
-        const statuses = {
-            missing: { marker: "M", label: "Missing assignment" },
-            low_score: { marker: "LOW GRADE", label: "Low-grade assignment" },
-            due: { marker: "DUE", label: "Upcoming assignment" },
-        };
         return h(
             "details",
             { className: "tc-agenda-class rounded-lg border border-slate-200" },
@@ -949,67 +1038,74 @@
                 "div",
                 { className: "grid gap-2 border-t border-slate-200 p-3" },
                 classGroup.assignments.map((assignment, index) => {
-                    const status = statuses[assignment.status] || statuses.due;
                     return h(
-                        "article",
+                        AgendaAssignment,
                         {
                             key: `${assignment.status}-${assignment.dueDate}-${assignment.title}-${index}`,
-                            className: "tc-agenda-assignment",
+                            assignment,
                         },
-                        h(
-                            "span",
-                            {
-                                className: cn(
-                                    "tc-agenda-marker",
-                                    `tc-agenda-marker--${assignment.status}`,
-                                ),
-                                "aria-label": status.label,
-                            },
-                            status.marker,
-                        ),
-                        h(
-                            "span",
-                            {
-                                className: "min-w-0 flex-1 truncate",
-                                title: assignment.title,
-                            },
-                            assignment.title,
-                        ),
-                        h(
-                            "time",
-                            {
-                                className: "shrink-0 text-xs text-slate-500",
-                                dateTime: assignment.dueDate,
-                            },
-                            assignment.dueDisplay,
-                        ),
                     );
                 }),
             ),
         );
     }
 
-    const PRIMARY_AGENDA_PORTALS = new Set(["google_classroom", "canvas"]);
+    const GRADE_AGENDA_PORTALS = new Set(["infinite_campus", "parentvue", "canvas"]);
 
-    function displayAgendaSlots(slots) {
-        return (slots || [])
-            .filter(
-                (slot) =>
-                    slot &&
-                    (slot.portal || (Array.isArray(slot.weeks) && slot.weeks.length)),
-            )
-            .map((slot, sourceIndex) => ({ slot, sourceIndex }))
-            .sort((left, right) => {
-                const leftPreferred = PRIMARY_AGENDA_PORTALS.has(left.slot.portal) ? 0 : 1;
-                const rightPreferred = PRIMARY_AGENDA_PORTALS.has(right.slot.portal) ? 0 : 1;
-                return leftPreferred - rightPreferred || left.sourceIndex - right.sourceIndex;
-            })
-            .slice(0, 2)
-            .map(({ slot }, index) => Object.assign({}, slot, { number: index + 1 }));
+    function isConfiguredAgendaSlot(slot) {
+        return Boolean(
+            slot &&
+                (slot.portal || (Array.isArray(slot.weeks) && slot.weeks.length)),
+        );
+    }
+
+    function studentAgendaLayout(slots) {
+        const agendaSlots = slots || [];
+        const primary =
+            agendaSlots.find((slot) => slot && slot.number === 1) || agendaSlots[0] || null;
+        const secondary =
+            agendaSlots.find((slot) => slot && slot.number === 2) || agendaSlots[1] || null;
+        const gradeSlot =
+            isConfiguredAgendaSlot(primary) && GRADE_AGENDA_PORTALS.has(primary.portal)
+                ? primary
+                : null;
+        const standaloneSlot = isConfiguredAgendaSlot(secondary)
+            ? secondary
+            : isConfiguredAgendaSlot(primary) && !gradeSlot
+              ? primary
+              : null;
+        return { gradeSlot, standaloneSlot };
+    }
+
+    function gradeAgendaByCourse(slot) {
+        const courses = new Map();
+        for (const week of (slot && slot.weeks) || []) {
+            for (const classGroup of week.classes || []) {
+                const key = gradeCourseKey(classGroup.name);
+                const assignments = classGroup.assignments || [];
+                if (!key || !assignments.length) {
+                    continue;
+                }
+                if (!courses.has(key)) {
+                    courses.set(key, { assignments: [] });
+                }
+                const course = courses.get(key);
+                course.assignments.push(...assignments);
+            }
+        }
+        for (const course of courses.values()) {
+            course.assignments.sort(
+                (left, right) =>
+                    String(right.dueDate || "").localeCompare(String(left.dueDate || "")) ||
+                    String(right.dueTime || "").localeCompare(String(left.dueTime || "")) ||
+                    String(left.title || "").localeCompare(String(right.title || "")),
+            );
+        }
+        return courses;
     }
 
     function AgendaCard({ slot }) {
-        const heading = `Agenda ${slot.number}${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
+        const heading = `Agenda${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
         return h(
             Card,
             { className: "tc-report-card tc-agenda-card p-5" },
@@ -1060,31 +1156,11 @@
         );
     }
 
-    function EmptyAgendaCard({ number }) {
-        return h(
-            Card,
-            { className: "tc-report-card tc-agenda-card tc-agenda-card--empty p-5" },
-            h("h2", { className: "text-lg font-extrabold text-slate-500" }, `Agenda ${number}`),
-            h(
-                "div",
-                {
-                    className: "mt-4 flex min-h-32 items-center justify-center rounded-lg border border-dashed border-slate-300 p-5 text-center",
-                    "aria-label": `Agenda ${number} unavailable`,
-                },
-                h(
-                    "p",
-                    { className: "text-sm font-semibold text-slate-500" },
-                    number === 1 ? "No agenda available." : "No second agenda configured.",
-                ),
-            ),
-        );
-    }
-
-    function LegacyAgendaCard({ items, number = 1 }) {
+    function AgendaItemsCard({ items }) {
         return h(
             Card,
             { className: "tc-report-card tc-agenda-card p-5" },
-            h("h2", { className: "text-lg font-extrabold text-slate-900" }, `Agenda ${number}`),
+            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda"),
             h(
                 "div",
                 { className: "mt-4 grid gap-3" },
@@ -1115,23 +1191,13 @@
 
     function StudentPage({ data }) {
         const student = data.student || {};
-        const agendaSlots = displayAgendaSlots(student.agendaSlots);
-        const agendaCards = agendaSlots.map((slot) =>
-            h(AgendaCard, { key: `portal-${slot.number}`, slot }),
-        );
-        if (!agendaCards.length && student.agendaItems && student.agendaItems.length) {
-            agendaCards.push(
-                h(LegacyAgendaCard, {
-                    key: "legacy-1",
-                    items: student.agendaItems,
-                    number: 1,
-                }),
-            );
-        }
-        while (agendaCards.length < 2) {
-            const number = agendaCards.length + 1;
-            agendaCards.push(h(EmptyAgendaCard, { key: `empty-${number}`, number }));
-        }
+        const agendaLayout = studentAgendaLayout(student.agendaSlots);
+        const courseAgendas = gradeAgendaByCourse(agendaLayout.gradeSlot);
+        const standaloneAgenda = agendaLayout.standaloneSlot
+            ? h(AgendaCard, { slot: agendaLayout.standaloneSlot })
+            : student.agendaItems && student.agendaItems.length
+              ? h(AgendaItemsCard, { items: student.agendaItems })
+              : null;
         const [activeTab, setActiveTab] = useState(
             studentTabFromHash(window.location.hash),
         );
@@ -1170,8 +1236,16 @@
             ),
             h(
                 "div",
-                { key: "grades", className: "mt-4" },
-                h(GradeList, { grades: student.gradesSnapshot }),
+                {
+                    key: "grades",
+                    className: "tc-report-card__scroll tc-scrollbar tc-focus-ring mt-4 rounded-md pr-2",
+                    tabIndex: 0,
+                    "aria-label": "Current grades and assignments",
+                },
+                h(GradeList, {
+                    grades: student.gradesSnapshot,
+                    agendaByCourse: courseAgendas,
+                }),
             ),
             h(
                 "p",
@@ -1252,7 +1326,13 @@
                               ),
                           ),
                       ),
-                      h("div", { className: "tc-agenda-row" }, agendaCards),
+                      standaloneAgenda
+                          ? h(
+                                "div",
+                                { className: "grid gap-6" },
+                                standaloneAgenda,
+                            )
+                          : null,
                   ),
         );
     }
