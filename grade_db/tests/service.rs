@@ -306,3 +306,57 @@ async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
         deterministic_result_key(Uuid::from_u128(19), 1, "grade")
     );
 }
+
+#[tokio::test]
+async fn agenda_pull_results_use_independent_slot_idempotency_keys() {
+    let crm = Arc::new(FakeCrm::default());
+    crm.students
+        .lock()
+        .unwrap()
+        .push(crm_student(1, Some("pw")));
+    let neon = Arc::new(FakeNeon::default());
+    neon.states.lock().unwrap().insert(
+        1,
+        StudentGradeState {
+            crmstudentid: 1,
+            track_agenda: true,
+            ..Default::default()
+        },
+    );
+    *neon.active_job.lock().unwrap() = Some(ActiveJob {
+        job_id: Uuid::from_u128(19),
+        lease_token: Uuid::from_u128(42),
+        kind: JobKind::Agenda,
+        franchise_id: Some(19),
+        student_id: None,
+    });
+    let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
+
+    for slot in ["agenda1", "agenda2"] {
+        let request = serde_json::from_value(json!({
+            "job_id": Uuid::from_u128(19),
+            "lease_token": Uuid::from_u128(42),
+            "crmstudentid": 1,
+            "outcome": {
+                "kind": "agenda_success",
+                "weekly_agenda": {
+                    slot: {"portal": "canvas", "weeks": {}}
+                }
+            }
+        }))
+        .unwrap();
+        service.post_result(request).await.unwrap();
+    }
+
+    let writes = neon.writes.lock().unwrap();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(
+        writes[0].idempotency_key,
+        deterministic_result_key(Uuid::from_u128(19), 1, "agenda1")
+    );
+    assert_eq!(
+        writes[1].idempotency_key,
+        deterministic_result_key(Uuid::from_u128(19), 1, "agenda2")
+    );
+    assert_ne!(writes[0].idempotency_key, writes[1].idempotency_key);
+}

@@ -651,7 +651,7 @@ def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> N
     )
 
     assert failure is None
-    assert len(posts) == 2
+    assert len(posts) == 4
     assert observed == {"user-7": "user-7", "user-8": "user-8"}
     assert len(browser.contexts) == 2
     assert all(context.close_calls == 1 for context in browser.contexts)
@@ -704,7 +704,7 @@ def test_agenda_job_limits_active_portal_workers(monkeypatch) -> None:
 
     assert failure is None
     assert peak_active == min(agenda.MAX_CONCURRENT_AGENDA_WORKERS, len(students))
-    assert len(posts) == len(students)
+    assert len(posts) == len(students) * 2
 
 
 @pytest.mark.parametrize(
@@ -778,7 +778,7 @@ def test_unsupported_and_unidentified_slots_remain_in_empty_bundle() -> None:
     assert browser.pages == []
 
 
-def test_no_worker_slots_post_exactly_one_empty_success() -> None:
+def test_no_worker_slots_post_each_empty_pull_independently() -> None:
     posts = []
     student = _student(7)
     student.update(
@@ -811,22 +811,38 @@ def test_no_worker_slots_post_exactly_one_empty_success() -> None:
     )
 
     assert failure is None
-    assert len(posts) == 1
-    assert posts[0]["outcome"] == {
-        "kind": "agenda_success",
-        "weekly_agenda": empty_bundle,
-    }
+    assert [post["outcome"] for post in posts] == [
+        {
+            "kind": "agenda_success",
+            "weekly_agenda": {"agenda1": empty_bundle["agenda1"]},
+        },
+        {
+            "kind": "agenda_success",
+            "weekly_agenda": {"agenda2": empty_bundle["agenda2"]},
+        },
+    ]
     assert browser.contexts == []
     assert browser.pages == []
     assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
 
 
-def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> None:
+@pytest.mark.parametrize(
+    ("failing_portal", "successful_slot", "failed_slot"),
+    [
+        ("parentvue", "agenda1", "agenda2"),
+        ("canvas", "agenda2", "agenda1"),
+    ],
+)
+def test_slot_failure_preserves_the_other_successful_pull(
+    monkeypatch,
+    caplog,
+    failing_portal: str,
+    successful_slot: str,
+    failed_slot: str,
+) -> None:
     sentinels = [
         "sentinel-user",
         "sentinel-password",
-        "Sentinel Course",
-        "Sentinel Assignment",
         "sentinel-query",
         "sentinel-cookie",
         "sentinel-token",
@@ -858,7 +874,7 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
             raise RuntimeError("sentinel-cookie sentinel-token")
 
     def get_portal(key):
-        return SuccessEngine if key == "canvas" else FailureEngine
+        return FailureEngine if key == failing_portal else SuccessEngine
 
     class Client:
         def post_result(self, **kwargs):
@@ -876,24 +892,51 @@ def test_slot_failure_posts_only_safe_atomic_failure(monkeypatch, caplog) -> Non
     )
     browser = FakeBrowser()
 
+    progress = _new_progress(1)
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
             browser,
             [student],
-            _new_progress(1),
+            progress,
             asyncio.Event(),
         )
     )
 
     assert failure is None
-    assert len(posts) == 1
-    assert posts[0]["outcome"] == {
-        "kind": "failure",
-        "code": "agenda2_parentvue_failed",
-        "passwordgood": None,
-    }
+    successful_portal = "parentvue" if successful_slot == "agenda2" else "canvas"
+    assert [post["outcome"] for post in posts] == [
+        {
+            "kind": "agenda_success",
+            "weekly_agenda": {
+                successful_slot: {
+                    "portal": successful_portal,
+                    "weeks": {
+                        "2026-08-10": {
+                            "Sentinel Course": {
+                                "missing": [],
+                                "low_score": [],
+                                "due": [
+                                    {
+                                        "title": "Sentinel Assignment",
+                                        "dueDate": "2026-08-16",
+                                        "dueTime": None,
+                                    }
+                                ],
+                            }
+                        }
+                    },
+                }
+            },
+        },
+        {
+            "kind": "agenda_pull_failure",
+            "agenda_slot": failed_slot,
+            "code": f"{failed_slot}_{failing_portal}_failed",
+        },
+    ]
+    assert progress == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
     assert len(browser.pages) == 2
     assert all(page.close_calls == 1 for page in browser.pages)
     assert len(browser.contexts) == 2
@@ -1018,10 +1061,17 @@ def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
 
     async def fetch(_context, student, **_kwargs):
         if student["db_id"] == 7:
-            return {
-                "agenda1": {"portal": "canvas", "weeks": {}},
-                "agenda2": {"portal": "parentvue", "weeks": {}},
-            }, student
+            first, second = agenda.resolve_agenda_slots(student)
+            return (
+                agenda.AgendaPullResult(
+                    slot=first,
+                    snapshot={"portal": "canvas", "weeks": {}},
+                ),
+                agenda.AgendaPullResult(
+                    slot=second,
+                    snapshot={"portal": "parentvue", "weeks": {}},
+                ),
+            ), student
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -1032,7 +1082,7 @@ def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
         def post_result(self, **_kwargs):
             raise GradeDbUnavailable("safe")
 
-    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
+    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
@@ -1079,7 +1129,7 @@ def test_lease_failure_cancels_outstanding_collection(monkeypatch) -> None:
         await lease_task
         return result
 
-    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
+    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
 
     assert asyncio.run(scenario()) == "lease_renewal_failed"
     assert cancelled.is_set()
@@ -1092,7 +1142,7 @@ def test_heartbeat_failure_prevents_agenda_tasks_from_starting(monkeypatch) -> N
         started.append(student["db_id"])
         return {}, student
 
-    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
+    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
     lease_failed = asyncio.Event()
     lease_failed.set()
 

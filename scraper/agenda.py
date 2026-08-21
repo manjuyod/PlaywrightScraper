@@ -11,6 +11,7 @@ from playwright.async_api import Browser, async_playwright
 
 from scraper.agenda_contract import (
     AgendaBundle,
+    AgendaSlotSnapshot,
     AgendaWeeks,
     empty_agenda_bundle,
     normalize_agenda,
@@ -58,6 +59,13 @@ class AgendaSlotCollectionError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True, repr=False)
+class AgendaPullResult:
+    slot: AgendaSlot
+    snapshot: AgendaSlotSnapshot | None
+    failure_code: str | None = None
 
 
 def _agenda_exception_kind(exc: BaseException) -> AgendaExceptionKind:
@@ -236,12 +244,12 @@ async def _collect_slot(
         reset_log_context(context_token)
 
 
-async def fetch_agenda(
+async def _fetch_agenda_pulls(
     browser: Browser,
     student: dict[str, Any],
     *,
     worker_semaphore: asyncio.Semaphore | None = None,
-) -> tuple[AgendaBundle, dict[str, Any]]:
+) -> tuple[tuple[AgendaPullResult, AgendaPullResult], dict[str, Any]]:
     if worker_semaphore is None:
         worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
 
@@ -251,6 +259,10 @@ async def fetch_agenda(
 
     slots = resolve_agenda_slots(student)
     bundle = empty_agenda_bundle([slot.portal for slot in slots])
+    pulls = {
+        slot.key: AgendaPullResult(slot=slot, snapshot=bundle[slot.key])
+        for slot in slots
+    }
     workers: list[tuple[AgendaSlot, asyncio.Task[AgendaWeeks]]] = []
     for slot in slots:
         if (
@@ -273,10 +285,36 @@ async def fetch_agenda(
     )
     for (slot, _task), result in zip(workers, results, strict=True):
         if isinstance(result, BaseException):
-            raise AgendaSlotCollectionError(
-                f"{slot.key}_{slot.portal}_failed"
-            ) from None
-        bundle[slot.key]["weeks"] = result
+            pulls[slot.key] = AgendaPullResult(
+                slot=slot,
+                snapshot=None,
+                failure_code=f"{slot.key}_{slot.portal}_failed",
+            )
+            continue
+        pulls[slot.key] = AgendaPullResult(
+            slot=slot,
+            snapshot={"portal": bundle[slot.key]["portal"], "weeks": result},
+        )
+    return (pulls["agenda1"], pulls["agenda2"]), student
+
+
+async def fetch_agenda(
+    browser: Browser,
+    student: dict[str, Any],
+    *,
+    worker_semaphore: asyncio.Semaphore | None = None,
+) -> tuple[AgendaBundle, dict[str, Any]]:
+    pulls, student = await _fetch_agenda_pulls(
+        browser,
+        student,
+        worker_semaphore=worker_semaphore,
+    )
+    bundle = empty_agenda_bundle([pull.slot.portal for pull in pulls])
+    for pull in pulls:
+        if pull.failure_code is not None:
+            raise AgendaSlotCollectionError(pull.failure_code)
+        if pull.snapshot is not None:
+            bundle[pull.slot.key] = pull.snapshot
     return bundle, student
 
 
@@ -301,7 +339,7 @@ async def _collect_and_post_agendas(
     worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
     tasks = {
         asyncio.create_task(
-            fetch_agenda(
+            _fetch_agenda_pulls(
                 browser,
                 student,
                 worker_semaphore=worker_semaphore,
@@ -321,49 +359,70 @@ async def _collect_and_post_agendas(
             for task in done:
                 student = tasks[task]
                 try:
-                    weekly_agenda, _ = task.result()
-                    outcome = {
-                        "kind": "agenda_success",
-                        "weekly_agenda": weekly_agenda,
-                    }
-                    collection_succeeded = True
+                    pulls, _ = task.result()
+                    successful_pulls = [
+                        pull for pull in pulls if pull.failure_code is None
+                    ]
+                    failed_pulls = [
+                        pull for pull in pulls if pull.failure_code is not None
+                    ]
+                    outcomes = [
+                        {
+                            "kind": "agenda_success",
+                            "weekly_agenda": {
+                                pull.slot.key: pull.snapshot,
+                            },
+                        }
+                        for pull in successful_pulls
+                    ] + [
+                        {
+                            "kind": "agenda_pull_failure",
+                            "agenda_slot": pull.slot.key,
+                            "code": pull.failure_code,
+                        }
+                        for pull in failed_pulls
+                    ]
+                    collection_succeeded = not failed_pulls
                 except AgendaSlotCollectionError as exc:
-                    outcome = {
+                    outcomes = [{
                         "kind": "failure",
                         "code": exc.code,
                         "passwordgood": None,
-                    }
+                    }]
                     collection_succeeded = False
                 except Exception:
-                    outcome = {
+                    outcomes = [{
                         "kind": "failure",
                         "code": "agenda_failed",
                         "passwordgood": None,
-                    }
+                    }]
                     collection_succeeded = False
 
                 if lease_failed.is_set():
                     await _cancel_tasks(pending)
                     return "lease_renewal_failed"
-                try:
-                    response = await asyncio.to_thread(
-                        client.post_result,
-                        job_id=session["job_id"],
-                        lease_token=session["lease_token"],
-                        crmstudentid=student["db_id"],
-                        outcome=outcome,
-                    )
-                except GradeDbLeaseExpired:
-                    await _cancel_tasks(pending)
-                    return "lease_expired"
-                except GradeDbUnavailable:
-                    await _cancel_tasks(pending)
-                    return "neon_unavailable"
-                except GradeDbError:
-                    await _cancel_tasks(pending)
-                    return "result_post_failed"
+                all_applied = True
+                for outcome in outcomes:
+                    try:
+                        response = await asyncio.to_thread(
+                            client.post_result,
+                            job_id=session["job_id"],
+                            lease_token=session["lease_token"],
+                            crmstudentid=student["db_id"],
+                            outcome=outcome,
+                        )
+                    except GradeDbLeaseExpired:
+                        await _cancel_tasks(pending)
+                        return "lease_expired"
+                    except GradeDbUnavailable:
+                        await _cancel_tasks(pending)
+                        return "neon_unavailable"
+                    except GradeDbError:
+                        await _cancel_tasks(pending)
+                        return "result_post_failed"
+                    all_applied = all_applied and bool(response.get("applied"))
 
-                applied_success = collection_succeeded and bool(response.get("applied"))
+                applied_success = collection_succeeded and all_applied
                 _advance_progress(progress, success=applied_success)
                 if on_progress is not None:
                     on_progress()

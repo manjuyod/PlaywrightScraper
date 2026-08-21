@@ -259,6 +259,22 @@ pub fn deterministic_result_key(job_id: Uuid, crmstudentid: i64, kind: &str) -> 
     Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes())
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgendaSlot {
+    Agenda1,
+    Agenda2,
+}
+
+impl AgendaSlot {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agenda1 => "agenda1",
+            Self::Agenda2 => "agenda2",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResultOutcome {
@@ -267,6 +283,10 @@ pub enum ResultOutcome {
     },
     AgendaSuccess {
         weekly_agenda: Value,
+    },
+    AgendaPullFailure {
+        agenda_slot: AgendaSlot,
+        code: String,
     },
     Failure {
         code: String,
@@ -280,7 +300,18 @@ impl ResultOutcome {
         match self {
             Self::GradeSuccess { .. } => "grade",
             Self::AgendaSuccess { .. } => "agenda",
+            Self::AgendaPullFailure { .. } => "agenda",
             Self::Failure { .. } => "failure",
+        }
+    }
+
+    pub fn idempotency_scope(&self, job_kind: JobKind) -> &'static str {
+        match self {
+            Self::AgendaSuccess { weekly_agenda } => {
+                agenda_pull_scope(weekly_agenda).unwrap_or(job_kind.as_str())
+            }
+            Self::AgendaPullFailure { agenda_slot, .. } => agenda_slot.as_str(),
+            _ => job_kind.as_str(),
         }
     }
 
@@ -296,13 +327,29 @@ impl ResultOutcome {
             {
                 validate_result_json(weekly_agenda)
             }
+            (Self::AgendaPullFailure { code, .. }, JobKind::Agenda) if is_safe_code(code) => Ok(()),
             (Self::Failure { code, .. }, _) if is_safe_code(code) => Ok(()),
             (Self::GradeSuccess { .. }, JobKind::Agenda)
-            | (Self::AgendaSuccess { .. }, JobKind::Grade) => {
+            | (Self::AgendaSuccess { .. }, JobKind::Grade)
+            | (Self::AgendaPullFailure { .. }, JobKind::Grade) => {
                 Err("result kind does not match job kind")
             }
             _ => Err("result payload is invalid"),
         }
+    }
+}
+
+fn agenda_pull_scope(weekly_agenda: &Value) -> Option<&'static str> {
+    let object = weekly_agenda.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    if object.contains_key("agenda1") {
+        Some("agenda1")
+    } else if object.contains_key("agenda2") {
+        Some("agenda2")
+    } else {
+        None
     }
 }
 
@@ -427,6 +474,12 @@ impl ResultPostRequest {
                 "status": "synced",
                 "kind": "agenda",
                 "weekly_agenda": weekly_agenda,
+            }),
+            ResultOutcome::AgendaPullFailure { agenda_slot, code } => json!({
+                "status": "error",
+                "kind": "agenda",
+                "agenda_slot": agenda_slot,
+                "code": code,
             }),
             ResultOutcome::Failure { code, passwordgood } => json!({
                 "status": "error",

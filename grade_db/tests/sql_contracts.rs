@@ -65,7 +65,8 @@ fn result_writes_are_idempotent_and_state_updates_are_separate() {
     assert!(sql::APPLY_GRADE.contains("jsonb_build_object"));
     assert!(sql::APPLY_GRADE.contains("date_trunc('week', now())"));
     assert!(sql::APPLY_AGENDA.contains("weekly_agenda"));
-    assert!(!sql::APPLY_AGENDA.contains("||"));
+    assert!(sql::APPLY_AGENDA.contains("COALESCE(weekly_agenda"));
+    assert!(sql::APPLY_AGENDA.contains("||"));
     assert!(!sql::INSERT_RESULT.contains("weeklydata"));
     assert!(!sql::INSERT_RESULT.contains("weekly_agenda"));
 }

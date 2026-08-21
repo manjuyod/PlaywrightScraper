@@ -168,7 +168,7 @@ WHERE crmstudentid = $1
 "#;
     pub const APPLY_AGENDA: &str = r#"
 UPDATE students_grades_20262027
-SET weekly_agenda = $2::jsonb,
+SET weekly_agenda = COALESCE(weekly_agenda, '{}'::jsonb) || $2::jsonb,
     status = 'synced', error_msg = NULL, updated_at = now()
 WHERE crmstudentid = $1
 "#;
@@ -503,6 +503,14 @@ async fn apply_outcome(
             sqlx::query(sql::APPLY_AGENDA)
                 .bind(crmstudentid)
                 .bind(weekly_agenda)
+                .execute(&mut **tx)
+                .await
+        }
+        ResultOutcome::AgendaPullFailure { code, .. } => {
+            sqlx::query(sql::APPLY_FAILURE)
+                .bind(crmstudentid)
+                .bind(None::<bool>)
+                .bind(code)
                 .execute(&mut **tx)
                 .await
         }

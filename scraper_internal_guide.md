@@ -43,8 +43,8 @@ payload and database boundary.
 
 `scraper.agenda` preserves the two CRM credential positions as fixed agenda
 slots: Portal 1 is always `agenda1`, and Portal 2 is always `agenda2`. It never
-sorts or otherwise reassigns slots based on portal type. A successful result
-replaces `weekly_agenda` as one nested snapshot:
+sorts or otherwise reassigns slots based on portal type. Each successful pull
+merges one fixed top-level slot into `weekly_agenda`:
 
 ```json
 {
@@ -97,10 +97,11 @@ large portal response is deterministically truncated rather than rejected by
 the database boundary.
 
 The runner starts workers only for configured agenda-capable slots and uses
-separate browser pages. It posts one `agenda_success` bundle only after every
-started worker succeeds. If any such worker fails during login, request,
-parsing, or normalization, it posts a controlled failure rather than a partial
-bundle; the database boundary leaves the prior stored snapshot in place.
+separate browser pages. It posts each slot result independently. A successful
+pull replaces only its own top-level slot; a login, request, parser, or
+normalization failure posts a slot-scoped controlled failure and leaves that
+slot's prior snapshot in place. The sibling pull is unaffected, and two failed
+pulls leave both prior snapshots unchanged.
 
 The snapshot must never include credentials, portal URLs, student identifiers,
 cookies, tokens, session values, or raw portal responses. Logs and controlled

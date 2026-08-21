@@ -129,6 +129,19 @@ fn result_outcome_must_match_the_job_kind() {
 }
 
 #[test]
+fn agenda_pull_failure_is_scoped_to_one_agenda_job_slot() {
+    let failure: ResultOutcome = serde_json::from_value(json!({
+        "kind": "agenda_pull_failure",
+        "agenda_slot": "agenda2",
+        "code": "agenda2_parentvue_failed"
+    }))
+    .unwrap();
+
+    assert!(failure.validate_for_job(JobKind::Agenda).is_ok());
+    assert!(failure.validate_for_job(JobKind::Grade).is_err());
+}
+
+#[test]
 fn academic_result_json_is_bounded_before_it_can_be_persisted() {
     let mut nested = json!({"grade": 90});
     for _ in 0..10 {

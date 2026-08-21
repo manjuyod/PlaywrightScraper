@@ -164,8 +164,8 @@ cross-slot deduplication or reordering.
 
 Storage is intentionally bounded by the unchanged Rust result validator. Each
 slot's normalized `weeks` subtree is capped independently at 497 recursively
-counted JSON values, so the complete two-slot bundle is at most 999 values
-against the 1,000-value boundary. When a slot exceeds that capacity, it keeps
+counted JSON values, keeping every slot-level result below the 1,000-value
+boundary. When a slot exceeds that capacity, it keeps
 the deterministic canonical prefix: weeks in ascending order, classes in
 case-insensitive order, missing rows before due rows, and rows ordered by due
 date, time, and title. A week or class is included only when at least one of
@@ -179,8 +179,10 @@ scrub.
 An unconfigured, unsupported, or parserless portal is a valid blank slot:
 its `weeks` object stays empty. A capable collector that successfully finds no
 dated work is also a valid blank result. If any capable worker that starts
-fails, the run posts no partial agenda snapshot, so the previously stored
-snapshot remains unchanged.
+fails, its previously stored slot remains unchanged. Every successful slot is
+merged independently into `weekly_agenda`, so Agenda 1 can update while Agenda
+2 is preserved, or vice versa. If both pulls fail, both stored slots remain
+unchanged.
 
 For a safe, fictional UI preview that does not need CRM, Neon, credentials, or
 live portal data, run:

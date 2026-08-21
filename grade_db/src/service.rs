@@ -172,8 +172,11 @@ impl BoundaryService {
             }
         }
 
-        let idempotency_key =
-            deterministic_result_key(job.job_id, request.crmstudentid, job.kind.as_str());
+        let idempotency_key = deterministic_result_key(
+            job.job_id,
+            request.crmstudentid,
+            request.outcome.idempotency_scope(job.kind),
+        );
         let audit_payload = request.audit_payload(true, None);
         let duplicate = self
             .neon
@@ -198,8 +201,11 @@ impl BoundaryService {
         job_kind: JobKind,
         code: &str,
     ) -> Result<ResultPostResponse, AppError> {
-        let idempotency_key =
-            deterministic_result_key(request.job_id, request.crmstudentid, job_kind.as_str());
+        let idempotency_key = deterministic_result_key(
+            request.job_id,
+            request.crmstudentid,
+            request.outcome.idempotency_scope(job_kind),
+        );
         let audit_payload = request.audit_payload(false, Some(code));
         let duplicate = self
             .neon
