@@ -9,7 +9,8 @@
     "lastName": "Quinn",
     "gradeLevel": 11,
     "portalUrl": null,
-    "status": "synced",
+    "status": "error",
+    "errorCode": "bad_login",
     "updatedAt": "2026-08-13T15:14:00-07:00",
     "gradesSnapshot": [
       {"course": "Algebraic Modeling", "grade": 92.4, "change": "+"},

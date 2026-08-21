@@ -76,11 +76,18 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
     test_hooks = """
     window.__tcStudentPageTestHooks = {
         StudentPage: typeof StudentPage === "function" ? StudentPage : null,
-        AgendaCard: typeof AgendaCard === "function" ? AgendaCard : null,
-        AgendaClass: typeof AgendaClass === "function" ? AgendaClass : null,
         GradeHistory: typeof GradeHistory === "function" ? GradeHistory : null,
-        displayAgendaSlots:
-            typeof displayAgendaSlots === "function" ? displayAgendaSlots : null,
+        gradeAgendaByCourse:
+            typeof gradeAgendaByCourse === "function" ? gradeAgendaByCourse : null,
+        studentAgendaLayout:
+            typeof studentAgendaLayout === "function" ? studentAgendaLayout : null,
+        errorDescription:
+            typeof errorDescription === "function" ? errorDescription : null,
+        ErrorStatusBadge:
+            typeof ErrorStatusBadge === "function" ? ErrorStatusBadge : null,
+        JobCard: typeof JobCard === "function" ? JobCard : null,
+        StudentCard: typeof StudentCard === "function" ? StudentCard : null,
+        StudentTable: typeof StudentTable === "function" ? StudentTable : null,
     };
     return;
 
@@ -154,189 +161,155 @@ def test_react_bundle_is_read_only_and_polls_canonical_jobs() -> None:
         assert retired not in javascript
 
 
-def test_student_page_renders_two_ordered_portal_agenda_cards() -> None:
+
+def test_student_agenda_layout_and_course_mapping() -> None:
     result = _run_student_page_scenario(
         """
-if (!hooks.StudentPage || !hooks.AgendaCard || !hooks.AgendaClass) {
-    throw new Error("portal agenda components are not implemented");
-}
-const data = {
-    backUrl: "#back",
-    logoUrl: "/static/imgs/tc_logo.webp",
-    student: {
-        id: 77,
-        firstName: "Fictional",
-        lastName: "Learner",
-        gradeLevel: 11,
-        portalUrl: null,
-        status: "synced",
-        updatedAt: null,
-        gradesSnapshot: [],
-        grades: {},
-        agendaItems: [],
-        agendaSlots: [
-            { number: 1, portal: "canvas", portalLabel: "Canvas", weeks: [] },
-            {
-                number: 2,
-                portal: "parentvue",
-                portalLabel: "ParentVUE",
-                weeks: [
-                    {
-                        weekStart: "2026-08-10",
-                        label: "Week of Aug 10",
-                        classes: [
-                            {
-                                name: "Fictional Seminar",
-                                count: 3,
-                                assignments: [
-                                    { status: "missing", title: "Reflection draft", dueDate: "2026-08-11", dueDisplay: "Aug 11" },
-                                    { status: "low_score", title: "Earlier quiz", dueDate: "2026-08-14", dueDisplay: "Aug 14" },
-                                    { status: "due", title: "Reading notes", dueDate: "2026-08-16", dueDisplay: "Aug 16 · 23:59" },
-                                ],
-                            },
-                        ],
-                    },
-                ],
-            },
-        ],
-    },
+const primary = {
+    number: 1,
+    portal: "parentvue",
+    weeks: [{
+        weekStart: "2026-08-17",
+        label: "Week of Aug 17",
+        classes: [{
+            name: "1: ENGLISH 8",
+            assignments: [
+                { status: "due", title: "Essay", dueDate: "2026-08-18", dueDisplay: "Aug 18" },
+            ],
+        }],
+    }, {
+        weekStart: "2026-08-24",
+        label: "Week of Aug 24",
+        classes: [{
+            name: "ENGLISH 8",
+            assignments: [
+                { status: "due", title: "Presentation", dueDate: "2026-08-25", dueDisplay: "Aug 25" },
+            ],
+        }],
+    }],
 };
-const tree = hooks.StudentPage({ data });
-function collect(node, predicate, found = []) {
-    if (node === null || node === undefined || node === false) return found;
-    if (Array.isArray(node)) {
-        for (const child of node) collect(child, predicate, found);
-        return found;
-    }
-    if (typeof node === "object") {
-        if (predicate(node)) found.push(node);
-        for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
-            collect(child, predicate, found);
-        }
-    }
-    return found;
-}
-function textOf(node) {
-    if (node === null || node === undefined || node === false) return "";
-    if (Array.isArray(node)) return node.map(textOf).join("");
-    if (typeof node === "string" || typeof node === "number") return String(node);
-    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
-}
-const agendaHeadings = collect(tree, (node) => node.type === "h2")
-    .map(textOf)
-    .filter((text) => text.startsWith("Agenda"));
-const scrollRegions = collect(tree, (node) => String(node.props?.["aria-label"] || "").endsWith(" assignments"));
-const details = collect(tree, (node) => node.type === "details");
-const summaries = collect(tree, (node) => node.type === "summary");
-const statusMarkers = collect(tree, (node) => ["Missing assignment", "Low-scoring assignment", "Upcoming assignment"].includes(node.props?.["aria-label"]));
+const secondary = { number: 2, portal: "canvas", weeks: [] };
+const layout = hooks.studentAgendaLayout([primary, secondary]);
+const canvasOnly = hooks.studentAgendaLayout([
+    { ...primary, portal: "canvas" },
+    { number: 2, portal: null, weeks: [] },
+]);
+const course = hooks.gradeAgendaByCourse(layout.gradeSlot).get("english 8");
 console.log(JSON.stringify({
-    agendaHeadings,
-    scrollRegions: scrollRegions.map((node) => ({ label: node.props["aria-label"], tabIndex: node.props.tabIndex, text: textOf(node) })),
-    detailCount: details.length,
-    summaryText: summaries.map(textOf),
-    statusMarkers: statusMarkers.map((node) => ({ label: node.props["aria-label"], text: textOf(node), className: node.props.className })),
-    pageText: textOf(tree),
+    gradePortal: layout.gradeSlot.portal,
+    standalonePortal: layout.standaloneSlot.portal,
+    canvasOnlyStandalone: canvasOnly.standaloneSlot?.portal ?? null,
+    assignmentDates: course.assignments.map((assignment) => assignment.dueDate),
 }));
 """
     )
 
-    assert result["agendaHeadings"] == [
-        "Agenda 1 · Canvas",
-        "Agenda 2 · ParentVUE",
-    ]
-    assert result["scrollRegions"] == [
-        {"label": "Agenda 1 · Canvas assignments", "tabIndex": 0, "text": ""},
-        {
-            "label": "Agenda 2 · ParentVUE assignments",
-            "tabIndex": 0,
-            "text": (
-                "Week of Aug 10Fictional Seminar3 assignments"
-                "MReflection draftAug 11LOWEarlier quizAug 14DUEReading notesAug 16 · 23:59"
-            ),
-        },
-    ]
-    assert result["detailCount"] == 1
-    assert result["summaryText"] == ["Fictional Seminar3 assignments"]
-    assert result["statusMarkers"] == [
-        {
-            "label": "Missing assignment",
-            "text": "M",
-            "className": "tc-agenda-marker tc-agenda-marker--missing",
-        },
-        {
-            "label": "Low-scoring assignment",
-            "text": "LOW",
-            "className": "tc-agenda-marker tc-agenda-marker--low_score",
-        },
-        {
-            "label": "Upcoming assignment",
-            "text": "DUE",
-            "className": "tc-agenda-marker tc-agenda-marker--due",
-        },
-    ]
-    assert result["pageText"].count("Low") == 2
-    assert "No agenda" not in result["pageText"]
-    assert "scrape" not in result["pageText"].lower()
+    assert result == {
+        "gradePortal": "parentvue",
+        "standalonePortal": "canvas",
+        "canvasOnlyStandalone": None,
+        "assignmentDates": ["2026-08-25", "2026-08-18"],
+    }
 
 
-def test_agenda_class_uses_singular_assignment_count_copy() -> None:
+def test_error_descriptions_are_plain_english_on_every_status_surface() -> None:
     result = _run_student_page_scenario(
         """
-if (!hooks.AgendaClass) {
-    throw new Error("AgendaClass is not implemented");
-}
-const tree = hooks.AgendaClass({
-    classGroup: {
-        name: "Fictional Seminar",
-        count: 1,
-        assignments: [
-            { status: "due", title: "Reading notes", dueDate: "2026-08-16", dueDisplay: "Aug 16" },
-        ],
-    },
-});
-function find(node, type) {
-    if (!node || typeof node !== "object") return null;
+function tooltipMessages(node) {
     if (Array.isArray(node)) {
-        for (const child of node) {
-            const match = find(child, type);
-            if (match) return match;
-        }
-        return null;
+        return node.flatMap(tooltipMessages);
     }
-    if (node.type === type) return node;
-    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
-        const match = find(child, type);
-        if (match) return match;
+    if (!node || typeof node !== "object") {
+        return [];
     }
-    return null;
+    const own = node.props && node.props.role === "tooltip"
+        ? [node.children.flat(Infinity).filter((child) => typeof child === "string").join("")]
+        : [];
+    return own.concat(tooltipMessages(node.children || []));
 }
-function textOf(node) {
-    if (node === null || node === undefined || node === false) return "";
-    if (Array.isArray(node)) return node.map(textOf).join("");
-    if (typeof node === "string" || typeof node === "number") return String(node);
-    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
-}
-console.log(JSON.stringify({ summary: textOf(find(tree, "summary")) }));
+
+const student = {
+    id: 17,
+    detailUrl: "/franchises/3/students/17",
+    firstName: "Avery",
+    lastName: "Quinn",
+    gradeLevel: 11,
+    portalUrl: null,
+    status: "error",
+    errorCode: "bad_login",
+    updatedAt: "2026-08-20T12:00:00-07:00",
+    standing: "Poor",
+    gradesSnapshot: [],
+    lowGrades: [],
+    highGrades: [],
+    grades: {},
+    agendaSlots: [],
+    agendaItems: [],
+};
+const surfaces = {
+    job: hooks.JobCard({
+        job: {
+            kind: "grade",
+            status: "failed",
+            errorCode: "bad_login",
+            attempted: 1,
+            total: 1,
+            success: 0,
+            errors: 1,
+        },
+    }),
+    studentCard: hooks.StudentCard({ student }),
+    studentTable: hooks.StudentTable({
+        students: [student],
+        sortConfig: { key: "name", direction: "asc" },
+        onSort: () => undefined,
+    }),
+    studentPage: hooks.StudentPage({
+        data: { student, backUrl: "#back", logoUrl: "/logo.webp" },
+    }),
+};
+console.log(JSON.stringify({
+    known: hooks.errorDescription("bad_login"),
+    agendaFailure: hooks.errorDescription("agenda2_parentvue_failed"),
+    missingConfiguration: hooks.errorDescription("agenda1_configuration_missing"),
+    unexpected: hooks.errorDescription("mystery_failure"),
+    surfaceMessages: Object.fromEntries(
+        Object.entries(surfaces).map(([name, tree]) => [name, tooltipMessages(tree)]),
+    ),
+}));
 """
     )
 
-    assert result == {"summary": "Fictional Seminar1 assignment"}
+    login_description = "The portal rejected the student's username or password."
+    assert result == {
+        "known": login_description,
+        "agendaFailure": "Portal 2's ParentVUE agenda could not be collected.",
+        "missingConfiguration": "Portal 1 is missing its URL or login credentials.",
+        "unexpected": (
+            "The scraper reported an unexpected error. "
+            "Reference code: mystery_failure."
+        ),
+        "surfaceMessages": {
+            "job": [login_description],
+            "studentCard": [login_description],
+            "studentTable": [login_description],
+            "studentPage": [login_description],
+        },
+    }
 
 
-def test_student_page_preserves_legacy_agenda_and_heatmap_branches() -> None:
-    legacy = _run_student_page_scenario(
+def test_student_page_supports_flat_agenda_and_heatmap_views() -> None:
+    flat = _run_student_page_scenario(
         """
 const tree = hooks.StudentPage({ data: {
     backUrl: "#back",
     logoUrl: "/static/imgs/tc_logo.webp",
     student: {
         id: 78,
-        firstName: "Legacy",
-        lastName: "Learner",
+        firstName: "Flat",
+        lastName: "Agenda",
         gradeLevel: 10,
-        portalUrl: null,
         status: "synced",
-        updatedAt: null,
         gradesSnapshot: [],
         grades: {},
         agendaSlots: [],
@@ -362,9 +335,7 @@ const tree = hooks.StudentPage({ data: {
         firstName: "Heatmap",
         lastName: "Learner",
         gradeLevel: 9,
-        portalUrl: null,
         status: "synced",
-        updatedAt: null,
         gradesSnapshot: [],
         grades: { "2026-08-10": { "Fictional Studies": 91 } },
         agendaSlots: [],
@@ -378,105 +349,18 @@ function collect(node, type, found = []) {
         return found;
     }
     if (node.type === type) found.push(node);
-    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) collect(child, type, found);
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+        collect(child, type, found);
+    }
     return found;
 }
-function textOf(node) {
-    if (node === null || node === undefined || node === false) return "";
-    if (Array.isArray(node)) return node.map(textOf).join("");
-    if (typeof node === "string" || typeof node === "number") return String(node);
-    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
-}
-console.log(JSON.stringify({ headings: collect(tree, "h2").map(textOf), tables: collect(tree, "table").length }));
+console.log(JSON.stringify({ tables: collect(tree, "table").length }));
 """,
         hash_value="#heatmap",
     )
 
-    assert "Agenda 12026-08-14Archive responseFictional Studies" in legacy["text"]
-    assert "Agenda 2No second agenda configured." in legacy["text"]
-    assert legacy["text"].count("Agenda") == 2
-    assert heatmap == {"headings": ["Grade Heatmap"], "tables": 1}
-
-
-def test_agenda_display_prefers_classroom_portals_and_pads_empty_slots() -> None:
-    result = _run_student_page_scenario(
-        """
-if (!hooks.displayAgendaSlots || !hooks.StudentPage) {
-    throw new Error("agenda display helpers are not implemented");
-}
-function collect(node, predicate, found = []) {
-    if (node === null || node === undefined || node === false) return found;
-    if (Array.isArray(node)) {
-        for (const child of node) collect(child, predicate, found);
-        return found;
-    }
-    if (typeof node === "object") {
-        if (predicate(node)) found.push(node);
-        for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
-            collect(child, predicate, found);
-        }
-    }
-    return found;
-}
-function textOf(node) {
-    if (node === null || node === undefined || node === false) return "";
-    if (Array.isArray(node)) return node.map(textOf).join("");
-    if (typeof node === "string" || typeof node === "number") return String(node);
-    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
-}
-function studentWith(slots) {
-    return hooks.StudentPage({ data: {
-        backUrl: "#back",
-        logoUrl: "/static/imgs/tc_logo.webp",
-        student: {
-            id: 80,
-            firstName: "Agenda",
-            lastName: "Learner",
-            gradeLevel: 8,
-            status: "synced",
-            gradesSnapshot: [],
-            grades: {},
-            agendaItems: [],
-            agendaSlots: slots,
-        },
-    } });
-}
-const reordered = studentWith([
-    { number: 1, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
-    { number: 2, portal: "canvas", portalLabel: "Canvas", weeks: [] },
-]);
-const single = studentWith([
-    { number: 2, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
-]);
-console.log(JSON.stringify({
-    preferredPortals: ["canvas", "google_classroom"].map((portal) =>
-        hooks.displayAgendaSlots([
-            { number: 1, portal: "parentvue", portalLabel: "ParentVUE", weeks: [] },
-            { number: 2, portal, portalLabel: portal, weeks: [] },
-        ])[0].portal,
-    ),
-    reorderedHeadings: collect(reordered, (node) => node.type === "h2")
-        .map(textOf).filter((text) => text.startsWith("Agenda")),
-    singleHeadings: collect(single, (node) => node.type === "h2")
-        .map(textOf).filter((text) => text.startsWith("Agenda")),
-    unavailable: collect(single, (node) =>
-        String(node.props?.["aria-label"] || "").endsWith(" unavailable"),
-    ).map((node) => ({ label: node.props["aria-label"], text: textOf(node) })),
-}));
-"""
-    )
-
-    assert result == {
-        "preferredPortals": ["canvas", "google_classroom"],
-        "reorderedHeadings": ["Agenda 1 · Canvas", "Agenda 2 · ParentVUE"],
-        "singleHeadings": ["Agenda 1 · ParentVUE", "Agenda 2"],
-        "unavailable": [
-            {
-                "label": "Agenda 2 unavailable",
-                "text": "No second agenda configured.",
-            }
-        ],
-    }
+    assert "Agenda2026-08-14Archive responseFictional Studies" in flat["text"]
+    assert heatmap == {"tables": 1}
 
 
 def test_grade_history_only_shows_the_most_recent_completed_week() -> None:
@@ -544,12 +428,8 @@ def test_header_ambient_texture_omits_floating_square_overlays() -> None:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
     )
-    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
-        encoding="utf-8"
-    )
-    header = javascript.split("function Header", 1)[1].split(
-        "function Shell", 1
-    )[0]
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(encoding="utf-8")
+    header = javascript.split("function Header", 1)[1].split("function Shell", 1)[0]
 
     assert 'className: "tc-header-squares"' in header
     assert 'className: "tc-header-scanline"' in header
@@ -567,7 +447,7 @@ def test_student_header_back_action_uses_generic_label() -> None:
         "function App", 1
     )[0]
 
-    assert 'href: data.backUrl' in student_page
+    assert "href: data.backUrl" in student_page
     assert 'icon: "arrowLeft"' in student_page
     assert '"Back"' in student_page
     assert '"Franchise"' not in student_page
@@ -869,9 +749,7 @@ console.log(JSON.stringify({
 
 
 def test_heatmap_course_column_is_bounded_and_adaptive() -> None:
-    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
-        encoding="utf-8"
-    )
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(encoding="utf-8")
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
     )
@@ -897,9 +775,7 @@ def test_heatmap_course_column_is_bounded_and_adaptive() -> None:
 
 
 def test_heatmap_grade_columns_are_individually_compact() -> None:
-    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(
-        encoding="utf-8"
-    )
+    css = (ROOT / "ui" / "static" / "react-dashboard.css").read_text(encoding="utf-8")
     selector = ".tc-heatmap-table tr > :not(:first-child) {"
 
     assert selector in css
@@ -918,7 +794,7 @@ def test_heatmap_grade_columns_are_individually_compact() -> None:
     assert "min-width: 48px;" in mobile_grade_columns
 
 
-def test_flask_web_path_does_not_import_legacy_writes_or_executor() -> None:
+def test_flask_web_path_does_not_import_retired_writes_or_executor() -> None:
     routes = (ROOT / "ui" / "routes.py").read_text(encoding="utf-8")
     app = (ROOT / "ui" / "app.py").read_text(encoding="utf-8")
 

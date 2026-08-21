@@ -65,24 +65,6 @@ def browser_page() -> Iterator[Page]:
         browser.close()
 
 
-def _box(page: Page, selector: str, index: int = 0) -> dict[str, float]:
-    box = page.locator(selector).nth(index).bounding_box()
-    assert box is not None
-    return box
-
-
-def _assert_aligned_equal(left: dict[str, float], right: dict[str, float]) -> None:
-    assert abs(left["y"] - right["y"]) <= 1
-    assert abs((left["y"] + left["height"]) - (right["y"] + right["height"])) <= 1
-    assert abs(left["height"] - right["height"]) <= 1
-
-
-def _scroll_metrics(page: Page, selector: str, index: int = 0) -> dict[str, int]:
-    return page.locator(selector).nth(index).evaluate(
-        "element => ({clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, scrollTop: element.scrollTop})"
-    )
-
-
 def _focus_outline(page: Page, selector: str, index: int = 0) -> dict[str, object]:
     region = page.locator(selector).nth(index)
     region.focus()
@@ -111,9 +93,9 @@ def test_report_scroll_regions_use_the_existing_visible_focus_treatment(
     page.goto(preview_url, wait_until="networkidle")
 
     selectors = [
+        ('[aria-label="Current grades and assignments"]', 0),
         ('[aria-label="Grade history"]', 0),
         (".tc-agenda-card .tc-report-card__scroll", 0),
-        (".tc-agenda-card .tc-report-card__scroll", 1),
     ]
     for selector, index in selectors:
         outline = _focus_outline(page, selector, index)
@@ -124,105 +106,52 @@ def test_report_scroll_regions_use_the_existing_visible_focus_treatment(
         assert outline["visibleWithinCard"] is True
 
 
-def test_student_report_cards_are_equal_height_and_scroll_independently(
+def test_error_description_opens_on_hover_and_keyboard_focus(
     browser_page: Page,
     preview_url: str,
 ) -> None:
     page = browser_page
     page.goto(preview_url, wait_until="networkidle")
-    expect(page.get_by_role("heading", name="Current grades")).to_be_visible()
 
-    grade_cards = page.locator(".tc-grade-card")
-    agenda_cards = page.locator(".tc-agenda-card")
-    expect(grade_cards).to_have_count(2)
-    expect(agenda_cards).to_have_count(2)
+    trigger = page.locator(".tc-error-tooltip")
+    tooltip = trigger.get_by_role("tooltip")
+    message = "The portal rejected the student's username or password."
 
-    desktop_grade_boxes = [_box(page, ".tc-grade-card", index) for index in range(2)]
-    desktop_agenda_boxes = [_box(page, ".tc-agenda-card", index) for index in range(2)]
-    _assert_aligned_equal(*desktop_grade_boxes)
-    _assert_aligned_equal(*desktop_agenda_boxes)
+    expect(trigger).to_have_count(1)
+    expect(trigger).to_have_attribute("tabindex", "0")
+    expect(trigger).to_have_attribute("aria-label", f"error: {message}")
+    expect(tooltip).to_be_hidden()
 
-    history_scroll = page.get_by_label("Grade history")
-    history_heading = page.get_by_role("heading", name="Grade history")
-    history_heading_y = history_heading.bounding_box()["y"]
-    history_metrics = _scroll_metrics(page, '[aria-label="Grade history"]')
-    assert history_metrics["scrollHeight"] > history_metrics["clientHeight"]
-    history_scroll.evaluate("element => { element.scrollTop = 180; }")
-    assert history_scroll.evaluate("element => element.scrollTop") > 0
-    assert abs(history_heading.bounding_box()["y"] - history_heading_y) <= 1
+    trigger.hover()
+    expect(tooltip).to_be_visible()
+    expect(tooltip).to_have_text(message)
 
-    agenda_scrolls = page.locator(".tc-agenda-card .tc-report-card__scroll")
-    expect(agenda_scrolls).to_have_count(2)
-    for index in range(2):
-        metrics = _scroll_metrics(
-            page, ".tc-agenda-card .tc-report-card__scroll", index
-        )
-        assert metrics["scrollHeight"] > metrics["clientHeight"]
-
-    heading_positions = [
-        page.get_by_role("heading", name="Agenda 1 · Canvas").bounding_box()["y"],
-        page.get_by_role("heading", name="Agenda 2 · ParentVUE").bounding_box()["y"],
-    ]
-    legend_positions = [
-        page.get_by_label("Assignment status legend").nth(index).bounding_box()["y"]
-        for index in range(2)
-    ]
-    agenda_scrolls.nth(0).evaluate("element => { element.scrollTop = 180; }")
-    assert agenda_scrolls.nth(0).evaluate("element => element.scrollTop") > 0
-    assert agenda_scrolls.nth(1).evaluate("element => element.scrollTop") == 0
-    assert page.get_by_role("heading", name="Agenda 1 · Canvas").bounding_box()["y"] == heading_positions[0]
-    assert page.get_by_label("Assignment status legend").nth(0).bounding_box()["y"] == legend_positions[0]
-
-    agenda_scrolls.nth(1).evaluate("element => { element.scrollTop = 180; }")
-    assert agenda_scrolls.nth(1).evaluate("element => element.scrollTop") > 0
-    assert page.get_by_role("heading", name="Agenda 2 · ParentVUE").bounding_box()["y"] == heading_positions[1]
-    assert page.get_by_label("Assignment status legend").nth(1).bounding_box()["y"] == legend_positions[1]
-
-    page.set_viewport_size({"width": 720, "height": 1000})
-    page.wait_for_timeout(100)
-    mobile_boxes = [
-        _box(page, ".tc-grade-card", 0),
-        _box(page, ".tc-grade-card", 1),
-        _box(page, ".tc-agenda-card", 0),
-        _box(page, ".tc-agenda-card", 1),
-    ]
-    assert max(box["x"] for box in mobile_boxes) - min(box["x"] for box in mobile_boxes) <= 1
-    assert [box["y"] for box in mobile_boxes] == sorted(box["y"] for box in mobile_boxes)
-    assert len({round(box["y"], 2) for box in mobile_boxes}) == 4
-    assert abs(mobile_boxes[0]["height"] - desktop_grade_boxes[0]["height"]) <= 1
-    assert abs(mobile_boxes[1]["height"] - desktop_grade_boxes[1]["height"]) <= 1
-    assert abs(mobile_boxes[2]["height"] - desktop_agenda_boxes[0]["height"]) <= 1
-    assert abs(mobile_boxes[3]["height"] - desktop_agenda_boxes[1]["height"]) <= 1
+    page.mouse.move(0, 0)
+    trigger.focus()
+    expect(tooltip).to_be_visible()
 
 
-def test_student_report_disclosures_statuses_and_tabs_remain_interactive(
+def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(
     browser_page: Page,
     preview_url: str,
 ) -> None:
     page = browser_page
-    page.set_viewport_size({"width": 720, "height": 1000})
     page.goto(preview_url, wait_until="networkidle")
 
-    first_details = page.locator(".tc-agenda-class").first
-    first_summary = first_details.locator("summary")
-    first_summary.click()
-    assert first_details.evaluate("element => element.open") is True
+    expect(page.locator(".tc-grade-agenda")).to_have_count(7)
+    expect(page.locator(".tc-agenda-card")).to_have_count(1)
+    expect(page.get_by_role("heading", name="Agenda · ParentVUE")).to_be_visible()
+    expect(page.get_by_role("heading", name="Agenda · Canvas")).to_have_count(0)
+
+    first_course = page.locator(".tc-grade-agenda").first
+    expect(page.get_by_label("Missing assignment").first).not_to_be_visible()
+    first_course.locator("summary").click()
     expect(page.get_by_label("Missing assignment").first).to_be_visible()
     expect(page.get_by_label("Upcoming assignment").first).to_be_visible()
-    expect(page.get_by_label("Missing assignment").first).to_have_text("M")
-    expect(page.get_by_label("Upcoming assignment").first).to_have_text("DUE")
-
-    first_summary.focus()
-    first_summary.press("Enter")
-    assert first_details.evaluate("element => element.open") is False
-    first_summary.press("Enter")
-    assert first_details.evaluate("element => element.open") is True
+    expect(first_course.get_by_text("Week of", exact=False)).to_have_count(0)
+    expect(first_course.locator(".tc-agenda-assignment").first).to_contain_text("Systems practice")
 
     page.get_by_role("link", name="Heatmap").click()
     expect(page.get_by_role("heading", name="Grade Heatmap")).to_be_visible()
     page.get_by_role("link", name="Report").click()
-    expect(page.get_by_role("heading", name="Agenda 1 · Canvas")).to_be_visible()
-    mobile_grade_boxes = [_box(page, ".tc-grade-card", index) for index in range(2)]
-    mobile_agenda_boxes = [_box(page, ".tc-agenda-card", index) for index in range(2)]
-    assert abs(mobile_grade_boxes[0]["height"] - mobile_grade_boxes[1]["height"]) <= 1
-    assert abs(mobile_agenda_boxes[0]["height"] - mobile_agenda_boxes[1]["height"]) <= 1
+    expect(page.get_by_role("heading", name="Agenda · ParentVUE")).to_be_visible()
