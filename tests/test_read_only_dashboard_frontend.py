@@ -81,6 +81,13 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
             typeof gradeAgendaByCourse === "function" ? gradeAgendaByCourse : null,
         studentAgendaLayout:
             typeof studentAgendaLayout === "function" ? studentAgendaLayout : null,
+        errorDescription:
+            typeof errorDescription === "function" ? errorDescription : null,
+        ErrorStatusBadge:
+            typeof ErrorStatusBadge === "function" ? ErrorStatusBadge : null,
+        JobCard: typeof JobCard === "function" ? JobCard : null,
+        StudentCard: typeof StudentCard === "function" ? StudentCard : null,
+        StudentTable: typeof StudentTable === "function" ? StudentTable : null,
     };
     return;
 
@@ -202,6 +209,92 @@ console.log(JSON.stringify({
         "standalonePortal": "canvas",
         "canvasOnlyStandalone": None,
         "assignmentDates": ["2026-08-25", "2026-08-18"],
+    }
+
+
+def test_error_descriptions_are_plain_english_on_every_status_surface() -> None:
+    result = _run_student_page_scenario(
+        """
+function tooltipMessages(node) {
+    if (Array.isArray(node)) {
+        return node.flatMap(tooltipMessages);
+    }
+    if (!node || typeof node !== "object") {
+        return [];
+    }
+    const own = node.props && node.props.role === "tooltip"
+        ? [node.children.flat(Infinity).filter((child) => typeof child === "string").join("")]
+        : [];
+    return own.concat(tooltipMessages(node.children || []));
+}
+
+const student = {
+    id: 17,
+    detailUrl: "/franchises/3/students/17",
+    firstName: "Avery",
+    lastName: "Quinn",
+    gradeLevel: 11,
+    portalUrl: null,
+    status: "error",
+    errorCode: "bad_login",
+    updatedAt: "2026-08-20T12:00:00-07:00",
+    standing: "Poor",
+    gradesSnapshot: [],
+    lowGrades: [],
+    highGrades: [],
+    grades: {},
+    agendaSlots: [],
+    agendaItems: [],
+};
+const surfaces = {
+    job: hooks.JobCard({
+        job: {
+            kind: "grade",
+            status: "failed",
+            errorCode: "bad_login",
+            attempted: 1,
+            total: 1,
+            success: 0,
+            errors: 1,
+        },
+    }),
+    studentCard: hooks.StudentCard({ student }),
+    studentTable: hooks.StudentTable({
+        students: [student],
+        sortConfig: { key: "name", direction: "asc" },
+        onSort: () => undefined,
+    }),
+    studentPage: hooks.StudentPage({
+        data: { student, backUrl: "#back", logoUrl: "/logo.webp" },
+    }),
+};
+console.log(JSON.stringify({
+    known: hooks.errorDescription("bad_login"),
+    agendaFailure: hooks.errorDescription("agenda2_parentvue_failed"),
+    missingConfiguration: hooks.errorDescription("agenda1_configuration_missing"),
+    unexpected: hooks.errorDescription("mystery_failure"),
+    surfaceMessages: Object.fromEntries(
+        Object.entries(surfaces).map(([name, tree]) => [name, tooltipMessages(tree)]),
+    ),
+}));
+"""
+    )
+
+    login_description = "The portal rejected the student's username or password."
+    assert result == {
+        "known": login_description,
+        "agendaFailure": "Portal 2's ParentVUE agenda could not be collected.",
+        "missingConfiguration": "Portal 1 is missing its URL or login credentials.",
+        "unexpected": (
+            "The scraper reported an unexpected error. "
+            "Reference code: mystery_failure."
+        ),
+        "surfaceMessages": {
+            "job": [login_description],
+            "studentCard": [login_description],
+            "studentTable": [login_description],
+            "studentPage": [login_description],
+        },
     }
 
 

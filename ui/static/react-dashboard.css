@@ -570,6 +570,48 @@ summary:focus-visible {
     color: #475569;
 }
 
+.tc-error-tooltip {
+    position: relative;
+    display: inline-flex;
+    border-radius: 999px;
+}
+
+.tc-error-tooltip__content {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 50;
+    width: max-content;
+    max-width: min(20rem, calc(100vw - 2rem));
+    border-radius: 0.5rem;
+    background: var(--tc-blue-deep);
+    box-shadow: var(--tc-shadow);
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.35;
+    opacity: 0;
+    padding: 0.625rem 0.75rem;
+    pointer-events: none;
+    text-align: left;
+    text-transform: none;
+    transform: translateY(-0.25rem);
+    transition:
+        opacity 140ms ease,
+        transform 140ms ease,
+        visibility 140ms ease;
+    visibility: hidden;
+    white-space: normal;
+}
+
+.tc-error-tooltip:hover .tc-error-tooltip__content,
+.tc-error-tooltip:focus .tc-error-tooltip__content,
+.tc-error-tooltip:focus-within .tc-error-tooltip__content {
+    opacity: 1;
+    transform: translateY(0);
+    visibility: visible;
+}
+
 .tc-field {
     display: grid;
     gap: 6px;

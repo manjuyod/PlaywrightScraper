@@ -135,6 +135,89 @@
         );
     }
 
+    const ERROR_DESCRIPTIONS = Object.freeze({
+        bad_login: "The portal rejected the student's username or password.",
+        no_grades: "The portal opened successfully, but no grades were found.",
+        scrape_failed: "The portal could not be read successfully.",
+        agenda_failed: "The student's agenda could not be collected.",
+        agenda_runner_failed: "The agenda job stopped before it could finish.",
+        runner_failed: "The grade job stopped before it could finish.",
+        neon_unavailable: "The grade database is temporarily unavailable.",
+        lease_expired: "The job took too long and its processing lease expired.",
+        lease_renewal_failed: "The job could not keep its processing lease active.",
+        result_post_failed: "The scrape finished, but its result could not be saved.",
+    });
+
+    const ERROR_PORTAL_LABELS = Object.freeze({
+        asuprep: "ASU Prep",
+        canvas: "Canvas",
+        google_classroom: "Google Classroom",
+        infinite_campus: "Infinite Campus",
+        parentvue: "ParentVUE",
+        powerschool: "PowerSchool",
+        schoology: "Schoology",
+    });
+
+    function errorPortalLabel(portal) {
+        return (
+            ERROR_PORTAL_LABELS[portal] ||
+            portal
+                .split("_")
+                .filter(Boolean)
+                .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+                .join(" ")
+        );
+    }
+
+    function errorDescription(code) {
+        const normalized = String(code || "").trim().toLowerCase();
+        if (!normalized) {
+            return null;
+        }
+        if (ERROR_DESCRIPTIONS[normalized]) {
+            return ERROR_DESCRIPTIONS[normalized];
+        }
+
+        const missingConfiguration = normalized.match(
+            /^agenda([12])_configuration_missing$/,
+        );
+        if (missingConfiguration) {
+            return `Portal ${missingConfiguration[1]} is missing its URL or login credentials.`;
+        }
+
+        const agendaFailure = normalized.match(/^agenda([12])_([a-z0-9_]+)_failed$/);
+        if (agendaFailure) {
+            return `Portal ${agendaFailure[1]}'s ${errorPortalLabel(agendaFailure[2])} agenda could not be collected.`;
+        }
+
+        return `The scraper reported an unexpected error. Reference code: ${normalized}.`;
+    }
+
+    function ErrorStatusBadge({ status, errorCode }) {
+        const label = status || "unknown";
+        const description = errorDescription(errorCode);
+        const badge = h(Badge, { tone: statusTone(status) }, label);
+        if (!description) {
+            return badge;
+        }
+        return h(
+            "span",
+            {
+                className: "tc-error-tooltip tc-focus-ring",
+                tabIndex: 0,
+                title: description,
+                "aria-label": `${label}: ${description}`,
+                "data-error-code": errorCode,
+            },
+            badge,
+            h(
+                "span",
+                { className: "tc-error-tooltip__content", role: "tooltip" },
+                description,
+            ),
+        );
+    }
+
     function Header({ data, title, subtitle, actions }) {
         return h(
             "header",
@@ -400,7 +483,7 @@
                     h("p", { className: "font-bold capitalize text-slate-900" }, `${job.kind} · ${scope}`),
                     h("p", { className: "mt-1 text-xs text-slate-500" }, `Started ${formatDate(job.startedAt)}`),
                 ),
-                h(Badge, { tone: statusTone(job.status) }, job.status || "unknown"),
+                h(ErrorStatusBadge, { status: job.status, errorCode: job.errorCode }),
             ),
             h(
                 "div",
@@ -588,7 +671,10 @@
                     h("h2", { className: "text-lg font-extrabold text-slate-900" }, `${student.firstName} ${student.lastName}`),
                     h("p", { className: "mt-1 text-sm text-slate-500" }, `Grade ${student.gradeLevel || "—"} · CRM ${student.id}`),
                 ),
-                h(Badge, { tone: statusTone(student.status) }, student.status),
+                h(ErrorStatusBadge, {
+                    status: student.status,
+                    errorCode: student.errorCode,
+                }),
             ),
             h("div", { className: "my-4 h-px bg-slate-200" }),
             h(GradeList, { grades: student.gradesSnapshot }),
@@ -762,7 +848,10 @@
                                 h(
                                     "td",
                                     { className: cellClass },
-                                    h(Badge, { tone: statusTone(student.status) }, student.status || "never"),
+                                    h(ErrorStatusBadge, {
+                                        status: student.status || "never",
+                                        errorCode: student.errorCode,
+                                    }),
                                 ),
                                 h(
                                     "td",
@@ -1232,7 +1321,10 @@
                 "div",
                 { key: "heading", className: "flex items-center justify-between gap-3" },
                 h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Current grades"),
-                h(Badge, { tone: statusTone(student.status) }, student.status || "never"),
+                h(ErrorStatusBadge, {
+                    status: student.status || "never",
+                    errorCode: student.errorCode,
+                }),
             ),
             h(
                 "div",
