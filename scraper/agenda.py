@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
@@ -26,7 +27,7 @@ from scraper.config.logging import (
     reset_log_context,
     suspend_log_context,
 )
-from scraper.portals import get_portal
+from scraper.portals import LoginError, get_portal
 from scraper.portals.utils import get_portal_key_from_url
 from scraper.runner import (
     _advance_progress,
@@ -42,12 +43,16 @@ logger = logging.getLogger("scraper.agenda")
 
 AgendaExceptionKind = Literal["cancelled", "configuration", "timeout", "unexpected"]
 CleanupStatus = Literal["not_started", "closed", "failed"]
+AgendaSlotKey = Literal["agenda1", "agenda2"]
+AgendaSlotResultHandler = Callable[
+    [AgendaSlotKey, Mapping[str, Any], str | None], Awaitable[None]
+]
 
 
 @dataclass(frozen=True, repr=False)
 class AgendaSlot:
     number: Literal[1, 2]
-    key: Literal["agenda1", "agenda2"]
+    key: AgendaSlotKey
     portal: str | None
     login_url: str | None
     username: str | None
@@ -58,6 +63,22 @@ class AgendaSlotCollectionError(RuntimeError):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class AgendaFetchResult(dict[str, Any]):
+    def __init__(
+        self,
+        bundle: AgendaBundle,
+        attempted_slots: tuple[AgendaSlotKey, ...],
+        failures: Mapping[AgendaSlotKey, str],
+    ) -> None:
+        super().__init__(bundle)
+        self.attempted_slots = attempted_slots
+        self.failures = dict(failures)
+
+    @property
+    def bundle(self) -> AgendaBundle:
+        return self  # type: ignore[return-value]
 
 
 def _agenda_exception_kind(exc: BaseException) -> AgendaExceptionKind:
@@ -241,7 +262,8 @@ async def fetch_agenda(
     student: dict[str, Any],
     *,
     worker_semaphore: asyncio.Semaphore | None = None,
-) -> tuple[AgendaBundle, dict[str, Any]]:
+    on_slot_result: AgendaSlotResultHandler | None = None,
+) -> tuple[AgendaFetchResult, dict[str, Any]]:
     if worker_semaphore is None:
         worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
 
@@ -251,33 +273,70 @@ async def fetch_agenda(
 
     slots = resolve_agenda_slots(student)
     bundle = empty_agenda_bundle([slot.portal for slot in slots])
-    workers: list[tuple[AgendaSlot, asyncio.Task[AgendaWeeks]]] = []
+    attempted_slots: list[AgendaSlotKey] = []
+    failures: dict[AgendaSlotKey, str] = {}
+    workers: dict[asyncio.Task[AgendaWeeks], AgendaSlot] = {}
+
+    async def report(slot: AgendaSlot, failure_code: str | None) -> None:
+        if on_slot_result is not None:
+            await on_slot_result(slot.key, bundle[slot.key], failure_code)
+
     for slot in slots:
-        if (
-            not slot.portal
-            or not slot.login_url
-            or not slot.username
-            or not slot.password
-        ):
+        configured_values = (slot.login_url, slot.username, slot.password)
+        if not any(configured_values):
             continue
-        engine = get_portal(slot.portal)
+        attempted_slots.append(slot.key)
+        if not all(configured_values):
+            failures[slot.key] = "configuration_missing"
+            await report(slot, failures[slot.key])
+            continue
+        if not slot.portal:
+            failures[slot.key] = "unsupported_portal"
+            await report(slot, failures[slot.key])
+            continue
+        try:
+            engine = get_portal(slot.portal)
+        except ValueError:
+            failures[slot.key] = "unsupported_portal"
+            await report(slot, failures[slot.key])
+            continue
         if not engine.agenda_capable:
+            failures[slot.key] = "unsupported_portal"
+            await report(slot, failures[slot.key])
             continue
-        workers.append((slot, asyncio.create_task(collect_slot(slot))))
+        workers[asyncio.create_task(collect_slot(slot))] = slot
 
     _log_agenda_fetch_prepared(len(workers))
 
-    results = await asyncio.gather(
-        *(task for _, task in workers),
-        return_exceptions=True,
+    pending = set(workers)
+    try:
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                slot = workers[task]
+                try:
+                    bundle[slot.key]["weeks"] = task.result()
+                    failure_code = None
+                except LoginError:
+                    failure_code = "bad_login"
+                    failures[slot.key] = failure_code
+                except BaseException:
+                    failure_code = "scrape_failed"
+                    failures[slot.key] = failure_code
+                await report(slot, failure_code)
+    finally:
+        await _cancel_tasks(pending)
+
+    return (
+        AgendaFetchResult(
+            bundle=bundle,
+            attempted_slots=tuple(attempted_slots),
+            failures=failures,
+        ),
+        student,
     )
-    for (slot, _task), result in zip(workers, results, strict=True):
-        if isinstance(result, BaseException):
-            raise AgendaSlotCollectionError(
-                f"{slot.key}_{slot.portal}_failed"
-            ) from None
-        bundle[slot.key]["weeks"] = result
-    return bundle, student
 
 
 async def _cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
@@ -299,14 +358,63 @@ async def _collect_and_post_agendas(
     if lease_failed.is_set():
         return "lease_renewal_failed"
     worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
-    tasks = {
-        asyncio.create_task(
-            fetch_agenda(
-                browser,
-                student,
-                worker_semaphore=worker_semaphore,
+    post_lock = asyncio.Lock()
+
+    async def collect_student(
+        student: dict[str, Any],
+    ) -> tuple[AgendaFetchResult, bool]:
+        reported_slots: set[AgendaSlotKey] = set()
+        all_applied = True
+
+        async def post_slot_result(
+            slot_key: AgendaSlotKey,
+            snapshot: Mapping[str, Any],
+            failure_code: str | None,
+        ) -> None:
+            nonlocal all_applied
+            channel = (
+                "primary_agenda" if slot_key == "agenda1" else "secondary_agenda"
             )
-        ): student
+            outcome = (
+                {
+                    "kind": "failure",
+                    "channel": channel,
+                    "code": failure_code,
+                }
+                if failure_code is not None
+                else {
+                    "kind": f"{channel}_success",
+                    "agenda": dict(snapshot),
+                }
+            )
+            async with post_lock:
+                response = await asyncio.to_thread(
+                    client.post_result,
+                    job_id=session["job_id"],
+                    lease_token=session["lease_token"],
+                    crmstudentid=student["db_id"],
+                    outcome=outcome,
+                )
+            all_applied = all_applied and bool(response.get("applied"))
+            reported_slots.add(slot_key)
+
+        fetch_result, _ = await fetch_agenda(
+            browser,
+            student,
+            worker_semaphore=worker_semaphore,
+            on_slot_result=post_slot_result,
+        )
+        for slot_key in fetch_result.attempted_slots:
+            if slot_key not in reported_slots:
+                await post_slot_result(
+                    slot_key,
+                    fetch_result.bundle[slot_key],
+                    fetch_result.failures.get(slot_key),
+                )
+        return fetch_result, all_applied
+
+    tasks = {
+        asyncio.create_task(collect_student(student)): student
         for student in students
     }
     pending = set(tasks)
@@ -321,38 +429,7 @@ async def _collect_and_post_agendas(
             for task in done:
                 student = tasks[task]
                 try:
-                    weekly_agenda, _ = task.result()
-                    outcome = {
-                        "kind": "agenda_success",
-                        "weekly_agenda": weekly_agenda,
-                    }
-                    collection_succeeded = True
-                except AgendaSlotCollectionError as exc:
-                    outcome = {
-                        "kind": "failure",
-                        "code": exc.code,
-                        "passwordgood": None,
-                    }
-                    collection_succeeded = False
-                except Exception:
-                    outcome = {
-                        "kind": "failure",
-                        "code": "agenda_failed",
-                        "passwordgood": None,
-                    }
-                    collection_succeeded = False
-
-                if lease_failed.is_set():
-                    await _cancel_tasks(pending)
-                    return "lease_renewal_failed"
-                try:
-                    response = await asyncio.to_thread(
-                        client.post_result,
-                        job_id=session["job_id"],
-                        lease_token=session["lease_token"],
-                        crmstudentid=student["db_id"],
-                        outcome=outcome,
-                    )
+                    fetch_result, all_applied = task.result()
                 except GradeDbLeaseExpired:
                     await _cancel_tasks(pending)
                     return "lease_expired"
@@ -362,9 +439,29 @@ async def _collect_and_post_agendas(
                 except GradeDbError:
                     await _cancel_tasks(pending)
                     return "result_post_failed"
+                except Exception:
+                    slots = resolve_agenda_slots(student)
+                    attempted_slots = tuple(
+                        slot.key
+                        for slot in slots
+                        if any((slot.login_url, slot.username, slot.password))
+                    )
+                    fetch_result = AgendaFetchResult(
+                        bundle=empty_agenda_bundle([slot.portal for slot in slots]),
+                        attempted_slots=attempted_slots,
+                        failures={key: "scrape_failed" for key in attempted_slots},
+                    )
+                    all_applied = True
 
-                applied_success = collection_succeeded and bool(response.get("applied"))
-                _advance_progress(progress, success=applied_success)
+                if lease_failed.is_set():
+                    await _cancel_tasks(pending)
+                    return "lease_renewal_failed"
+                for slot_key in fetch_result.attempted_slots:
+                    if slot_key in fetch_result.failures:
+                        all_applied = False
+
+                collection_succeeded = not fetch_result.failures and all_applied
+                _advance_progress(progress, success=collection_succeeded)
                 if on_progress is not None:
                     on_progress()
         return None
@@ -401,6 +498,7 @@ async def main(
         _heartbeat_loop(client, session, progress, stop_heartbeat, lease_failed)
     )
     failure_code: str | None = None
+    collection_finished = False
     try:
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
@@ -416,10 +514,15 @@ async def main(
                     progress,
                     lease_failed,
                 )
+                collection_finished = True
             finally:
-                await browser.close()
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
     except Exception:
-        failure_code = failure_code or "agenda_runner_failed"
+        if not collection_finished:
+            failure_code = failure_code or "agenda_runner_failed"
     finally:
         stop_heartbeat.set()
         await heartbeat

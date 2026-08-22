@@ -61,7 +61,7 @@ fn runner_context_merges_crm_owned_portals_with_neon_owned_configuration() {
         }),
         auth_type: Some("gps_pictograph".into()),
         auth_answers: json!(["cat", "tree", "moon"]),
-        status: Some("never".into()),
+        grade_status: Some("never".into()),
         passwordgood: Some(true),
     };
 
@@ -80,7 +80,7 @@ fn runner_context_merges_crm_owned_portals_with_neon_owned_configuration() {
         merged.known_course_titles,
         vec!["ENGLISH 11", "MARKETING 1"]
     );
-    assert_eq!(merged.status.as_deref(), Some("never"));
+    assert_eq!(merged.grade_status.as_deref(), Some("never"));
     assert_eq!(merged.passwordgood, Some(true));
     assert_eq!(merged.auth_images, vec!["cat", "tree", "moon"]);
 }
@@ -91,10 +91,12 @@ fn result_identity_is_stable_per_job_student_and_kind() {
 
     let first = deterministic_result_key(job_id, 42, "grade");
     let retry = deterministic_result_key(job_id, 42, "grade");
-    let agenda = deterministic_result_key(job_id, 42, "agenda");
+    let primary_agenda = deterministic_result_key(job_id, 42, "primary_agenda");
+    let secondary_agenda = deterministic_result_key(job_id, 42, "secondary_agenda");
 
     assert_eq!(first, retry);
-    assert_ne!(first, agenda);
+    assert_ne!(first, primary_agenda);
+    assert_ne!(primary_agenda, secondary_agenda);
 }
 
 #[test]
@@ -117,30 +119,23 @@ fn rejected_result_audit_never_contains_academic_payload() {
 }
 
 #[test]
-fn agenda_result_accepts_portal_slot_bundle() {
-    let outcome = ResultOutcome::AgendaSuccess {
-        weekly_agenda: json!({
-            "agenda1": {
-                "portal": "canvas",
-                "weeks": {
-                    "2026-08-10": {
-                        "English 11": {
-                            "missing": [],
-                            "low_score": [{
-                                "title": "Earlier quiz",
-                                "dueDate": "2026-08-14",
-                                "dueTime": null
-                            }],
-                            "due": [{
-                                "title": "Reading response",
-                                "dueDate": "2026-08-16",
-                                "dueTime": null
-                            }]
-                        }
+fn agenda_result_accepts_one_portal_slot() {
+    let outcome = ResultOutcome::PrimaryAgendaSuccess {
+        agenda: json!({
+            "portal": "canvas",
+            "weeks": {
+                "2026-08-10": {
+                    "English 11": {
+                        "missing": [],
+                        "low_score": [],
+                        "due": [{
+                            "title": "Reading response",
+                            "dueDate": "2026-08-16",
+                            "dueTime": null
+                        }]
                     }
                 }
-            },
-            "agenda2": {"portal": "parentvue", "weeks": {}}
+            }
         }),
     };
 
@@ -149,11 +144,11 @@ fn agenda_result_accepts_portal_slot_bundle() {
 
 #[test]
 fn agenda_result_accepts_exact_node_limit_and_rejects_one_over() {
-    let allowed = ResultOutcome::AgendaSuccess {
-        weekly_agenda: json!({"nodes": vec![Value::Null; 998]}),
+    let allowed = ResultOutcome::PrimaryAgendaSuccess {
+        agenda: json!({"nodes": vec![Value::Null; 998]}),
     };
-    let too_large = ResultOutcome::AgendaSuccess {
-        weekly_agenda: json!({"nodes": vec![Value::Null; 999]}),
+    let too_large = ResultOutcome::PrimaryAgendaSuccess {
+        agenda: json!({"nodes": vec![Value::Null; 999]}),
     };
 
     assert_eq!(allowed.validate_for_job(JobKind::Agenda), Ok(()));

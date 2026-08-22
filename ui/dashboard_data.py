@@ -48,11 +48,15 @@ NEON_STATES_SQL = """
 SELECT
     crmstudentid,
     weeklydata,
-    weekly_agenda,
-    status,
+    primary_agenda,
+    secondary_agenda,
+    grade_status,
+    primary_agenda_status,
+    secondary_agenda_status,
     passwordgood,
-    error_msg,
-    updated_at
+    grade_updated_at,
+    primary_agenda_updated_at,
+    secondary_agenda_updated_at
 FROM students_grades_20262027
 WHERE crmstudentid IN :crmstudentids
 """
@@ -67,7 +71,7 @@ WITH active_jobs AS (
         franchise_id,
         student_id,
         progress,
-        error_msg,
+        failure_code,
         started_at,
         updated_at,
         completed_at
@@ -82,7 +86,7 @@ recent_jobs AS (
         franchise_id,
         student_id,
         progress,
-        error_msg,
+        failure_code,
         started_at,
         updated_at,
         completed_at
@@ -106,7 +110,15 @@ ORDER BY
 _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 _GRADE_LEVEL = re.compile(r"^(\d{1,2})(?:st|nd|rd|th)?$", re.IGNORECASE)
 _COURSE_PERIOD_PREFIX = re.compile(r"^\s*\d+\s*:\s*")
-_KNOWN_STATUSES = {"never", "synced", "error"}
+_KNOWN_STATUSES = {
+    "never",
+    "synced",
+    "bad_login",
+    "configuration_missing",
+    "no_grades",
+    "scrape_failed",
+    "unsupported_portal",
+}
 
 
 class DashboardDataError(RuntimeError):
@@ -312,10 +324,13 @@ class DashboardStudent:
     portal_url: str | None
     grades: dict[str, dict[str, Any]]
     agenda: dict[str, Any]
-    status: str
+    grade_status: str
+    primary_agenda_status: str
+    secondary_agenda_status: str
     passwordgood: bool | None
-    error_code: str | None
-    updated_at: datetime | date | str | None
+    grade_updated_at: datetime | date | str | None
+    primary_agenda_updated_at: datetime | date | str | None
+    secondary_agenda_updated_at: datetime | date | str | None
     grades_snapshot: tuple[CourseGrade, ...] = field(default_factory=tuple)
     low_grades: tuple[CourseGrade, ...] = field(default_factory=tuple)
     high_grades: tuple[CourseGrade, ...] = field(default_factory=tuple)
@@ -332,6 +347,15 @@ def _json_object(value: Any) -> dict[str, Any]:
             return {}
         return decoded if isinstance(decoded, dict) else {}
     return {}
+
+
+def _agenda_slot(value: Any) -> dict[str, Any]:
+    slot = _json_object(value)
+    portal = slot.get("portal")
+    weeks = slot.get("weeks")
+    if (portal is None or isinstance(portal, str)) and isinstance(weeks, dict):
+        return {"portal": portal, "weeks": weeks}
+    return {"portal": None, "weeks": {}}
 
 
 def _optional_int(value: Any) -> int | None:
@@ -404,15 +428,21 @@ def merge_student_rows(
             grade_level=_grade_level_int(crm_row.get("grade")),
             portal_url=_safe_http_url(crm_row.get("portal_url")),
             grades=_json_object(state.get("weeklydata")),
-            agenda=_json_object(state.get("weekly_agenda")),
-            status=_safe_status(state.get("status")),
+            agenda={
+                "agenda1": _agenda_slot(state.get("primary_agenda")),
+                "agenda2": _agenda_slot(state.get("secondary_agenda")),
+            },
+            grade_status=_safe_status(state.get("grade_status")),
+            primary_agenda_status=_safe_status(state.get("primary_agenda_status")),
+            secondary_agenda_status=_safe_status(state.get("secondary_agenda_status")),
             passwordgood=(
                 state.get("passwordgood")
                 if isinstance(state.get("passwordgood"), bool)
                 else None
             ),
-            error_code=_safe_error_code(state.get("error_msg")),
-            updated_at=state.get("updated_at"),
+            grade_updated_at=state.get("grade_updated_at"),
+            primary_agenda_updated_at=state.get("primary_agenda_updated_at"),
+            secondary_agenda_updated_at=state.get("secondary_agenda_updated_at"),
         )
         students.append(build_student_report(student))
     return students
@@ -505,7 +535,7 @@ def shape_job_row(row: Mapping[str, Any]) -> dict[str, Any]:
         "startedAt": _iso_timestamp(row.get("started_at")),
         "updatedAt": _iso_timestamp(row.get("updated_at")),
         "completedAt": _iso_timestamp(row.get("completed_at")),
-        "errorCode": _safe_error_code(row.get("error_msg")),
+        "errorCode": _safe_error_code(row.get("failure_code")),
     }
 
 
@@ -520,7 +550,13 @@ def summarize_franchises(students: Sequence[DashboardStudent]) -> list[dict[str,
         updated = [
             timestamp
             for timestamp in (
-                _iso_timestamp(student.updated_at) for student in franchise_students
+                _iso_timestamp(timestamp)
+                for student in franchise_students
+                for timestamp in (
+                    student.grade_updated_at,
+                    student.primary_agenda_updated_at,
+                    student.secondary_agenda_updated_at,
+                )
             )
             if timestamp is not None
         ]
@@ -530,10 +566,11 @@ def summarize_franchises(students: Sequence[DashboardStudent]) -> list[dict[str,
                 "name": franchise_students[0].franchise_name,
                 "total": len(franchise_students),
                 "synced": sum(
-                    student.status == "synced" for student in franchise_students
+                    student.grade_status == "synced" for student in franchise_students
                 ),
                 "errorCount": sum(
-                    student.status == "error" for student in franchise_students
+                    student.grade_status not in {"never", "synced"}
+                    for student in franchise_students
                 ),
                 "badLogins": sum(
                     student.passwordgood is False for student in franchise_students

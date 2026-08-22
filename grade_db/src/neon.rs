@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::{
-    ActiveJob, JobKind, JobLease, JobStartRequest, ResultOutcome, StudentGradeState,
+    ActiveJob, JobKind, JobLease, JobStartRequest, ResultChannel, ResultOutcome, StudentGradeState,
 };
 use crate::service::{NeonGateway, NeonResultWrite};
 
@@ -22,14 +22,19 @@ SELECT NOT EXISTS (
         VALUES
             ('students_grades_20262027', 'crmstudentid'),
             ('students_grades_20262027', 'weeklydata'),
-            ('students_grades_20262027', 'weekly_agenda'),
+            ('students_grades_20262027', 'primary_agenda'),
+            ('students_grades_20262027', 'secondary_agenda'),
             ('students_grades_20262027', 'portal'),
             ('students_grades_20262027', 'track_agenda'),
             ('students_grades_20262027', 'auth_type'),
             ('students_grades_20262027', 'auth_answers'),
-            ('students_grades_20262027', 'status'),
+            ('students_grades_20262027', 'grade_status'),
+            ('students_grades_20262027', 'primary_agenda_status'),
+            ('students_grades_20262027', 'secondary_agenda_status'),
+            ('students_grades_20262027', 'grade_updated_at'),
+            ('students_grades_20262027', 'primary_agenda_updated_at'),
+            ('students_grades_20262027', 'secondary_agenda_updated_at'),
             ('students_grades_20262027', 'passwordgood'),
-            ('students_grades_20262027', 'error_msg'),
             ('grade_scrape_jobs', 'id'),
             ('grade_scrape_jobs', 'kind'),
             ('grade_scrape_jobs', 'status'),
@@ -40,7 +45,7 @@ SELECT NOT EXISTS (
             ('grade_scrape_jobs', 'lease_expires_at'),
             ('grade_scrape_jobs', 'progress'),
             ('grade_scrape_jobs', 'summary'),
-            ('grade_scrape_jobs', 'error_msg'),
+            ('grade_scrape_jobs', 'failure_code'),
             ('grade_scrape_job_events', 'job_id'),
             ('grade_scrape_job_events', 'level'),
             ('grade_scrape_job_events', 'code'),
@@ -73,7 +78,7 @@ SELECT crmstudentid, portal,
        COALESCE(track_agenda, false) AS track_agenda,
        COALESCE(weeklydata, '{}'::jsonb) AS weeklydata,
        auth_type, COALESCE(auth_answers, '[]'::jsonb) AS auth_answers,
-       status, passwordgood
+       grade_status, passwordgood
 FROM students_grades_20262027
 WHERE crmstudentid = ANY($1::bigint[])
 "#;
@@ -81,7 +86,7 @@ WHERE crmstudentid = ANY($1::bigint[])
     pub const EXPIRE_JOBS: &str = r#"
 WITH expired AS (
     UPDATE grade_scrape_jobs
-    SET status = 'failed', error_msg = 'lease_expired', completed_at = now(), updated_at = now()
+    SET status = 'failed', failure_code = 'lease_expired', completed_at = now(), updated_at = now()
     WHERE kind = $1 AND status = 'running' AND lease_expires_at <= now()
     RETURNING id
 )
@@ -139,7 +144,7 @@ WHERE id = $1 AND lease_token = $2 AND runner_id = $3
 "#;
     pub const FAIL_JOB: &str = r#"
 UPDATE grade_scrape_jobs
-SET status = 'failed', error_msg = $4, completed_at = now(), updated_at = now()
+SET status = 'failed', failure_code = $4, completed_at = now(), updated_at = now()
 WHERE id = $1 AND lease_token = $2 AND runner_id = $3
   AND status = 'running' AND lease_expires_at > now()
 "#;
@@ -163,19 +168,35 @@ SET weeklydata = COALESCE(weeklydata, '{}'::jsonb)
             to_char(date_trunc('week', now())::date, 'YYYY-MM-DD'),
             $2::jsonb
         ),
-    passwordgood = true, status = 'synced', error_msg = NULL, updated_at = now()
+    passwordgood = true, grade_status = 'synced', grade_updated_at = now()
 WHERE crmstudentid = $1
 "#;
-    pub const APPLY_AGENDA: &str = r#"
+    pub const APPLY_PRIMARY_AGENDA: &str = r#"
 UPDATE students_grades_20262027
-SET weekly_agenda = $2::jsonb,
-    status = 'synced', error_msg = NULL, updated_at = now()
+SET primary_agenda = $2::jsonb,
+    primary_agenda_status = 'synced', primary_agenda_updated_at = now()
 WHERE crmstudentid = $1
 "#;
-    pub const APPLY_FAILURE: &str = r#"
+    pub const APPLY_SECONDARY_AGENDA: &str = r#"
 UPDATE students_grades_20262027
-SET status = 'error', passwordgood = COALESCE($2, passwordgood),
-    error_msg = $3, updated_at = now()
+SET secondary_agenda = $2::jsonb,
+    secondary_agenda_status = 'synced', secondary_agenda_updated_at = now()
+WHERE crmstudentid = $1
+"#;
+    pub const APPLY_GRADE_FAILURE: &str = r#"
+UPDATE students_grades_20262027
+SET grade_status = $3, passwordgood = COALESCE($2, passwordgood),
+    grade_updated_at = now()
+WHERE crmstudentid = $1
+"#;
+    pub const APPLY_PRIMARY_AGENDA_FAILURE: &str = r#"
+UPDATE students_grades_20262027
+SET primary_agenda_status = $2, primary_agenda_updated_at = now()
+WHERE crmstudentid = $1
+"#;
+    pub const APPLY_SECONDARY_AGENDA_FAILURE: &str = r#"
+UPDATE students_grades_20262027
+SET secondary_agenda_status = $2, secondary_agenda_updated_at = now()
 WHERE crmstudentid = $1
 "#;
 }
@@ -315,7 +336,7 @@ impl NeonGateway for PostgresNeonGateway {
                         weeklydata: row.try_get("weeklydata").map_err(neon_error)?,
                         auth_type: row.try_get("auth_type").map_err(neon_error)?,
                         auth_answers: row.try_get("auth_answers").map_err(neon_error)?,
-                        status: row.try_get("status").map_err(neon_error)?,
+                        grade_status: row.try_get("grade_status").map_err(neon_error)?,
                         passwordgood: row.try_get("passwordgood").map_err(neon_error)?,
                     },
                 ))
@@ -499,21 +520,48 @@ async fn apply_outcome(
                 .execute(&mut **tx)
                 .await
         }
-        ResultOutcome::AgendaSuccess { weekly_agenda } => {
-            sqlx::query(sql::APPLY_AGENDA)
+        ResultOutcome::PrimaryAgendaSuccess { agenda } => {
+            sqlx::query(sql::APPLY_PRIMARY_AGENDA)
                 .bind(crmstudentid)
-                .bind(weekly_agenda)
+                .bind(agenda)
                 .execute(&mut **tx)
                 .await
         }
-        ResultOutcome::Failure { code, passwordgood } => {
-            sqlx::query(sql::APPLY_FAILURE)
+        ResultOutcome::SecondaryAgendaSuccess { agenda } => {
+            sqlx::query(sql::APPLY_SECONDARY_AGENDA)
                 .bind(crmstudentid)
-                .bind(passwordgood)
-                .bind(code)
+                .bind(agenda)
                 .execute(&mut **tx)
                 .await
         }
+        ResultOutcome::Failure {
+            channel,
+            code,
+            passwordgood,
+        } => match channel {
+            ResultChannel::Grade => {
+                sqlx::query(sql::APPLY_GRADE_FAILURE)
+                    .bind(crmstudentid)
+                    .bind(passwordgood)
+                    .bind(code)
+                    .execute(&mut **tx)
+                    .await
+            }
+            ResultChannel::PrimaryAgenda => {
+                sqlx::query(sql::APPLY_PRIMARY_AGENDA_FAILURE)
+                    .bind(crmstudentid)
+                    .bind(code)
+                    .execute(&mut **tx)
+                    .await
+            }
+            ResultChannel::SecondaryAgenda => {
+                sqlx::query(sql::APPLY_SECONDARY_AGENDA_FAILURE)
+                    .bind(crmstudentid)
+                    .bind(code)
+                    .execute(&mut **tx)
+                    .await
+            }
+        },
     }
     .map_err(neon_error)?;
     if result.rows_affected() == 1 {

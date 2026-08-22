@@ -135,9 +135,7 @@ impl BoundaryService {
             .student_id
             .is_some_and(|value| value != request.crmstudentid)
         {
-            return self
-                .record_rejected(request, job.kind, "job_scope_mismatch")
-                .await;
+            return self.record_rejected(request, "job_scope_mismatch").await;
         }
         request
             .outcome
@@ -151,14 +149,10 @@ impl BoundaryService {
             .into_iter()
             .find(|row| row.crmstudentid == request.crmstudentid);
         let Some(crm_student) = crm_student.filter(CrmStudent::is_grade_portal_eligible) else {
-            return self
-                .record_rejected(request, job.kind, "crm_ineligible")
-                .await;
+            return self.record_rejected(request, "crm_ineligible").await;
         };
         if crm_student.franchiseid != job.franchise_id.unwrap_or(crm_student.franchiseid) {
-            return self
-                .record_rejected(request, job.kind, "job_scope_mismatch")
-                .await;
+            return self.record_rejected(request, "job_scope_mismatch").await;
         }
         if job.kind == JobKind::Agenda {
             let states = self.neon.states_by_crm_ids(&[request.crmstudentid]).await?;
@@ -166,14 +160,13 @@ impl BoundaryService {
                 .get(&request.crmstudentid)
                 .is_some_and(|row| row.track_agenda)
             {
-                return self
-                    .record_rejected(request, job.kind, "agenda_not_enabled")
-                    .await;
+                return self.record_rejected(request, "agenda_not_enabled").await;
             }
         }
 
+        let result_channel = request.outcome.channel();
         let idempotency_key =
-            deterministic_result_key(job.job_id, request.crmstudentid, job.kind.as_str());
+            deterministic_result_key(job.job_id, request.crmstudentid, result_channel.as_str());
         let audit_payload = request.audit_payload(true, None);
         let duplicate = self
             .neon
@@ -195,11 +188,13 @@ impl BoundaryService {
     async fn record_rejected(
         &self,
         request: ResultPostRequest,
-        job_kind: JobKind,
         code: &str,
     ) -> Result<ResultPostResponse, AppError> {
-        let idempotency_key =
-            deterministic_result_key(request.job_id, request.crmstudentid, job_kind.as_str());
+        let idempotency_key = deterministic_result_key(
+            request.job_id,
+            request.crmstudentid,
+            request.outcome.channel().as_str(),
+        );
         let audit_payload = request.audit_payload(false, Some(code));
         let duplicate = self
             .neon

@@ -6,7 +6,7 @@ use chrono::{Duration, Utc};
 use grade_db::error::AppError;
 use grade_db::models::{
     deterministic_result_key, ActiveJob, CrmStudent, JobKind, JobLease, JobStartRequest,
-    ResultOutcome, ResultPostRequest, StudentGradeState,
+    ResultChannel, ResultOutcome, ResultPostRequest, StudentGradeState,
 };
 use grade_db::service::{BoundaryService, CrmGateway, NeonGateway, NeonResultWrite};
 use serde_json::json;
@@ -274,7 +274,7 @@ async fn result_is_rejected_when_crm_no_longer_returns_the_student() {
 }
 
 #[tokio::test]
-async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
+async fn rejected_failure_uses_its_channel_for_idempotency_identity() {
     let crm = Arc::new(FakeCrm::default());
     crm.students.lock().unwrap().push(crm_student(1, None));
     let neon = Arc::new(FakeNeon::default());
@@ -293,6 +293,7 @@ async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
             lease_token: Uuid::from_u128(42),
             crmstudentid: 1,
             outcome: ResultOutcome::Failure {
+                channel: ResultChannel::Grade,
                 code: "bad_login".into(),
                 passwordgood: Some(false),
             },

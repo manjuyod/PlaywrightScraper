@@ -145,18 +145,15 @@ An agenda run always collects both missing and upcoming/due work for every
 supported, configured credential slot. It does not accept a per-status target:
 there is one complete collection for the selected students.
 
-Agenda storage remains the existing `weekly_agenda` snapshot, with two fixed
-top-level slots:
+Agenda storage uses independent `primary_agenda` and `secondary_agenda` JSONB
+columns. Each column stores one fixed credential slot:
 
 ```json
-{
-  "agenda1": {"portal": "canvas", "weeks": {}},
-  "agenda2": {"portal": null, "weeks": {}}
-}
+{"portal": "canvas", "weeks": {}}
 ```
 
-Portal 1 always supplies `agenda1`; Portal 2 always supplies `agenda2`. Slot
-identity is never reordered by portal type. Each populated `weeks` object is
+Portal 1 always supplies `primary_agenda`; Portal 2 always supplies
+`secondary_agenda`. Slot identity is never reordered by portal type. Each populated `weeks` object is
 grouped by the ISO date of the Monday containing an assignment's due date, then
 by the portal-provided class name, with `missing` and `due` arrays in each
 class bucket. A row visible in both slots remains in both slots; there is no
@@ -178,9 +175,11 @@ the same run. Infinite Campus uses a sequential Current Term assignment-detail
 scrub.
 An unconfigured, unsupported, or parserless portal is a valid blank slot:
 its `weeks` object stays empty. A capable collector that successfully finds no
-dated work is also a valid blank result. If any capable worker that starts
-fails, the run posts no partial agenda snapshot, so the previously stored
-snapshot remains unchanged.
+dated work is also a valid blank result. Each configured slot posts as soon as
+that slot finishes. A successful slot remains committed if the other slot later
+fails or is interrupted; the failed slot keeps its previous snapshot and records
+its own failure status. Slot failures count as student errors but do not fail the
+agenda process itself.
 
 For a safe, fictional UI preview that does not need CRM, Neon, credentials, or
 live portal data, run:
@@ -209,10 +208,12 @@ Database rollout is intentionally human-operated:
 
 1. Run and review [`grade_db/sql/000_inspect_boundary.sql`](grade_db/sql/000_inspect_boundary.sql). It selects only schema metadata and row counts.
 2. After review, apply [`grade_db/sql/001_runner_boundary.sql`](grade_db/sql/001_runner_boundary.sql). It is forward-only and does not drop tables or data.
-3. Deploy the CRM-backed `grade-db.exe`, run `grade-db.exe doctor`, and require `crm_secondary_schema=true` before removing any Neon columns.
-4. Apply [`grade_db/sql/002_drop_neon_secondary_portal.sql`](grade_db/sql/002_drop_neon_secondary_portal.sql) to existing Neon databases, then rerun `doctor`.
-5. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override, agenda tracking, and GPS fields. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
-6. Pilot one student, one franchise, and agenda collection before enabling scheduled batches.
+3. Require `crm_secondary_schema=true`, then apply [`grade_db/sql/002_drop_neon_secondary_portal.sql`](grade_db/sql/002_drop_neon_secondary_portal.sql).
+4. Apply the non-destructive [`grade_db/sql/003_split_student_scrape_state.sql`](grade_db/sql/003_split_student_scrape_state.sql) to add and backfill channel-specific data, status, and timestamp columns.
+5. Deploy the matching Python, dashboard, and `grade-db.exe` build, then require `grade-db.exe doctor` to pass.
+6. Pilot one student, one franchise, and an agenda job. Verify channel statuses and result audit rows.
+7. Apply [`grade_db/sql/004_drop_shared_scrape_state.sql`](grade_db/sql/004_drop_shared_scrape_state.sql) only after the new readers and writers are verified.
+8. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override, agenda tracking, and GPS fields. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
 
 `grade-db.exe` exposes only `job start`, `job heartbeat`, `result post`, `job complete`, `job fail`, and read-only `doctor`. It has no listener, arbitrary SQL command, scheduler, or migration command.
 

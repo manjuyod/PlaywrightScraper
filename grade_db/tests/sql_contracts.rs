@@ -11,6 +11,12 @@ fn doctor_schema_check_is_read_only_and_checks_required_columns() {
     for required in [
         "crmstudentid",
         "weeklydata",
+        "primary_agenda",
+        "secondary_agenda",
+        "grade_status",
+        "primary_agenda_status",
+        "secondary_agenda_status",
+        "failure_code",
         "lease_token",
         "lease_expires_at",
         "idempotency_key",
@@ -64,8 +70,8 @@ fn result_writes_are_idempotent_and_state_updates_are_separate() {
     assert!(sql::APPLY_GRADE.contains("weeklydata"));
     assert!(sql::APPLY_GRADE.contains("jsonb_build_object"));
     assert!(sql::APPLY_GRADE.contains("date_trunc('week', now())"));
-    assert!(sql::APPLY_AGENDA.contains("weekly_agenda"));
-    assert!(!sql::APPLY_AGENDA.contains("||"));
+    assert!(sql::APPLY_PRIMARY_AGENDA.contains("primary_agenda"));
+    assert!(sql::APPLY_SECONDARY_AGENDA.contains("secondary_agenda"));
     assert!(!sql::INSERT_RESULT.contains("weeklydata"));
-    assert!(!sql::INSERT_RESULT.contains("weekly_agenda"));
+    assert!(!sql::INSERT_RESULT.contains("primary_agenda"));
 }

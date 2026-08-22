@@ -33,11 +33,11 @@ def _student(
             {
                 "crmstudentid": student_id,
                 "weeklydata": {"2026-07-13": {"English": 91.5}},
-                "weekly_agenda": {"2026-07-15": [["English", "Essay"]]},
-                "status": status,
+                "primary_agenda": {"portal": None, "weeks": {}},
+                "secondary_agenda": {"portal": None, "weeks": {}},
+                "grade_status": status,
                 "passwordgood": status == "synced",
-                "error_msg": None if status == "synced" else "scrape_failed",
-                "updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
+                "grade_updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
             }
         ],
     )[0]
@@ -243,10 +243,8 @@ def test_student_page_contains_canonical_grades_and_agenda(monkeypatch) -> None:
     assert response.status_code == 200
     assert student["id"] == 101
     assert student["grades"] == {"2026-07-13": {"English": 91.5}}
-    assert student["agendaItems"] == [
-        {"dueDate": "2026-07-15", "course": "English", "title": "Essay"}
-    ]
-    assert student["agendaSlots"] == []
+    assert student["agendaItems"] == []
+    assert len(student["agendaSlots"]) == 2
 
 
 def test_student_page_keeps_legacy_items_for_noncanonical_slot_hybrid(monkeypatch) -> None:

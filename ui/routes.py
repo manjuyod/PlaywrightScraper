@@ -249,9 +249,8 @@ def _student_card(student: dashboard.DashboardStudent) -> dict[str, Any]:
         "lastName": student.last_name,
         "gradeLevel": student.grade_level,
         "portalUrl": student.portal_url,
-        "status": student.status,
-        "errorCode": student.error_code,
-        "updatedAt": dashboard._iso_timestamp(student.updated_at),
+        "status": student.grade_status,
+        "updatedAt": dashboard._iso_timestamp(student.grade_updated_at),
         "standing": student.standing,
         "gradesSnapshot": _grade_items(student.grades_snapshot),
         "lowGrades": _grade_items(student.low_grades),
@@ -301,7 +300,7 @@ def index():
             "logoUrl": url_for("static", filename="imgs/tc_logo.webp"),
             "jobsUrl": url_for("jobs_api"),
             "countAll": len(students),
-            "countSynced": sum(student.status == "synced" for student in students),
+            "countSynced": sum(student.grade_status == "synced" for student in students),
             "countBadLogins": sum(
                 student.passwordgood is False for student in students
             ),

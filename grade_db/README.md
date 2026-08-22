@@ -41,6 +41,8 @@ Agents do not execute these files:
 - `sql/000_inspect_boundary.sql`: read-only schema/constraint/count inspection for human review.
 - `sql/001_runner_boundary.sql`: idempotent forward migration for fresh or partially applied defunct schemas; secondary credentials are never created in Neon.
 - `sql/002_drop_neon_secondary_portal.sql`: transactional cleanup for existing Neon databases after the CRM-backed executable is deployed and verified.
+- `sql/003_split_student_scrape_state.sql`: splits grade, primary-agenda, and secondary-agenda data, status, and timestamps while migrating existing agenda snapshots.
+- `sql/004_drop_shared_scrape_state.sql`: removes the replaced shared agenda, status, error, and timestamp columns after the new contract is deployed and verified.
 - `sql/operations/`: human-run updates for Neon-owned portal override, agenda, and GPS configuration on rows that already exist.
 
-The separate CRM frontend owns `dbo.tblStudentGradePortalSecondary`. Deploy the new executable, require `doctor` to report `crm_secondary_schema=true`, apply the cleanup migration, rerun `doctor`, then pilot a single student, a single franchise, and an agenda job.
+The separate CRM frontend owns `dbo.tblStudentGradePortalSecondary`. Apply the expand/backfill migration before deploying the matching executable and dashboard, verify `doctor` and pilot jobs, then apply the shared-state cleanup migration.

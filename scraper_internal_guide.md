@@ -42,52 +42,53 @@ payload and database boundary.
 ## Agenda Collection Contract
 
 `scraper.agenda` preserves the two CRM credential positions as fixed agenda
-slots: Portal 1 is always `agenda1`, and Portal 2 is always `agenda2`. It never
-sorts or otherwise reassigns slots based on portal type. A successful result
-replaces `weekly_agenda` as one nested snapshot:
+slots: Portal 1 is always primary, and Portal 2 is always secondary. It never
+sorts or otherwise reassigns slots based on portal type. Each slot is audited
+and persisted independently in `primary_agenda` or `secondary_agenda`:
 
 ```json
 {
-  "agenda1": {
-    "portal": "canvas",
-    "weeks": {
-      "2026-08-10": {
-        "Example class": {
-          "missing": [],
-          "due": [{"title": "Example work", "dueDate": "2026-08-14", "dueTime": null}]
-        }
+  "portal": "canvas",
+  "weeks": {
+    "2026-08-10": {
+      "Example class": {
+        "missing": [],
+        "due": [{"title": "Example work", "dueDate": "2026-08-14", "dueTime": null}]
       }
     }
-  },
-  "agenda2": {"portal": null, "weeks": {}}
+  }
 }
 ```
 
-The only top-level agenda keys are `agenda1` and `agenda2`. `portal` is a safe
-lowercase registry key or `null`; it is not a portal URL. `weeks` is always an
-object. Week keys are canonical ISO Monday dates calculated from each usable
+`portal` is a safe lowercase registry key or `null`; it is not a portal URL.
+`weeks` is always an object. Week keys are canonical ISO Monday dates calculated from each usable
 assignment due date. Class buckets always contain `missing` and `due` arrays.
 Rows contain the title, normalized due date, and normalized local time (or
 `null`); undated work is omitted because it cannot be placed in a week.
 
 Canvas, ParentVUE, and Google Classroom are agenda-capable. Each collector
 returns both missing and upcoming/due work in one invocation; the agenda CLI
-does not select a single status. Other configured portals retain their detected
-slot and produce `weeks: {}` until an agenda parser is available. Missing
-credentials, unsupported portals, and parserless portals are intentional blank
-slots, not collection failures. A capable collector that completes with no
-dated assignments is likewise a successful blank slot.
+does not select a single status. Missing credentials and unsupported or
+parserless portals record `configuration_missing` or `unsupported_portal` for
+their specific slot. A capable collector that completes with no dated
+assignments is a successful blank slot.
 
 Within a slot, normalized rows are grouped by Monday week and class, with
 missing and due status buckets. Identical rows from the same portal may be
 collapsed by stable source identity (with missing taking precedence over due),
-but rows are never deduplicated, merged, or reordered across `agenda1` and
-`agenda2`.
+but rows are never deduplicated, merged, or reordered across slots.
 
 The Rust result boundary recursively counts every JSON object, array, and
 primitive value and accepts at most 1,000 nodes. Normalization therefore caps
-each slot's `weeks` subtree at 497 nodes. The maximum bundle is
-`1 + 2 * (1 slot object + 1 portal value + 497 weeks nodes) = 999` nodes.
+each slot's `weeks` subtree at 497 nodes.
+
+Each audited result targets exactly one channel. Grade status may be `never`,
+`synced`, `bad_login`, `no_grades`, or `scrape_failed`. Agenda status may be
+`never`, `synced`, `bad_login`, `configuration_missing`, `scrape_failed`, or
+`unsupported_portal`. Rust rejects failure codes that do not belong to the
+result channel. Job-level failures use the separate process codes
+`lease_renewal_failed`, `lease_expired`, `neon_unavailable`,
+`result_post_failed`, `runner_failed`, and `agenda_runner_failed`.
 The cap is applied separately to both slots, so a large `agenda1` cannot reduce
 the capacity available to `agenda2`. Rows are retained from the already
 canonical order (week, case-insensitive class, missing before due, then

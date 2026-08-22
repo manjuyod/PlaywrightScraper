@@ -94,7 +94,7 @@ def student_from_context(context: RawStudentContext) -> StudentContext:
             for title in known_course_titles
             if isinstance(title, str) and title.strip()
         ],
-        "status": context.get("status"),
+        "grade_status": context.get("grade_status"),
         "passwordgood": context.get("passwordgood"),
         "franchise_id": context.get("franchiseid"),
         "grade": context.get("grade"),
@@ -119,7 +119,7 @@ def _filter_contexts(
         if (not wanted_portal or context.get("portal") == wanted_portal)
         and (
             not wanted_status
-            or str(context.get("status") or "").strip().lower() == wanted_status
+            or str(context.get("grade_status") or "").strip().lower() == wanted_status
         )
     ]
     
@@ -285,6 +285,7 @@ async def _process_grade_students(
                     else:
                         outcome = {
                             "kind": "failure",
+                            "channel": "grade",
                             "code": "no_grades",
                             "passwordgood": None,
                         }
@@ -292,6 +293,7 @@ async def _process_grade_students(
                 except LoginError:
                     outcome = {
                         "kind": "failure",
+                        "channel": "grade",
                         "code": "bad_login",
                         "passwordgood": False,
                     }
@@ -307,6 +309,7 @@ async def _process_grade_students(
                     )
                     outcome = {
                         "kind": "failure",
+                        "channel": "grade",
                         "code": "scrape_failed",
                         "passwordgood": None,
                     }

@@ -159,8 +159,8 @@ def test_agenda_slot_diagnostics_allowlist_and_redact_collection_data(
         unknown_extra=sentinels[6],
     )
     try:
-        with pytest.raises(agenda.AgendaSlotCollectionError):
-            asyncio.run(agenda.fetch_agenda(Browser(), student))
+        result, _ = asyncio.run(agenda.fetch_agenda(Browser(), student))
+        assert result.failures == {"agenda1": "scrape_failed"}
     finally:
         reset_log_context(outer_context_token)
         logger.removeHandler(handler)

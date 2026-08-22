@@ -70,6 +70,48 @@ def test_secondary_portal_drop_migration_removes_only_crm_owned_columns() -> Non
         )
 
 
+def test_scrape_state_migration_splits_and_backfills_channels() -> None:
+    sql = _sql("003_split_student_scrape_state.sql")
+
+    for column in (
+        "primary_agenda",
+        "secondary_agenda",
+        "grade_status",
+        "primary_agenda_status",
+        "secondary_agenda_status",
+        "grade_updated_at",
+        "primary_agenda_updated_at",
+        "secondary_agenda_updated_at",
+        "failure_code",
+    ):
+        assert f"add column if not exists {column}" in sql
+    assert "weekly_agenda->'agenda1'" in sql
+    assert "weekly_agenda->'agenda2'" in sql
+    assert "drop column" not in sql
+
+
+def test_shared_scrape_state_cleanup_removes_only_replaced_columns() -> None:
+    sql = _sql("004_drop_shared_scrape_state.sql")
+
+    for retired in (
+        "weekly_agenda",
+        "status",
+        "error_msg",
+        "updated_at",
+    ):
+        assert f"drop column if exists {retired}" in sql
+    for retained in (
+        "weeklydata",
+        "primary_agenda",
+        "secondary_agenda",
+        "grade_status",
+        "primary_agenda_status",
+        "secondary_agenda_status",
+        "failure_code",
+    ):
+        assert f"drop column if exists {retained}" not in sql
+
+
 def test_boundary_migration_relaxes_only_known_defunct_constraints() -> None:
     sql = _sql("001_runner_boundary.sql")
 

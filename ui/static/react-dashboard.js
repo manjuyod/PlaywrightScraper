@@ -203,7 +203,7 @@
         if (status === "synced" || status === "complete") {
             return "success";
         }
-        if (status === "error" || status === "failed") {
+        if (status === "failed" || (status && status !== "never" && status !== "running")) {
             return "danger";
         }
         if (status === "running") {
