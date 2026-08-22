@@ -147,6 +147,7 @@ def test_neon_failure_stops_scheduling_new_students(monkeypatch) -> None:
         scraped.append(student["db_id"])
         return {"db_id": student["db_id"], "parsed_grades": {"week": {}}}
 
+    monkeypatch.setattr(runner, "MAX_CONCURRENT_GRADE_WORKERS", 1, raising=False)
     monkeypatch.setattr(runner, "scrape_one", scrape)
     students = [
         runner._student_from_context(_context(7)),
@@ -302,3 +303,111 @@ def test_startup_failure_sends_sanitized_fatal_notification(monkeypatch) -> None
     assert "unhandled_exception" in message
     assert "RuntimeError" in message
     assert "primary-secret" not in message
+
+
+def test_grade_job_limits_scrapes_and_serializes_result_posts(monkeypatch) -> None:
+    import threading
+    import time
+
+    active_scrapes = 0
+    peak_scrapes = 0
+    active_posts = 0
+    peak_posts = 0
+    post_counter_lock = threading.Lock()
+    posted_student_ids: list[int] = []
+
+    class Client:
+        def post_result(self, **kwargs):
+            nonlocal active_posts, peak_posts
+            with post_counter_lock:
+                active_posts += 1
+                peak_posts = max(peak_posts, active_posts)
+            time.sleep(0.01)
+            posted_student_ids.append(kwargs["crmstudentid"])
+            with post_counter_lock:
+                active_posts -= 1
+            return {"applied": True, "duplicate": False}
+
+    async def scrape(_browser, student):
+        nonlocal active_scrapes, peak_scrapes
+        active_scrapes += 1
+        peak_scrapes = max(peak_scrapes, active_scrapes)
+        await asyncio.sleep(0.01)
+        active_scrapes -= 1
+        return {
+            "db_id": student["db_id"],
+            "parsed_grades": {"Math": 95},
+        }
+
+    monkeypatch.setenv("GRADE_SCRAPER_WORKERS", "8")
+    monkeypatch.setattr(runner, "MAX_CONCURRENT_GRADE_WORKERS", 2, raising=False)
+    monkeypatch.setattr(runner, "scrape_one", scrape)
+    students = [
+        runner._student_from_context(_context(student_id))
+        for student_id in range(7, 11)
+    ]
+    progress = runner._new_progress(len(students))
+
+    failure = asyncio.run(
+        runner._process_grade_students(
+            Client(),
+            {"job_id": "job", "lease_token": "lease"},
+            object(),
+            students,
+            progress,
+            asyncio.Event(),
+        )
+    )
+
+    assert failure is None
+    assert peak_scrapes == 2
+    assert peak_posts == 1
+    assert sorted(posted_student_ids) == [7, 8, 9, 10]
+    assert progress == {"total": 4, "attempted": 4, "success": 4, "errors": 0}
+
+
+def test_grade_result_failure_cancels_active_and_waiting_workers(monkeypatch) -> None:
+    started: list[int] = []
+    cancelled: list[int] = []
+    keep_running = asyncio.Event()
+
+    class Client:
+        def post_result(self, **_kwargs):
+            raise GradeDbUnavailable("safe")
+
+    async def scrape(_browser, student):
+        student_id = student["db_id"]
+        started.append(student_id)
+        if student_id == 7:
+            await asyncio.sleep(0.01)
+            return {"db_id": student_id, "parsed_grades": {"Math": 95}}
+        try:
+            await keep_running.wait()
+        except asyncio.CancelledError:
+            cancelled.append(student_id)
+            raise
+        raise AssertionError("blocked scrape unexpectedly resumed")
+
+    monkeypatch.setattr(runner, "MAX_CONCURRENT_GRADE_WORKERS", 2, raising=False)
+    monkeypatch.setattr(runner, "scrape_one", scrape)
+    students = [
+        runner._student_from_context(_context(student_id))
+        for student_id in range(7, 10)
+    ]
+    progress = runner._new_progress(len(students))
+
+    failure = asyncio.run(
+        runner._process_grade_students(
+            Client(),
+            {"job_id": "job", "lease_token": "lease"},
+            object(),
+            students,
+            progress,
+            asyncio.Event(),
+        )
+    )
+
+    assert failure == "neon_unavailable"
+    assert sorted(started) == [7, 8]
+    assert cancelled == [8]
+    assert progress == {"total": 3, "attempted": 0, "success": 0, "errors": 0}
