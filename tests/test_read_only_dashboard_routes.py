@@ -268,23 +268,27 @@ def test_student_page_exposes_grade_and_agenda_channel_state(monkeypatch) -> Non
     payload = _page_data(client.get("/franchise/57/student/101"))["student"]
 
     assert payload["status"] == "bad_login"
-    assert payload["errorCode"] == "bad_login"
+    assert payload["syncIssues"] == [
+        {"channel": "grades", "label": "Grades", "status": "bad_login"},
+        {
+            "channel": "primary_agenda",
+            "label": "Primary agenda",
+            "status": "scrape_failed",
+        },
+    ]
     assert [
         {
             "status": slot["status"],
-            "errorCode": slot["errorCode"],
             "updatedAt": slot["updatedAt"],
         }
         for slot in payload["agendaSlots"]
     ] == [
         {
             "status": "scrape_failed",
-            "errorCode": "scrape_failed",
             "updatedAt": "2026-08-20T19:45:00+00:00",
         },
         {
             "status": "not_configured",
-            "errorCode": None,
             "updatedAt": "2026-08-20T19:46:00+00:00",
         },
     ]
@@ -356,7 +360,6 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
 
     assert payload["agendaSlots"] == [
         {
-            "errorCode": None,
             "number": 1,
             "portal": "canvas",
             "portalLabel": "Canvas",
@@ -399,7 +402,6 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
             ],
         },
         {
-            "errorCode": None,
             "number": 2,
             "portal": "parentvue",
             "portalLabel": "ParentVUE",
@@ -479,7 +481,6 @@ def test_agenda_slots_orders_and_skips_malformed_nested_data(monkeypatch) -> Non
         "Later",
     ]
     assert slots[1] == {
-        "errorCode": None,
         "number": 2,
         "portal": "canvas",
         "portalLabel": "Canvas",

@@ -9,8 +9,7 @@
     "lastName": "Quinn",
     "gradeLevel": 11,
     "portalUrl": null,
-    "status": "error",
-    "errorCode": "bad_login",
+    "status": "bad_login",
     "updatedAt": "2026-08-13T15:14:00-07:00",
     "gradesSnapshot": [
       {"course": "Algebraic Modeling", "grade": 92.4, "change": "+"},
@@ -36,6 +35,8 @@
         "number": 1,
         "portal": "canvas",
         "portalLabel": "Canvas",
+        "status": "synced",
+        "updatedAt": "2026-08-13T15:15:00-07:00",
         "weeks": [
           {
             "weekStart": "2026-08-10",
@@ -99,6 +100,8 @@
         "number": 2,
         "portal": "parentvue",
         "portalLabel": "ParentVUE",
+        "status": "synced",
+        "updatedAt": "2026-08-13T15:16:00-07:00",
         "weeks": [
           {
             "weekStart": "2026-08-10",

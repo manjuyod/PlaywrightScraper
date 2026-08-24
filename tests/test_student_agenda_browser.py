@@ -106,29 +106,23 @@ def test_report_scroll_regions_use_the_existing_visible_focus_treatment(
         assert outline["visibleWithinCard"] is True
 
 
-def test_error_description_opens_on_hover_and_keyboard_focus(
+def test_grade_card_exposes_last_run_issue_to_pointer_and_keyboard_users(
     browser_page: Page,
     preview_url: str,
 ) -> None:
     page = browser_page
     page.goto(preview_url, wait_until="networkidle")
 
-    trigger = page.locator(".tc-error-tooltip")
-    tooltip = trigger.get_by_role("tooltip")
     message = "The portal rejected the student's username or password."
+    trigger = page.get_by_label(f"Grades: Issue on last run. {message}")
 
     expect(trigger).to_have_count(1)
     expect(trigger).to_have_attribute("tabindex", "0")
-    expect(trigger).to_have_attribute("aria-label", f"error: {message}")
-    expect(tooltip).to_be_hidden()
+    expect(trigger).to_have_attribute("title", message)
+    expect(trigger).to_contain_text("Issue on last run")
 
-    trigger.hover()
-    expect(tooltip).to_be_visible()
-    expect(tooltip).to_have_text(message)
-
-    page.mouse.move(0, 0)
     trigger.focus()
-    expect(tooltip).to_be_visible()
+    expect(trigger).to_be_focused()
 
 
 def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(

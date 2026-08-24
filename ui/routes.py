@@ -143,16 +143,10 @@ def _agenda_slots(
         else:
             channel_status = student.secondary_agenda_status
             channel_updated_at = student.secondary_agenda_updated_at
-        channel_error = (
-            channel_status
-            if channel_status not in {"never", "not_configured", "synced"}
-            else None
-        )
         result: dict[str, Any] = {
             "number": number,
             "portal": portal,
             "status": channel_status,
-            "errorCode": channel_error,
             "updatedAt": dashboard._iso_timestamp(channel_updated_at),
             "weeks": [],
         }
@@ -255,6 +249,22 @@ def _agenda_slots(
     return [project_slot(1), project_slot(2)]
 
 
+def _student_sync_issues(
+    student: dashboard.DashboardStudent,
+) -> list[dict[str, str]]:
+    healthy_statuses = {"never", "not_configured", "synced"}
+    channels = (
+        ("grades", "Grades", student.grade_status),
+        ("primary_agenda", "Primary agenda", student.primary_agenda_status),
+        ("secondary_agenda", "Secondary agenda", student.secondary_agenda_status),
+    )
+    return [
+        {"channel": channel, "label": label, "status": status}
+        for channel, label, status in channels
+        if status not in healthy_statuses
+    ]
+
+
 def _student_card(student: dashboard.DashboardStudent) -> dict[str, Any]:
     return {
         "id": student.crmstudentid,
@@ -268,11 +278,7 @@ def _student_card(student: dashboard.DashboardStudent) -> dict[str, Any]:
         "gradeLevel": student.grade_level,
         "portalUrl": student.portal_url,
         "status": student.grade_status,
-        "errorCode": (
-            student.grade_status
-            if student.grade_status not in {"never", "synced"}
-            else None
-        ),
+        "syncIssues": _student_sync_issues(student),
         "updatedAt": dashboard._iso_timestamp(student.grade_updated_at),
         "standing": student.standing,
         "gradesSnapshot": _grade_items(student.grades_snapshot),
