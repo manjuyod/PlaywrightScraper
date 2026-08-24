@@ -570,6 +570,19 @@ summary:focus-visible {
     color: #475569;
 }
 
+.tc-sync-warning {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(220, 38, 38, 0.22);
+    border-radius: 999px;
+    background: rgba(220, 38, 38, 0.1);
+    color: var(--tc-red);
+}
+
 .tc-error-tooltip {
     position: relative;
     display: inline-flex;
