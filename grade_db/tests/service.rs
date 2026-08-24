@@ -6,7 +6,7 @@ use chrono::{Duration, Utc};
 use grade_db::error::AppError;
 use grade_db::models::{
     deterministic_result_key, ActiveJob, CrmStudent, JobKind, JobLease, JobStartRequest,
-    ResultOutcome, ResultPostRequest, StudentGradeState,
+    ResultChannel, ResultOutcome, ResultPostRequest, StudentGradeState,
 };
 use grade_db::service::{BoundaryService, CrmGateway, NeonGateway, NeonResultWrite};
 use serde_json::json;
@@ -274,7 +274,7 @@ async fn result_is_rejected_when_crm_no_longer_returns_the_student() {
 }
 
 #[tokio::test]
-async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
+async fn rejected_failure_uses_its_channel_for_idempotency_identity() {
     let crm = Arc::new(FakeCrm::default());
     crm.students.lock().unwrap().push(crm_student(1, None));
     let neon = Arc::new(FakeNeon::default());
@@ -293,6 +293,7 @@ async fn rejected_failure_uses_the_job_kind_for_its_idempotency_identity() {
             lease_token: Uuid::from_u128(42),
             crmstudentid: 1,
             outcome: ResultOutcome::Failure {
+                channel: ResultChannel::Grade,
                 code: "bad_login".into(),
                 passwordgood: Some(false),
             },
@@ -332,31 +333,38 @@ async fn agenda_pull_results_use_independent_slot_idempotency_keys() {
     });
     let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
 
-    for slot in ["agenda1", "agenda2"] {
+    for (kind, channel) in [
+        ("primary_agenda_success", "primary_agenda"),
+        ("secondary_agenda_success", "secondary_agenda"),
+    ] {
         let request = serde_json::from_value(json!({
             "job_id": Uuid::from_u128(19),
             "lease_token": Uuid::from_u128(42),
             "crmstudentid": 1,
             "outcome": {
-                "kind": "agenda_success",
-                "weekly_agenda": {
-                    slot: {"portal": "canvas", "weeks": {}}
-                }
+                "kind": kind,
+                "agenda": {"portal": "canvas", "weeks": {}}
             }
         }))
         .unwrap();
         service.post_result(request).await.unwrap();
+
+        let writes = neon.writes.lock().unwrap();
+        assert_eq!(
+            writes.last().unwrap().idempotency_key,
+            deterministic_result_key(Uuid::from_u128(19), 1, channel)
+        );
     }
 
     let writes = neon.writes.lock().unwrap();
     assert_eq!(writes.len(), 2);
     assert_eq!(
         writes[0].idempotency_key,
-        deterministic_result_key(Uuid::from_u128(19), 1, "agenda1")
+        deterministic_result_key(Uuid::from_u128(19), 1, "primary_agenda")
     );
     assert_eq!(
         writes[1].idempotency_key,
-        deterministic_result_key(Uuid::from_u128(19), 1, "agenda2")
+        deterministic_result_key(Uuid::from_u128(19), 1, "secondary_agenda")
     );
     assert_ne!(writes[0].idempotency_key, writes[1].idempotency_key);
 }

@@ -432,11 +432,9 @@ def test_canvas_timezone_evaluation_failure_reaches_controlled_slot_boundary(
         "alt_password": None,
     }
 
-    with pytest.raises(
-        agenda.AgendaSlotCollectionError,
-        match="^agenda1_canvas_failed$",
-    ):
-        asyncio.run(agenda.fetch_agenda(browser, student))
+    result, _ = asyncio.run(agenda.fetch_agenda(browser, student))
+
+    assert result.failures == {"agenda1": "scrape_failed"}
 
     assert browser.context.request.urls == []
     assert browser.context.page.close_calls == 1

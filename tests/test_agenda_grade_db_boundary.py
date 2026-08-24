@@ -556,8 +556,7 @@ def test_agenda_success_survives_cleanup_failure(monkeypatch, cleanup_target: st
     assert bundle["agenda1"]["weeks"] == {}
 
 
-def test_agenda_slot_failure_code_survives_cleanup_failure(monkeypatch) -> None:
-    """Would fail if cleanup replaces the established public slot failure code."""
+def test_agenda_slot_failure_state_survives_cleanup_failure(monkeypatch) -> None:
 
     class CleanupFailingPage(FakePage):
         async def close(self) -> None:
@@ -596,11 +595,31 @@ def test_agenda_slot_failure_code_survives_cleanup_failure(monkeypatch) -> None:
     student = _student(7)
     student.update(alt_login_url=None, alt_id=None, alt_password=None)
 
-    with pytest.raises(
-        agenda.AgendaSlotCollectionError,
-        match="^agenda1_canvas_failed$",
-    ):
-        asyncio.run(agenda.fetch_agenda(CleanupFailingBrowser(), student))
+    result, _ = asyncio.run(agenda.fetch_agenda(CleanupFailingBrowser(), student))
+
+    assert result.failures == {"agenda1": "scrape_failed"}
+
+
+def test_agenda_login_failure_is_assigned_to_its_slot(monkeypatch) -> None:
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            raise agenda.LoginError("portal login rejected")
+
+        async def get_agenda(self):
+            raise AssertionError("agenda collection should not start")
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    student = _student(7)
+    student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+    result, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), student))
+
+    assert result.failures == {"agenda1": "bad_login"}
 
 
 def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> None:
@@ -778,7 +797,7 @@ def test_unsupported_and_unidentified_slots_remain_in_empty_bundle() -> None:
     assert browser.pages == []
 
 
-def test_no_worker_slots_post_each_empty_pull_independently() -> None:
+def test_unsupported_configured_slot_posts_its_failure_state() -> None:
     posts = []
     student = _student(7)
     student.update(
@@ -787,10 +806,6 @@ def test_no_worker_slots_post_each_empty_pull_independently() -> None:
         alt_id=None,
         alt_password=None,
     )
-    empty_bundle = {
-        "agenda1": {"portal": "powerschool", "weeks": {}},
-        "agenda2": {"portal": None, "weeks": {}},
-    }
     browser = FakeBrowser()
 
     class Client:
@@ -813,40 +828,21 @@ def test_no_worker_slots_post_each_empty_pull_independently() -> None:
     assert failure is None
     assert [post["outcome"] for post in posts] == [
         {
-            "kind": "agenda_success",
-            "weekly_agenda": {"agenda1": empty_bundle["agenda1"]},
+            "kind": "failure",
+            "channel": "primary_agenda",
+            "code": "unsupported_portal",
         },
         {
-            "kind": "agenda_success",
-            "weekly_agenda": {"agenda2": empty_bundle["agenda2"]},
+            "kind": "secondary_agenda_success",
+            "agenda": {"portal": None, "weeks": {}},
         },
     ]
     assert browser.contexts == []
     assert browser.pages == []
-    assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
+    assert progress == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
 
 
-@pytest.mark.parametrize(
-    ("failing_portal", "successful_slot", "failed_slot"),
-    [
-        ("parentvue", "agenda1", "agenda2"),
-        ("canvas", "agenda2", "agenda1"),
-    ],
-)
-def test_slot_failure_preserves_the_other_successful_pull(
-    monkeypatch,
-    caplog,
-    failing_portal: str,
-    successful_slot: str,
-    failed_slot: str,
-) -> None:
-    sentinels = [
-        "sentinel-user",
-        "sentinel-password",
-        "sentinel-query",
-        "sentinel-cookie",
-        "sentinel-token",
-    ]
+def test_slot_failure_preserves_the_other_slot_and_posts_only_safe_state(monkeypatch, caplog) -> None:
     posts = []
 
     class SuccessEngine:
@@ -874,7 +870,7 @@ def test_slot_failure_preserves_the_other_successful_pull(
             raise RuntimeError("sentinel-cookie sentinel-token")
 
     def get_portal(key):
-        return FailureEngine if key == failing_portal else SuccessEngine
+        return SuccessEngine if key == "canvas" else FailureEngine
 
     class Client:
         def post_result(self, **kwargs):
@@ -892,57 +888,101 @@ def test_slot_failure_preserves_the_other_successful_pull(
     )
     browser = FakeBrowser()
 
-    progress = _new_progress(1)
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
             {"job_id": "job", "lease_token": "lease"},
             browser,
             [student],
-            progress,
+            _new_progress(1),
             asyncio.Event(),
         )
     )
 
     assert failure is None
-    successful_portal = "parentvue" if successful_slot == "agenda2" else "canvas"
-    assert [post["outcome"] for post in posts] == [
-        {
-            "kind": "agenda_success",
-            "weekly_agenda": {
-                successful_slot: {
-                    "portal": successful_portal,
-                    "weeks": {
-                        "2026-08-10": {
-                            "Sentinel Course": {
-                                "missing": [],
-                                "low_score": [],
-                                "due": [
-                                    {
-                                        "title": "Sentinel Assignment",
-                                        "dueDate": "2026-08-16",
-                                        "dueTime": None,
-                                    }
-                                ],
-                            }
-                        }
-                    },
-                }
-            },
-        },
-        {
-            "kind": "agenda_pull_failure",
-            "agenda_slot": failed_slot,
-            "code": f"{failed_slot}_{failing_portal}_failed",
-        },
-    ]
-    assert progress == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
+    assert len(posts) == 2
+    outcomes = [post["outcome"] for post in posts]
+    assert any(outcome["kind"] == "primary_agenda_success" for outcome in outcomes)
+    assert {
+        "kind": "failure",
+        "channel": "secondary_agenda",
+        "code": "scrape_failed",
+    } in outcomes
     assert len(browser.pages) == 2
     assert all(page.close_calls == 1 for page in browser.pages)
     assert len(browser.contexts) == 2
     assert all(context.close_calls == 1 for context in browser.contexts)
     exposed = repr(agenda.resolve_agenda_slots(student)) + str(posts) + caplog.text
-    assert all(sentinel not in exposed for sentinel in sentinels)
+    for secret in (
+        "sentinel-user",
+        "sentinel-password",
+        "sentinel-query",
+        "sentinel-cookie",
+        "sentinel-token",
+    ):
+        assert secret not in exposed
+
+
+def test_completed_slot_is_posted_while_other_slot_is_still_running(monkeypatch) -> None:
+    primary_posted = asyncio.Event()
+    browser_closed = asyncio.Event()
+    posts = []
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, _page, username, *_args, **_kwargs):
+            self.username = username
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            if self.username == "user-7":
+                return []
+            await browser_closed.wait()
+            raise RuntimeError("browser closed")
+
+    class Client:
+        def post_result(self, **kwargs):
+            posts.append(kwargs)
+            if kwargs["outcome"]["kind"] == "primary_agenda_success":
+                primary_posted.set()
+            return {"applied": True, "duplicate": False}
+
+    async def scenario() -> str | None:
+        run = asyncio.create_task(
+            agenda._collect_and_post_agendas(
+                Client(),
+                {"job_id": "job", "lease_token": "lease"},
+                FakeBrowser(),
+                [_student(7)],
+                _new_progress(1),
+                asyncio.Event(),
+            )
+        )
+        await asyncio.wait_for(primary_posted.wait(), timeout=1)
+        assert not run.done()
+        assert [post["outcome"]["kind"] for post in posts] == [
+            "primary_agenda_success"
+        ]
+        browser_closed.set()
+        return await run
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+
+    assert asyncio.run(scenario()) is None
+    assert [post["outcome"] for post in posts] == [
+        {
+            "kind": "primary_agenda_success",
+            "agenda": {"portal": "canvas", "weeks": {}},
+        },
+        {
+            "kind": "failure",
+            "channel": "secondary_agenda",
+            "code": "scrape_failed",
+        },
+    ]
 
 
 def test_neon_failure_closes_started_slot_contexts_and_pages_once(monkeypatch) -> None:
@@ -1061,16 +1101,13 @@ def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
 
     async def fetch(_context, student, **_kwargs):
         if student["db_id"] == 7:
-            first, second = agenda.resolve_agenda_slots(student)
-            return (
-                agenda.AgendaPullResult(
-                    slot=first,
-                    snapshot={"portal": "canvas", "weeks": {}},
-                ),
-                agenda.AgendaPullResult(
-                    slot=second,
-                    snapshot={"portal": "parentvue", "weeks": {}},
-                ),
+            return agenda.AgendaFetchResult(
+                bundle={
+                    "agenda1": {"portal": "canvas", "weeks": {}},
+                    "agenda2": {"portal": "parentvue", "weeks": {}},
+                },
+                attempted_slots=("agenda1", "agenda2"),
+                failures={},
             ), student
         try:
             await asyncio.Event().wait()
@@ -1082,7 +1119,7 @@ def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
         def post_result(self, **_kwargs):
             raise GradeDbUnavailable("safe")
 
-    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
+    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
     failure = asyncio.run(
         agenda._collect_and_post_agendas(
             Client(),
@@ -1129,7 +1166,7 @@ def test_lease_failure_cancels_outstanding_collection(monkeypatch) -> None:
         await lease_task
         return result
 
-    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
+    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
 
     assert asyncio.run(scenario()) == "lease_renewal_failed"
     assert cancelled.is_set()
@@ -1142,7 +1179,7 @@ def test_heartbeat_failure_prevents_agenda_tasks_from_starting(monkeypatch) -> N
         started.append(student["db_id"])
         return {}, student
 
-    monkeypatch.setattr(agenda, "_fetch_agenda_pulls", fetch)
+    monkeypatch.setattr(agenda, "fetch_agenda", fetch)
     lease_failed = asyncio.Event()
     lease_failed.set()
 
@@ -1159,3 +1196,57 @@ def test_heartbeat_failure_prevents_agenda_tasks_from_starting(monkeypatch) -> N
 
     assert failure == "lease_renewal_failed"
     assert started == []
+
+
+def test_browser_cleanup_after_collection_does_not_fail_agenda_job(monkeypatch) -> None:
+    completed = []
+    failed = []
+
+    class Client:
+        def start_job(self, **_kwargs):
+            return {
+                "job_id": "job",
+                "lease_token": "lease",
+                "students": [{"crmstudentid": 7}],
+            }
+
+        def complete_job(self, **kwargs):
+            completed.append(kwargs)
+            return {"ok": True}
+
+        def fail_job(self, **kwargs):
+            failed.append(kwargs)
+
+    class Browser:
+        async def close(self):
+            raise RuntimeError("browser was closed by the user")
+
+    class Playwright:
+        class Chromium:
+            async def launch(self, **_kwargs):
+                return Browser()
+
+        chromium = Chromium()
+
+    class PlaywrightContext:
+        async def __aenter__(self):
+            return Playwright()
+
+        async def __aexit__(self, *_args):
+            raise RuntimeError("playwright cleanup after browser close")
+
+    async def collect(*args, **_kwargs):
+        progress = args[4]
+        progress.update(attempted=1, success=0, errors=1)
+        return None
+
+    monkeypatch.setattr(agenda, "GradeDbClient", Client)
+    monkeypatch.setattr(agenda, "async_playwright", PlaywrightContext)
+    monkeypatch.setattr(agenda, "student_from_context", lambda _row: _student(7))
+    monkeypatch.setattr(agenda, "_collect_and_post_agendas", collect)
+
+    result = asyncio.run(agenda.main(franchise_id=19, student_id=None))
+
+    assert result == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
+    assert len(completed) == 1
+    assert failed == []

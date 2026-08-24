@@ -26,7 +26,7 @@ def _context(student_id: int = 7) -> dict:
         "known_course_titles": ["MARKETING 1", "ENGLISH 11"],
         "auth_type": "gps_pictograph",
         "auth_images": ["cat", "moon"],
-        "status": "never",
+        "grade_status": "never",
         "passwordgood": None,
     }
 
@@ -194,6 +194,7 @@ def test_login_errors_post_only_a_sanitized_failure_code(monkeypatch) -> None:
 
     assert posts[0]["outcome"] == {
         "kind": "failure",
+        "channel": "grade",
         "code": "bad_login",
         "passwordgood": False,
     }

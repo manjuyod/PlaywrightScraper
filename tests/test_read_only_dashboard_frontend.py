@@ -298,6 +298,89 @@ console.log(JSON.stringify({
     }
 
 
+def test_student_page_shows_each_agenda_channel_status() -> None:
+    result = _run_student_page_scenario(
+        """
+function strings(node) {
+    if (Array.isArray(node)) {
+        return node.flatMap(strings);
+    }
+    if (typeof node === "string") {
+        return [node];
+    }
+    if (!node || typeof node !== "object") {
+        return [];
+    }
+    return strings(node.children || []);
+}
+
+function tooltipMessages(node) {
+    if (Array.isArray(node)) {
+        return node.flatMap(tooltipMessages);
+    }
+    if (!node || typeof node !== "object") {
+        return [];
+    }
+    const own = node.props && node.props.role === "tooltip"
+        ? [node.children.flat(Infinity).filter((child) => typeof child === "string").join("")]
+        : [];
+    return own.concat(tooltipMessages(node.children || []));
+}
+
+const tree = hooks.StudentPage({
+    data: {
+        backUrl: "#back",
+        logoUrl: "/logo.webp",
+        student: {
+            id: 17,
+            firstName: "Avery",
+            lastName: "Quinn",
+            gradeLevel: 11,
+            portalUrl: null,
+            status: "synced",
+            errorCode: null,
+            updatedAt: "2026-08-20T12:00:00-07:00",
+            standing: "Good",
+            gradesSnapshot: [],
+            lowGrades: [],
+            highGrades: [],
+            grades: {},
+            agendaItems: [],
+            agendaSlots: [
+                {
+                    number: 1,
+                    portal: "canvas",
+                    portalLabel: "Canvas",
+                    status: "scrape_failed",
+                    errorCode: "scrape_failed",
+                    updatedAt: "2026-08-20T12:01:00-07:00",
+                    weeks: [],
+                },
+                {
+                    number: 2,
+                    portal: null,
+                    status: "not_configured",
+                    errorCode: null,
+                    updatedAt: "2026-08-20T12:02:00-07:00",
+                    weeks: [],
+                },
+            ],
+        },
+    },
+});
+const visible = strings(tree).filter((value) =>
+    ["Portal 1", "Portal 2", "scrape_failed", "not_configured"].includes(value)
+);
+console.log(JSON.stringify({ visible, tooltips: tooltipMessages(tree) }));
+"""
+    )
+
+    assert result == {
+        "visible": ["Portal 1", "scrape_failed", "Portal 2", "not_configured"],
+        "tooltips": ["The portal could not be read successfully."],
+    }
+
+
 def test_student_page_supports_flat_agenda_and_heatmap_views() -> None:
     flat = _run_student_page_scenario(
         """

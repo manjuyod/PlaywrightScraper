@@ -70,7 +70,9 @@ def test_neon_student_query_never_selects_runner_secrets() -> None:
     sql = dashboard_data.NEON_STATES_SQL.lower()
 
     assert "weeklydata" in sql
-    assert "weekly_agenda" in sql
+    assert "primary_agenda" in sql
+    assert "secondary_agenda" in sql
+    assert "grade_status" in sql
     for forbidden in (
         "p1username",
         "p1password",
@@ -88,25 +90,25 @@ def test_merge_uses_crmstudentid_and_keeps_missing_state_displayable() -> None:
         {
             "crmstudentid": 101,
             "weeklydata": {"2026-07-13": {"English": 91.5}},
-            "weekly_agenda": {"2026-07-15": [["English", "Essay"]]},
-            "status": "synced",
+            "primary_agenda": {"portal": None, "weeks": {}},
+            "secondary_agenda": {"portal": None, "weeks": {}},
+            "grade_status": "synced",
             "passwordgood": True,
-            "error_msg": None,
-            "updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
+            "grade_updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
         },
         {
             "crmstudentid": 1,
             "weeklydata": {"2026-07-13": {"Wrong legacy match": 0}},
-            "status": "error",
+            "grade_status": "scrape_failed",
         },
     ]
 
     students = dashboard_data.merge_student_rows(crm_rows, state_rows)
 
     assert [student.crmstudentid for student in students] == [101, 102]
-    assert students[0].status == "synced"
+    assert students[0].grade_status == "synced"
     assert students[0].grades == {"2026-07-13": {"English": 91.5}}
-    assert students[1].status == "never"
+    assert students[1].grade_status == "never"
     assert students[1].grades == {}
     assert not hasattr(students[0], "p1password")
     assert not hasattr(students[0], "portal2")
@@ -229,7 +231,7 @@ def test_job_shape_exposes_only_public_counts_and_sanitized_error() -> None:
                 "errors": 3,
                 "username": "must-not-leak",
             },
-            "error_msg": "unsafe error with details",
+            "failure_code": "unsafe error with details",
             "started_at": datetime(2026, 7, 14, 12, 0, tzinfo=UTC),
             "updated_at": datetime(2026, 7, 14, 12, 5, tzinfo=UTC),
             "completed_at": datetime(2026, 7, 14, 12, 5, tzinfo=UTC),
@@ -260,12 +262,11 @@ def test_franchise_summary_counts_only_merged_students() -> None:
     students = dashboard_data.merge_student_rows(
         [_crm_student(101), _crm_student(102), _crm_student(201, franchise_id=99)],
         [
-            {"crmstudentid": 101, "status": "synced", "passwordgood": True},
+            {"crmstudentid": 101, "grade_status": "synced", "passwordgood": True},
             {
                 "crmstudentid": 102,
-                "status": "error",
+                "grade_status": "bad_login",
                 "passwordgood": False,
-                "error_msg": "bad_login",
             },
         ],
     )
@@ -532,14 +533,14 @@ def test_load_students_reads_neon_in_one_batch(monkeypatch) -> None:
 
     def read_states(ids: list[int]) -> list[dict[str, Any]]:
         calls.append(ids)
-        return [{"crmstudentid": 102, "status": "synced"}]
+        return [{"crmstudentid": 102, "grade_status": "synced"}]
 
     monkeypatch.setattr(dashboard_data, "read_neon_states", read_states)
 
     students = dashboard_data.load_students(franchise_id=57)
 
     assert calls == [[101, 102]]
-    assert [student.status for student in students] == ["never", "synced"]
+    assert [student.grade_status for student in students] == ["never", "synced"]
 
 
 def test_neon_engine_creation_failure_is_wrapped_without_details(monkeypatch) -> None:

@@ -33,11 +33,11 @@ def _student(
             {
                 "crmstudentid": student_id,
                 "weeklydata": {"2026-07-13": {"English": 91.5}},
-                "weekly_agenda": {"2026-07-15": [["English", "Essay"]]},
-                "status": status,
+                "primary_agenda": {"portal": None, "weeks": {}},
+                "secondary_agenda": {"portal": None, "weeks": {}},
+                "grade_status": status,
                 "passwordgood": status == "synced",
-                "error_msg": None if status == "synced" else "scrape_failed",
-                "updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
+                "grade_updated_at": datetime(2026, 7, 14, 12, 30, tzinfo=UTC),
             }
         ],
     )[0]
@@ -243,10 +243,51 @@ def test_student_page_contains_canonical_grades_and_agenda(monkeypatch) -> None:
     assert response.status_code == 200
     assert student["id"] == 101
     assert student["grades"] == {"2026-07-13": {"English": 91.5}}
-    assert student["agendaItems"] == [
-        {"dueDate": "2026-07-15", "course": "English", "title": "Essay"}
+    assert student["agendaItems"] == []
+    assert len(student["agendaSlots"]) == 2
+
+
+def test_student_page_exposes_grade_and_agenda_channel_state(monkeypatch) -> None:
+    client, routes = _create_client(monkeypatch)
+    student = _student(101, status="bad_login")
+    student = student.__class__(
+        **{
+            **student.__dict__,
+            "primary_agenda_status": "scrape_failed",
+            "secondary_agenda_status": "not_configured",
+            "primary_agenda_updated_at": datetime(
+                2026, 8, 20, 19, 45, tzinfo=UTC
+            ),
+            "secondary_agenda_updated_at": datetime(
+                2026, 8, 20, 19, 46, tzinfo=UTC
+            ),
+        }
+    )
+    monkeypatch.setattr(routes.dashboard, "load_student", lambda *_args: student)
+
+    payload = _page_data(client.get("/franchise/57/student/101"))["student"]
+
+    assert payload["status"] == "bad_login"
+    assert payload["errorCode"] == "bad_login"
+    assert [
+        {
+            "status": slot["status"],
+            "errorCode": slot["errorCode"],
+            "updatedAt": slot["updatedAt"],
+        }
+        for slot in payload["agendaSlots"]
+    ] == [
+        {
+            "status": "scrape_failed",
+            "errorCode": "scrape_failed",
+            "updatedAt": "2026-08-20T19:45:00+00:00",
+        },
+        {
+            "status": "not_configured",
+            "errorCode": None,
+            "updatedAt": "2026-08-20T19:46:00+00:00",
+        },
     ]
-    assert student["agendaSlots"] == []
 
 
 def test_student_page_keeps_legacy_items_for_noncanonical_slot_hybrid(monkeypatch) -> None:
@@ -315,9 +356,12 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
 
     assert payload["agendaSlots"] == [
         {
+            "errorCode": None,
             "number": 1,
             "portal": "canvas",
             "portalLabel": "Canvas",
+            "status": "never",
+            "updatedAt": None,
             "weeks": [
                 {
                     "weekStart": "2026-08-10",
@@ -354,7 +398,15 @@ def test_student_page_projects_portal_slots_and_hides_legacy_items(monkeypatch) 
                 }
             ],
         },
-        {"number": 2, "portal": "parentvue", "portalLabel": "ParentVUE", "weeks": []},
+        {
+            "errorCode": None,
+            "number": 2,
+            "portal": "parentvue",
+            "portalLabel": "ParentVUE",
+            "status": "never",
+            "updatedAt": None,
+            "weeks": [],
+        },
     ]
     assert payload["agendaItems"] == []
 
@@ -426,7 +478,15 @@ def test_agenda_slots_orders_and_skips_malformed_nested_data(monkeypatch) -> Non
         "Earlier",
         "Later",
     ]
-    assert slots[1] == {"number": 2, "portal": "canvas", "portalLabel": "Canvas", "weeks": []}
+    assert slots[1] == {
+        "errorCode": None,
+        "number": 2,
+        "portal": "canvas",
+        "portalLabel": "Canvas",
+        "status": "never",
+        "updatedAt": None,
+        "weeks": [],
+    }
 
 
 def test_agenda_slots_skips_rows_outside_the_enclosing_week(monkeypatch) -> None:

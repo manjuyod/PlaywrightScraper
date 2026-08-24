@@ -126,10 +126,10 @@ pub struct JobFailRequest {
 
 impl JobFailRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if is_safe_code(&self.code) {
+        if is_process_failure_code(&self.code) {
             Ok(())
         } else {
-            Err("failure code must be a safe identifier")
+            Err("failure code is not an allowed process failure")
         }
     }
 }
@@ -169,7 +169,7 @@ pub struct StudentGradeState {
     pub weeklydata: Value,
     pub auth_type: Option<String>,
     pub auth_answers: Value,
-    pub status: Option<String>,
+    pub grade_status: Option<String>,
     pub passwordgood: Option<bool>,
 }
 
@@ -191,7 +191,7 @@ pub struct RunnerStudent {
     pub known_course_titles: Vec<String>,
     pub auth_type: Option<String>,
     pub auth_images: Vec<String>,
-    pub status: Option<String>,
+    pub grade_status: Option<String>,
     pub passwordgood: Option<bool>,
 }
 
@@ -249,7 +249,7 @@ pub fn merge_runner_student(crm: &CrmStudent, state: Option<&StudentGradeState>)
             .unwrap_or_default(),
         auth_type: state.and_then(|row| row.auth_type.clone()),
         auth_images,
-        status: state.and_then(|row| row.status.clone()),
+        grade_status: state.and_then(|row| row.grade_status.clone()),
         passwordgood: state.and_then(|row| row.passwordgood),
     }
 }
@@ -259,19 +259,29 @@ pub fn deterministic_result_key(job_id: Uuid, crmstudentid: i64, kind: &str) -> 
     Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes())
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AgendaSlot {
-    Agenda1,
-    Agenda2,
+pub enum ResultChannel {
+    Grade,
+    PrimaryAgenda,
+    SecondaryAgenda,
 }
 
-impl AgendaSlot {
-    pub fn as_str(self) -> &'static str {
+impl ResultChannel {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Agenda1 => "agenda1",
-            Self::Agenda2 => "agenda2",
+            Self::Grade => "grade",
+            Self::PrimaryAgenda => "primary_agenda",
+            Self::SecondaryAgenda => "secondary_agenda",
         }
+    }
+
+    fn supports_job(&self, job_kind: JobKind) -> bool {
+        matches!(
+            (self, job_kind),
+            (Self::Grade, JobKind::Grade)
+                | (Self::PrimaryAgenda | Self::SecondaryAgenda, JobKind::Agenda)
+        )
     }
 }
 
@@ -281,14 +291,14 @@ pub enum ResultOutcome {
     GradeSuccess {
         parsed_grades: Value,
     },
-    AgendaSuccess {
-        weekly_agenda: Value,
+    PrimaryAgendaSuccess {
+        agenda: Value,
     },
-    AgendaPullFailure {
-        agenda_slot: AgendaSlot,
-        code: String,
+    SecondaryAgendaSuccess {
+        agenda: Value,
     },
     Failure {
+        channel: ResultChannel,
         code: String,
         #[serde(default)]
         passwordgood: Option<bool>,
@@ -296,22 +306,12 @@ pub enum ResultOutcome {
 }
 
 impl ResultOutcome {
-    pub fn kind(&self) -> &'static str {
+    pub fn channel(&self) -> ResultChannel {
         match self {
-            Self::GradeSuccess { .. } => "grade",
-            Self::AgendaSuccess { .. } => "agenda",
-            Self::AgendaPullFailure { .. } => "agenda",
-            Self::Failure { .. } => "failure",
-        }
-    }
-
-    pub fn idempotency_scope(&self, job_kind: JobKind) -> &'static str {
-        match self {
-            Self::AgendaSuccess { weekly_agenda } => {
-                agenda_pull_scope(weekly_agenda).unwrap_or(job_kind.as_str())
-            }
-            Self::AgendaPullFailure { agenda_slot, .. } => agenda_slot.as_str(),
-            _ => job_kind.as_str(),
+            Self::GradeSuccess { .. } => ResultChannel::Grade,
+            Self::PrimaryAgendaSuccess { .. } => ResultChannel::PrimaryAgenda,
+            Self::SecondaryAgendaSuccess { .. } => ResultChannel::SecondaryAgenda,
+            Self::Failure { channel, .. } => channel.clone(),
         }
     }
 
@@ -322,34 +322,32 @@ impl ResultOutcome {
             {
                 validate_result_json(parsed_grades)
             }
-            (Self::AgendaSuccess { weekly_agenda }, JobKind::Agenda)
-                if weekly_agenda.is_object() =>
+            (Self::PrimaryAgendaSuccess { agenda }, JobKind::Agenda)
+            | (Self::SecondaryAgendaSuccess { agenda }, JobKind::Agenda)
+                if agenda.is_object() =>
             {
-                validate_result_json(weekly_agenda)
+                validate_result_json(agenda)
             }
-            (Self::AgendaPullFailure { code, .. }, JobKind::Agenda) if is_safe_code(code) => Ok(()),
-            (Self::Failure { code, .. }, _) if is_safe_code(code) => Ok(()),
+            (
+                Self::Failure {
+                    channel,
+                    code,
+                    passwordgood,
+                },
+                job_kind,
+            ) if channel.supports_job(job_kind)
+                && is_channel_failure_code(channel, code)
+                && (matches!(channel, ResultChannel::Grade) || passwordgood.is_none()) =>
+            {
+                Ok(())
+            }
             (Self::GradeSuccess { .. }, JobKind::Agenda)
-            | (Self::AgendaSuccess { .. }, JobKind::Grade)
-            | (Self::AgendaPullFailure { .. }, JobKind::Grade) => {
-                Err("result kind does not match job kind")
-            }
+            | (
+                Self::PrimaryAgendaSuccess { .. } | Self::SecondaryAgendaSuccess { .. },
+                JobKind::Grade,
+            ) => Err("result kind does not match job kind"),
             _ => Err("result payload is invalid"),
         }
-    }
-}
-
-fn agenda_pull_scope(weekly_agenda: &Value) -> Option<&'static str> {
-    let object = weekly_agenda.as_object()?;
-    if object.len() != 1 {
-        return None;
-    }
-    if object.contains_key("agenda1") {
-        Some("agenda1")
-    } else if object.contains_key("agenda2") {
-        Some("agenda2")
-    } else {
-        None
     }
 }
 
@@ -431,12 +429,26 @@ fn validate_result_json(value: &Value) -> Result<(), &'static str> {
     visit(value, 0, &mut 0)
 }
 
-fn is_safe_code(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
-        })
+fn is_channel_failure_code(channel: &ResultChannel, code: &str) -> bool {
+    match channel {
+        ResultChannel::Grade => matches!(code, "bad_login" | "no_grades" | "scrape_failed"),
+        ResultChannel::PrimaryAgenda | ResultChannel::SecondaryAgenda => matches!(
+            code,
+            "bad_login" | "configuration_missing" | "scrape_failed" | "unsupported_portal"
+        ),
+    }
+}
+
+fn is_process_failure_code(code: &str) -> bool {
+    matches!(
+        code,
+        "agenda_runner_failed"
+            | "lease_expired"
+            | "lease_renewal_failed"
+            | "neon_unavailable"
+            | "result_post_failed"
+            | "runner_failed"
+    )
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -470,20 +482,23 @@ impl ResultPostRequest {
                 "kind": "grade",
                 "parsed_grades": parsed_grades,
             }),
-            ResultOutcome::AgendaSuccess { weekly_agenda } => json!({
+            ResultOutcome::PrimaryAgendaSuccess { agenda } => json!({
                 "status": "synced",
-                "kind": "agenda",
-                "weekly_agenda": weekly_agenda,
+                "kind": "primary_agenda",
+                "agenda": agenda,
             }),
-            ResultOutcome::AgendaPullFailure { agenda_slot, code } => json!({
-                "status": "error",
-                "kind": "agenda",
-                "agenda_slot": agenda_slot,
-                "code": code,
+            ResultOutcome::SecondaryAgendaSuccess { agenda } => json!({
+                "status": "synced",
+                "kind": "secondary_agenda",
+                "agenda": agenda,
             }),
-            ResultOutcome::Failure { code, passwordgood } => json!({
+            ResultOutcome::Failure {
+                channel,
+                code,
+                passwordgood,
+            } => json!({
                 "status": "error",
-                "kind": "failure",
+                "kind": channel.as_str(),
                 "code": code,
                 "passwordgood": passwordgood,
             }),

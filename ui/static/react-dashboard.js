@@ -286,7 +286,13 @@
         if (status === "synced" || status === "complete") {
             return "success";
         }
-        if (status === "error" || status === "failed") {
+        if (
+            status === "failed" ||
+            (status &&
+                status !== "never" &&
+                status !== "not_configured" &&
+                status !== "running")
+        ) {
             return "danger";
         }
         if (status === "running") {
@@ -1278,6 +1284,50 @@
         );
     }
 
+    function AgendaStatusSummary({ slots }) {
+        return h(
+            Card,
+            { className: "p-5" },
+            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda sync"),
+            h(
+                "div",
+                { className: "mt-4 grid gap-3 sm:grid-cols-2" },
+                (slots || []).map((slot) =>
+                    h(
+                        "div",
+                        {
+                            key: slot.number,
+                            className: "rounded-lg border border-slate-200 p-4",
+                        },
+                        h(
+                            "div",
+                            { className: "flex items-center justify-between gap-3" },
+                            h(
+                                "span",
+                                { className: "font-bold text-slate-900" },
+                                `Portal ${slot.number}`,
+                            ),
+                            h(ErrorStatusBadge, {
+                                status: slot.status || "never",
+                                errorCode: slot.errorCode,
+                            }),
+                        ),
+                        h(
+                            "p",
+                            { className: "mt-2 text-xs text-slate-500" },
+                            slot.portalLabel || "No portal configured",
+                        ),
+                        h(
+                            "p",
+                            { className: "mt-1 text-xs text-slate-500" },
+                            `Updated ${formatDate(slot.updatedAt)}`,
+                        ),
+                    ),
+                ),
+            ),
+        );
+    }
+
     function StudentPage({ data }) {
         const student = data.student || {};
         const agendaLayout = studentAgendaLayout(student.agendaSlots);
@@ -1395,6 +1445,9 @@
                   h(
                       "div",
                       { className: "grid gap-6" },
+                      student.agendaSlots && student.agendaSlots.length
+                          ? h(AgendaStatusSummary, { slots: student.agendaSlots })
+                          : null,
                       h(
                           "div",
                           { className: "tc-grade-row" },

@@ -1,7 +1,7 @@
 use grade_db::config::{normalize_postgres_url, parse_bool, parse_crm_address};
 use grade_db::models::{
     JobCompleteRequest, JobFailRequest, JobHeartbeatRequest, JobKind, JobStartRequest, Progress,
-    ResultOutcome,
+    ResultChannel, ResultOutcome,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -99,20 +99,29 @@ fn result_outcome_must_match_the_job_kind() {
     let grade = ResultOutcome::GradeSuccess {
         parsed_grades: json!({"Math": 90}),
     };
-    let agenda = ResultOutcome::AgendaSuccess {
-        weekly_agenda: json!({"Monday": []}),
+    let agenda = ResultOutcome::PrimaryAgendaSuccess {
+        agenda: json!({"portal": "canvas", "weeks": {}}),
     };
     let failure = ResultOutcome::Failure {
+        channel: ResultChannel::Grade,
         code: "bad_login".into(),
         passwordgood: Some(false),
+    };
+    let agenda_failure = ResultOutcome::Failure {
+        channel: ResultChannel::SecondaryAgenda,
+        code: "unsupported_portal".into(),
+        passwordgood: None,
     };
 
     assert!(grade.validate_for_job(JobKind::Grade).is_ok());
     assert!(grade.validate_for_job(JobKind::Agenda).is_err());
     assert!(agenda.validate_for_job(JobKind::Agenda).is_ok());
     assert!(failure.validate_for_job(JobKind::Grade).is_ok());
-    assert!(failure.validate_for_job(JobKind::Agenda).is_ok());
+    assert!(failure.validate_for_job(JobKind::Agenda).is_err());
+    assert!(agenda_failure.validate_for_job(JobKind::Agenda).is_ok());
+    assert!(agenda_failure.validate_for_job(JobKind::Grade).is_err());
     assert!(ResultOutcome::Failure {
+        channel: ResultChannel::Grade,
         code: "password was secret".into(),
         passwordgood: None,
     }
@@ -131,9 +140,9 @@ fn result_outcome_must_match_the_job_kind() {
 #[test]
 fn agenda_pull_failure_is_scoped_to_one_agenda_job_slot() {
     let failure: ResultOutcome = serde_json::from_value(json!({
-        "kind": "agenda_pull_failure",
-        "agenda_slot": "agenda2",
-        "code": "agenda2_parentvue_failed"
+        "kind": "failure",
+        "channel": "secondary_agenda",
+        "code": "scrape_failed"
     }))
     .unwrap();
 
@@ -189,7 +198,7 @@ fn lifecycle_requests_validate_progress_and_safe_failure_codes() {
     assert!(JobFailRequest {
         job_id,
         lease_token,
-        code: "crm_unavailable".into()
+        code: "neon_unavailable".into()
     }
     .validate()
     .is_ok());
