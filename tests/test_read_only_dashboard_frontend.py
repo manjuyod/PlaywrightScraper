@@ -349,29 +349,35 @@ const table = hooks.StudentTable({
     onSort: () => undefined,
 });
 console.log(JSON.stringify({
-    warningLabel: warning.props["aria-label"],
-    cardStates: collect(page, "div")
+    warningLabel: collect(warning, "summary")[0].props["aria-label"],
+    warningText: textOf(warning),
+    cardIssues: collect(page, "summary")
         .map((node) => node.props?.["aria-label"])
         .filter((label) => /^(Grades|Assignments|Agenda):/.test(String(label || ""))),
+    hasCompactCardStates: ["Synced", "Issue", "Last synced", "Last checked"]
+        .every((label) => textOf(page).includes(label)),
     headings: collect(table, "th").map(textOf),
-    tableWarnings: collect(table, "span")
+    tableWarnings: collect(table, "summary")
         .map((node) => node.props?.["aria-label"])
-        .filter((label) => String(label || "").startsWith("Synchronization warning")),
+        .filter((label) => String(label || "").startsWith("Issue.")),
 }));
 """
     )
 
     assert result == {
         "warningLabel": (
-            "Synchronization warning. Grades: The portal rejected the student's "
+            "Issue. Grades: The portal rejected the student's "
             "username or password. Primary agenda: The portal could not be read "
             "successfully."
         ),
-        "cardStates": [
-            "Grades: Synchronized on last run",
-            "Assignments: Issue on last run. The portal could not be read successfully.",
-            "Agenda: Synchronized on last run",
+        "warningText": (
+            "IssueGrades: The portal rejected the student's username or password."
+            "Primary agenda: The portal could not be read successfully."
+        ),
+        "cardIssues": [
+            "Assignments: Issue. The portal could not be read successfully.",
         ],
+        "hasCompactCardStates": True,
         "headings": [
             "Student↑",
             "Primary Portal",
@@ -383,7 +389,7 @@ console.log(JSON.stringify({
             "Actions",
         ],
         "tableWarnings": [
-            "Synchronization warning. Grades: The portal rejected the student's "
+            "Issue. Grades: The portal rejected the student's "
             "username or password. Primary agenda: The portal could not be read "
             "successfully."
         ],

@@ -106,7 +106,7 @@ def test_report_scroll_regions_use_the_existing_visible_focus_treatment(
         assert outline["visibleWithinCard"] is True
 
 
-def test_grade_card_exposes_last_run_issue_to_pointer_and_keyboard_users(
+def test_grade_card_exposes_sync_issue_details_to_pointer_and_keyboard_users(
     browser_page: Page,
     preview_url: str,
 ) -> None:
@@ -114,15 +114,17 @@ def test_grade_card_exposes_last_run_issue_to_pointer_and_keyboard_users(
     page.goto(preview_url, wait_until="networkidle")
 
     message = "The portal rejected the student's username or password."
-    trigger = page.get_by_label(f"Grades: Issue on last run. {message}")
+    trigger = page.get_by_label(f"Grades: Issue. {message}")
 
     expect(trigger).to_have_count(1)
-    expect(trigger).to_have_attribute("tabindex", "0")
     expect(trigger).to_have_attribute("title", message)
-    expect(trigger).to_contain_text("Issue on last run")
+    expect(trigger).to_contain_text("Issue")
+    expect(trigger.locator("xpath=../..")).to_contain_text("Last checked")
 
     trigger.focus()
     expect(trigger).to_be_focused()
+    trigger.click()
+    expect(trigger.locator("xpath=..").get_by_role("note")).to_contain_text(message)
 
 
 def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(
