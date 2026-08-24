@@ -571,16 +571,47 @@ summary:focus-visible {
 }
 
 .tc-sync-warning {
-    display: inline-flex;
-    width: 28px;
-    height: 28px;
+    position: relative;
     flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid rgba(220, 38, 38, 0.22);
+}
+
+.tc-sync-warning > summary,
+.tc-sync-issue > summary {
+    cursor: pointer;
+    list-style: none;
     border-radius: 999px;
-    background: rgba(220, 38, 38, 0.1);
-    color: var(--tc-red);
+}
+
+.tc-sync-warning > summary::-webkit-details-marker,
+.tc-sync-issue > summary::-webkit-details-marker {
+    display: none;
+}
+
+.tc-sync-warning__content,
+.tc-sync-issue__content {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 50;
+    width: max-content;
+    max-width: min(22rem, calc(100vw - 2rem));
+    border-radius: 0.5rem;
+    background: var(--tc-blue-deep);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.45;
+    padding: 0.65rem 0.75rem;
+    white-space: normal;
+}
+
+.tc-sync-warning__content > span + span {
+    margin-top: 0.4rem;
+}
+
+.tc-sync-issue {
+    position: relative;
 }
 
 .tc-error-tooltip {

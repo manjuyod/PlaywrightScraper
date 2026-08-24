@@ -231,12 +231,19 @@
 
     function syncStateText(status) {
         if (status === "synced") {
-            return "Synchronized on last run";
+            return "Synced";
         }
         if (status === "never" || status === "not_configured" || !status) {
-            return "Not synchronized yet";
+            return "Not synced";
         }
-        return "Issue on last run";
+        return "Issue";
+    }
+
+    function syncTimestampText(status, updatedAt) {
+        if (!updatedAt) {
+            return "No sync recorded";
+        }
+        return `${status === "synced" ? "Last synced" : "Last checked"} ${formatDate(updatedAt)}`;
     }
 
     function SyncState({ label, status, updatedAt }) {
@@ -249,23 +256,43 @@
             {
                 className: cn(
                     "flex flex-wrap items-center justify-end gap-2 rounded-md",
-                    issue && "tc-focus-ring",
                 ),
-                tabIndex: issue ? 0 : undefined,
-                title: description || undefined,
-                "aria-label": accessibleLabel,
             },
             h("span", { className: "text-xs font-bold text-slate-500" }, label),
-            h(
-                Badge,
-                { tone: issue ? "danger" : status === "synced" ? "success" : "slate" },
-                h(Icon, { name: issue ? "alert" : status === "synced" ? "check" : "activity", className: "mr-1 h-3.5 w-3.5" }),
-                stateText,
-            ),
+            issue
+                ? h(
+                      "details",
+                      { className: "tc-sync-issue" },
+                      h(
+                          "summary",
+                          {
+                              className: "tc-focus-ring",
+                              title: description,
+                              "aria-label": accessibleLabel,
+                          },
+                          h(
+                              Badge,
+                              { tone: "danger" },
+                              h(Icon, { name: "alert", className: "mr-1 h-3.5 w-3.5" }),
+                              stateText,
+                          ),
+                      ),
+                      h(
+                          "span",
+                          { className: "tc-sync-issue__content", role: "note" },
+                          description,
+                      ),
+                  )
+                : h(
+                      Badge,
+                      { tone: status === "synced" ? "success" : "slate" },
+                      h(Icon, { name: status === "synced" ? "check" : "activity", className: "mr-1 h-3.5 w-3.5" }),
+                      stateText,
+                  ),
             h(
                 "span",
                 { className: "text-xs text-slate-500" },
-                updatedAt ? formatDate(updatedAt) : "No run recorded",
+                syncTimestampText(status, updatedAt),
             ),
         );
     }
@@ -279,14 +306,34 @@
             .map((issue) => `${issue.label}: ${errorDescription(issue.status) || "Synchronization issue."}`)
             .join(" ");
         return h(
-            "span",
-            {
-                className: "tc-sync-warning tc-focus-ring",
-                tabIndex: 0,
-                title: description,
-                "aria-label": `Synchronization warning. ${description}`,
-            },
-            h(Icon, { name: "alert", className: "h-4 w-4" }),
+            "details",
+            { className: "tc-sync-warning" },
+            h(
+                "summary",
+                {
+                    className: "tc-focus-ring",
+                    title: description,
+                    "aria-label": `Issue. ${description}`,
+                },
+                h(
+                    Badge,
+                    { tone: "danger" },
+                    h(Icon, { name: "alert", className: "mr-1 h-3.5 w-3.5" }),
+                    "Issue",
+                ),
+            ),
+            h(
+                "span",
+                { className: "tc-sync-warning__content", role: "note" },
+                activeIssues.map((issue) =>
+                    h(
+                        "span",
+                        { key: issue.channel || issue.label, className: "block" },
+                        h("strong", null, `${issue.label}: `),
+                        errorDescription(issue.status) || "Synchronization issue.",
+                    ),
+                ),
+            ),
         );
     }
 
