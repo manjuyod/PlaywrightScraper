@@ -218,7 +218,7 @@ def test_dual_points_and_percentage_excluded_states_are_not_low(score: str) -> N
 
 @pytest.mark.parametrize(
     "score",
-    ["unexcused 0 / 10", "not excused 0%", "nonexempt 0%", "excusedness 0 / 10"],
+    ["unexcused 1 / 10", "not excused 10%", "nonexempt 10%", "excusedness 1 / 10"],
 )
 def test_negated_or_larger_excluded_tokens_keep_numeric_low_score(score: str) -> None:
     record = classify_infinite_campus_assignment(
@@ -232,6 +232,22 @@ def test_negated_or_larger_excluded_tokens_keep_numeric_low_score(score: str) ->
 
     assert record is not None
     assert record["status"] == "low_score"
+
+
+@pytest.mark.parametrize("score", ["0%", "0 / 10"])
+def test_numeric_zero_scores_are_missing(score: str) -> None:
+    """Would fail if numeric zero still follows the generic low-score branch."""
+    record = classify_infinite_campus_assignment(
+        listed(score),
+        AssignmentDetail(
+            start_at=datetime(2026, 8, 1, 8, 0),
+            end_at=datetime(2026, 8, 18, 23, 59),
+        ),
+        reference=REFERENCE,
+    )
+
+    assert record is not None
+    assert record["status"] == "missing"
 
 
 @pytest.mark.parametrize("score", ["79.5%", "Score: 7 / 10"])

@@ -476,6 +476,34 @@ def test_course_detail_classifies_explicit_missing_and_below_eighty_scores() -> 
     ]
 
 
+@pytest.mark.parametrize("score", ["0%", "0 / 10"])
+def test_course_detail_classifies_numeric_zero_scores_as_missing(score: str) -> None:
+    """Would fail if numeric zero still follows the generic low-score branch."""
+    html = f'''<div class="pxp-course-content">
+      <div class="item-container">
+        <div class="item-text-main">Zero-score assignment</div>
+        <div class="item-text-special">Aug 18</div>
+        <div class="item-text-small">{score}</div>
+      </div>
+    </div>'''
+
+    records = pv_agenda.parse_parentvue_course_assignments(
+        html,
+        course="Algebra II",
+        reference=datetime(2026, 8, 16, 12, 0),
+    )
+
+    assert records == [
+        {
+            "course": "Algebra II",
+            "title": "Zero-score assignment",
+            "dueDate": "2026-08-18",
+            "dueTime": None,
+            "status": "missing",
+        }
+    ]
+
+
 def test_overview_and_detail_share_assignment_link_identity_for_precedence() -> None:
     """Would fail if the same assignment survives as both due and missing."""
     overview = '''<div id="gb-assignments">

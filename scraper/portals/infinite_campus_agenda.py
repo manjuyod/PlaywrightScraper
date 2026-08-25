@@ -185,6 +185,8 @@ def classify_infinite_campus_assignment(
 
     if assignment.missing:
         status = "missing"
+    elif not excluded and percentage == 0:
+        status = "missing"
     elif not excluded and percentage is not None and percentage < 80:
         status = "low_score"
     elif percentage is not None or excluded:
