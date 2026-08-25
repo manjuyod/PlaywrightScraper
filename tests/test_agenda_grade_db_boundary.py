@@ -41,6 +41,7 @@ class FakePage:
         self.number = number
         self.context = context
         self.close_calls = 0
+        self.pause_calls = 0
 
     @property
     def closed(self) -> bool:
@@ -48,6 +49,10 @@ class FakePage:
 
     async def close(self) -> None:
         self.close_calls += 1
+
+    async def pause(self) -> None:
+        assert not self.closed
+        self.pause_calls += 1
 
 
 class FakeContext:
@@ -620,6 +625,31 @@ def test_agenda_login_failure_is_assigned_to_its_slot(monkeypatch) -> None:
     result, _ = asyncio.run(agenda.fetch_agenda(FakeBrowser(), student))
 
     assert result.failures == {"agenda1": "bad_login"}
+
+
+def test_agenda_diagnostic_pauses_failed_slot_before_cleanup(monkeypatch) -> None:
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            raise RuntimeError("diagnostic failure")
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    student = _student(7)
+    student.update(alt_login_url=None, alt_id=None, alt_password=None)
+    browser = FakeBrowser()
+
+    result, _ = asyncio.run(agenda.fetch_agenda(browser, student, diagnostic=True))
+
+    assert result.failures == {"agenda1": "scrape_failed"}
+    assert browser.pages[0].pause_calls == 1
+    assert browser.pages[0].closed
 
 
 def test_concurrent_same_origin_students_use_isolated_contexts(monkeypatch) -> None:

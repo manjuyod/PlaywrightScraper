@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from playwright.async_api import Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
 from scraper.agenda_contract import AgendaRecord
 
@@ -15,7 +15,8 @@ from .parentvue_agenda import (
 
 
 _COURSE_ROWS = "div.gb-class-header.gb-class-row:visible"
-_COURSE_READY = (
+_COURSE_ROOT = ".pxp-course-content:visible"
+_COURSE_ASSIGNMENTS_READY = (
     ".pxp-course-content .item-container:visible, "
     ".pxp-course-content .no-data:visible"
 )
@@ -25,6 +26,7 @@ _OVERVIEW_READY = (
     "#gb-assignments .no-data:visible"
 )
 _READINESS_TIMEOUT_MS = 90_000
+_EMPTY_COURSE_GRACE_MS = 3_000
 _OVERVIEW_SETTLE_MS = 3_000
 
 
@@ -48,7 +50,14 @@ async def _visible_current_courses(page: Page) -> list[ParentVueCourse]:
 
 
 async def _wait_for_course_detail(page: Page) -> None:
-    await page.wait_for_selector(_COURSE_READY, timeout=_READINESS_TIMEOUT_MS)
+    await page.wait_for_selector(_COURSE_ROOT, timeout=_READINESS_TIMEOUT_MS)
+    try:
+        await page.wait_for_selector(
+            _COURSE_ASSIGNMENTS_READY,
+            timeout=_EMPTY_COURSE_GRACE_MS,
+        )
+    except PlaywrightTimeout:
+        pass
 
 
 async def _wait_for_overview(page: Page, expected_courses: int | None):

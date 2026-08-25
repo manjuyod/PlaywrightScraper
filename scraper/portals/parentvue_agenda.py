@@ -395,8 +395,8 @@ def parse_parentvue_course_assignments(
         if visible_items:
             raise ParentVueAgendaError()
         return []
-    if not candidates or not visible_items:
-        raise ParentVueAgendaError()
+    if not visible_items:
+        return []
 
     records: list[AgendaRecord] = []
     for item in visible_items:

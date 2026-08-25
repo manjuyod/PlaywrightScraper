@@ -171,8 +171,8 @@ deduplicate or reorder work between `agenda1` and `agenda2`.
 
 Canvas, ParentVUE, Google Classroom, and Infinite Campus are the currently
 supported agenda collectors, and each returns missing plus upcoming/due work in
-the same run. Infinite Campus uses a sequential Current Term assignment-detail
-scrub.
+the same run. Infinite Campus opens each current course once from Grades and
+bulk-parses its rendered assignment rows without opening assignment details.
 An entirely unconfigured slot is cleared to the canonical blank snapshot and
 records `not_configured`, so removed credentials cannot leave stale assignments
 visible. Partial credentials record `configuration_missing`; an unsupported or

@@ -1,21 +1,29 @@
 from __future__ import annotations
 from datetime import datetime
+from typing import ClassVar
 
 from scraper.agenda_contract import AgendaRecord
-from playwright.async_api import Frame, Page, expect
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from playwright.async_api import Frame, Page, TimeoutError as PlaywrightTimeout, expect
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
+from typing_extensions import override
 
 from .infinite_campus_agenda import collect_infinite_campus_agenda
-from .base import GradeMap, PortalEngine, PlaywrightTimeout, UniversalLoginConfig
+from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import exists, grades_table_to_dict
 
 
 class InfiniteCampus(PortalEngine):
     """Portal scraper for Infinite Campus."""
-    portal_key = "infinite_campus"
-    url_patterns = ("campus/portal", "infinitecampus")
-    agenda_capable = True
-    login_config = UniversalLoginConfig(
+
+    portal_key: ClassVar[str] = "infinite_campus"
+    url_patterns: ClassVar[tuple[str, ...]] = ("campus/portal", "infinitecampus")
+    agenda_capable: ClassVar[bool] = True
+    login_config: ClassVar[UniversalLoginConfig | None] = UniversalLoginConfig(
         username_selector="#username",
         password_selector="#password",
         microsoft_sso=True,
@@ -23,21 +31,21 @@ class InfiniteCampus(PortalEngine):
         pre_fill_wait=5000,
     )
 
+    @override
     async def validate_login(self) -> None:
         invalid = await exists(
-            self.page.get_by_text(
-                "Incorrect Username and/or Password", exact=False
-            )
+            self.page.get_by_text("Incorrect Username and/or Password", exact=False)
         )
         await self.raise_login_error_if(invalid or "nav-wrapper" not in self.page.url)
 
+    @override
     async def after_login(self, first_name: str | None) -> None:
         await self.page.wait_for_load_state("networkidle")
         await self.select_student(first_name, self.page)
         self.logger.debug("portal.login.student_home_ready")
 
     # helper
-    async def select_student(self, first_name: str | None, page: Page):
+    async def select_student(self, first_name: str | None, page: Page) -> None:
         parent = page.frame("main-workspace")
         if not parent:
             parent = page
@@ -45,20 +53,27 @@ class InfiniteCampus(PortalEngine):
             return
         try:  # click the student with first name if it exists
             self.logger.debug("portal.student_selection.started")
-            await parent.get_by_role('link', name=first_name, exact=False).click(timeout=2000)
+            await parent.get_by_role("link", name=first_name, exact=False).click(
+                timeout=2000
+            )
         except PlaywrightTimeout:
             self.logger.info("portal.student_selection.not_available")
             pass  # no alternate student
 
     # ---------------------- NAV TO GRADES -------
-    async def nav_to_grades(self):
+    async def nav_to_grades(self, *, force: bool = False) -> None:
         grades_url_pattern = "**/grades*"
         menu_selector = "#menu-toggle-button"
         grades_button_label = "Grades"
-        try: # are we already on the page?
-            await expect(self.page).to_have_url(grades_url_pattern)
-        except AssertionError: # if not then navigate to it
-            await self.page.wait_for_selector(menu_selector)
+        on_grades_page = False
+        if not force:
+            try:  # are we already on the page?
+                await expect(self.page).to_have_url(grades_url_pattern)
+                on_grades_page = True
+            except AssertionError:
+                pass
+        if not on_grades_page:
+            _ = await self.page.wait_for_selector(menu_selector)
             await self.page.locator(menu_selector).click()
             await self.page.get_by_role("link", name=grades_button_label).click()
             await self.page.wait_for_url(grades_url_pattern, timeout=20000)
@@ -82,12 +97,15 @@ class InfiniteCampus(PortalEngine):
         return sem
 
     # ---------------------- FETCH (notifications → latest per subject) -------
+    @override
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
         retry=retry_if_exception_type(PlaywrightTimeout),
     )
-    async def fetch_grades(self) -> GradeMap: # TODO: Alter to parse from 'All terms' instead of 'Current term'
+    async def fetch_grades(
+        self,
+    ) -> GradeMap:  # TODO: Alter to parse from 'All terms' instead of 'Current term'
         """Collect grades from the grade tab"""
         await self.page.wait_for_load_state()
         await self.page.wait_for_timeout(1500)
@@ -101,18 +119,15 @@ class InfiniteCampus(PortalEngine):
             assert frame is not None, "Infinite Campus main workspace frame not found"
             # target the correct timeframe
 
-
-
-
             # collect grades
             table_selector = "div.collapsible-card.grades__card"
             course_selector = "h4 a"
             grades_selector = ".grading-score div"
 
             # we will parse the current quarter as well as the next quarter, and keep the grades from the most recent quarter
-            current_semester = self.term_semester_from_today() # either 1 or 2 (this only works if the page is using quarters not semesters)
+            current_semester = self.term_semester_from_today()  # either 1 or 2 (this only works if the page is using quarters not semesters)
 
-            try: # some ic portals don't populate each quarter, so we need to handle the case where the 'next' quarter doesn't exist
+            try:  # some ic portals don't populate each quarter, so we need to handle the case where the 'next' quarter doesn't exist
                 await self.select_timeframe(current_semester, frame)
                 next_q_grades = await grades_table_to_dict(
                     self.page,
@@ -120,7 +135,7 @@ class InfiniteCampus(PortalEngine):
                     course_selector,
                     grades_selector,
                     frame_selector=frame_selector,
-                    use_soup=False
+                    use_soup=False,
                 )
             except AssertionError:
                 next_q_grades = {}
@@ -132,7 +147,7 @@ class InfiniteCampus(PortalEngine):
                 course_selector,
                 grades_selector,
                 frame_selector=frame_selector,
-                use_soup=False
+                use_soup=False,
             )
 
             # match the possible grades from the next quarter to the current quarter
@@ -154,12 +169,22 @@ class InfiniteCampus(PortalEngine):
             self.logger.debug("portal.fetch.finished")
 
     @staticmethod
-    async def select_timeframe(current_sem: int, frame: Frame, q_before = False) -> None:
-        timeframe = frame.get_by_role("button", name="QT" + str(current_sem * 2 - 1 if q_before else current_sem * 2))
+    async def select_timeframe(
+        current_sem: int, frame: Frame, q_before: bool = False
+    ) -> None:
+        timeframe = frame.get_by_role(
+            "button",
+            name="QT" + str(current_sem * 2 - 1 if q_before else current_sem * 2),
+        )
         if not await exists(timeframe):
-            timeframe = frame.get_by_role("button", name="Q" + str(current_sem * 2 - 1 if q_before else current_sem * 2))
+            timeframe = frame.get_by_role(
+                "button",
+                name="Q" + str(current_sem * 2 - 1 if q_before else current_sem * 2),
+            )
         if not await exists(timeframe):
-            timeframe = frame.get_by_role("button", name="S" + str(current_sem if q_before else current_sem - 1))
+            timeframe = frame.get_by_role(
+                "button", name="S" + str(current_sem if q_before else current_sem - 1)
+            )
         assert await exists(timeframe)
         await timeframe.wait_for(timeout=1000)
         await timeframe.click()
@@ -169,5 +194,14 @@ class InfiniteCampus(PortalEngine):
         # await self.page.goto(self.LOGOFF)
         await self.page.wait_for_timeout(500)
 
+    @override
     async def get_agenda(self) -> list[AgendaRecord]:
-        return await collect_infinite_campus_agenda(self.page)
+        await self.nav_to_grades()
+
+        async def return_to_grades() -> None:
+            await self.nav_to_grades(force=True)
+
+        return await collect_infinite_campus_agenda(
+            self.page,
+            return_to_grades=return_to_grades,
+        )
