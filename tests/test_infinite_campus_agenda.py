@@ -136,9 +136,21 @@ def test_detail_parser_reads_explicit_local_start_and_end_dates() -> None:
     )
 
 
-def test_duplicate_title_course_key_is_ambiguous() -> None:
+def test_duplicate_nonmissing_title_course_rows_preserve_distinct_ordinals() -> None:
+    rows = parse_infinite_campus_list(
+        LIST_HTML + LIST_HTML,
+        missing_keys=frozenset(),
+    )
+
+    assert [row.ordinal for row in rows] == [0, 1]
+
+
+def test_duplicate_missing_title_course_key_remains_ambiguous() -> None:
     with pytest.raises(InfiniteCampusAgendaError):
-        parse_infinite_campus_list(LIST_HTML + LIST_HTML, missing_keys=frozenset())
+        parse_infinite_campus_list(
+            LIST_HTML + LIST_HTML,
+            missing_keys=frozenset({("synthetic quiz", "synthetic algebra")}),
+        )
 
 
 def test_recognizable_explicit_empty_list_returns_no_rows() -> None:

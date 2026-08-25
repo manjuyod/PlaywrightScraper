@@ -217,6 +217,30 @@ def test_canvas_return_can_reenter_approved_broker_before_final_return() -> None
     )
 
 
+def test_canvas_postauth_return_allows_exact_transit_bounces() -> None:
+    """Would fail when the live post-submit Canvas transit poisons a trusted return."""
+    route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")
+    approved_broker = (
+        "https://af4a8e81-f8b1-4434-88f6-0c8c0a166c9e."
+        "iad.login.instructure.com/sso"
+    )
+    approved_transit = "https://sso.canvaslms.com/login/saml"
+
+    route.observe(approved_transit)
+    route.observe("https://login.microsoftonline.com/common/oauth2/authorize")
+    route.mark_password_submitted()
+    route.observe("https://husd.instructure.com/")
+    route.observe(approved_broker)
+    route.observe(approved_transit)
+    route.observe("https://husd.instructure.com/")
+    route.observe(approved_transit)
+    route.observe("https://husd.instructure.com/dashboard")
+
+    assert route.verified_canvas_origin("https://husd.instructure.com/dashboard") == (
+        "https://husd.instructure.com"
+    )
+
+
 def test_canvas_return_still_rejects_unapproved_uuid_broker() -> None:
     """Would fail if late-return recovery broadens beyond explicit broker hosts."""
     route = canvas._CanvasAuthRoute("https://husd.instructure.com/login/canvas")

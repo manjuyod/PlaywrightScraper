@@ -111,7 +111,7 @@ def parse_infinite_campus_list(
         if not title or not course:
             raise InfiniteCampusAgendaError()
         key = _key(title, course)
-        if key in seen_keys:
+        if key in seen_keys and key in missing_keys:
             raise InfiniteCampusAgendaError()
         seen_keys.add(key)
         listed.append(
