@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from playwright.async_api import Browser, async_playwright
@@ -36,7 +36,7 @@ from scraper.runner import (
     student_from_context,
 )
 
-load_dotenv()
+_ = load_dotenv()
 
 MAX_CONCURRENT_AGENDA_WORKERS = 6
 logger = logging.getLogger("scraper.agenda")
