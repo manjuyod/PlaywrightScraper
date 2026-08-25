@@ -5,6 +5,7 @@ from datetime import datetime
 import importlib
 
 import pytest
+from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from scraper.portals.parentvue_agenda import ParentVueAgendaError
 
@@ -43,6 +44,8 @@ MISSING_COURSE_HTML = '''<div class="pxp-course-content">
 EMPTY_COURSE_HTML = '''<div class="pxp-course-content">
   <div class="no-data">No assignments</div>
 </div>'''
+
+BLANK_COURSE_HTML = '<div class="pxp-course-content"></div>'
 
 MALFORMED_COURSE_HTML = '''<div class="pxp-course-content">
   <div class="item-container"><div class="item-text-main">Undated</div></div>
@@ -147,7 +150,12 @@ class FakeCoursePage:
         return self.course_html[index]
 
     async def wait_for_selector(self, _selector: str, *, timeout: int) -> None:
-        assert timeout == 90_000
+        assert timeout in (3_000, 90_000)
+        if timeout == 3_000 and self.view.startswith("course:"):
+            index = int(self.view.split(":", 1)[1])
+            html = self.course_html[index]
+            if "item-container" not in html and "no-data" not in html:
+                raise PlaywrightTimeout("no assignments rendered")
 
     async def wait_for_timeout(self, timeout: int) -> None:
         assert timeout == 3_000
@@ -195,9 +203,9 @@ def test_collects_overview_and_courses_in_strict_sequence() -> None:
     assert page.course_open is False
 
 
-def test_explicit_empty_course_preserves_other_complete_records() -> None:
-    """Would fail if a validated empty course aborts or invents assignments."""
-    page = FakeCoursePage([EMPTY_COURSE_HTML])
+@pytest.mark.parametrize("course_html", [EMPTY_COURSE_HTML, BLANK_COURSE_HTML])
+def test_empty_course_preserves_other_complete_records(course_html: str) -> None:
+    page = FakeCoursePage([course_html])
 
     records = _collect(page)
 

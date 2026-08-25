@@ -176,7 +176,13 @@ async def test_portal(
                 diagnostic=debug,
             )
         if agenda:
-            _ = await fetch_student_agenda(browser, student)
+            agenda_result, _ = await fetch_student_agenda(
+                browser,
+                student,
+                diagnostic=debug,
+            )
+            if agenda_result.failures:
+                raise RuntimeError("agenda diagnostic failed")
     except Exception as exc:
         exception_type = type(exc).__name__
         logger.error(

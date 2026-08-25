@@ -538,19 +538,23 @@ def test_overview_and_detail_share_assignment_link_identity_for_precedence() -> 
     assert buckets["due"] == []
 
 
-def test_course_detail_accepts_explicit_empty_and_rejects_ambiguous_empty() -> None:
-    """Would fail if a blank course is treated as a complete empty snapshot."""
+def test_course_detail_accepts_empty_nonacademic_period() -> None:
     reference = datetime(2026, 8, 16, 12, 0)
 
-    assert pv_agenda.parse_parentvue_course_assignments(
+    for html in (
         '<div class="pxp-course-content"><div class="no-data">No assignments</div></div>',
-        course="Algebra II",
-        reference=reference,
-    ) == []
+        '<div class="pxp-course-content"></div>',
+    ):
+        assert pv_agenda.parse_parentvue_course_assignments(
+            html,
+            course="Lunch",
+            reference=reference,
+        ) == []
+
     with pytest.raises(ParentVueAgendaError):
         pv_agenda.parse_parentvue_course_assignments(
-            '<div class="pxp-course-content"></div>',
-            course="Algebra II",
+            "<main></main>",
+            course="Lunch",
             reference=reference,
         )
 
