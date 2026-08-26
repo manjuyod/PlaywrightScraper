@@ -156,7 +156,7 @@ Run this exact diagnostic from the repository root. It obtains Weston's context 
 ```powershell
 uv run python -c 'import asyncio,json; from dotenv import load_dotenv; load_dotenv(); import pyodbc; from playwright.async_api import async_playwright; from ui.dashboard_data import _crm_connection_string; from scraper.portals import get_portal_key_from_url; from scraper.runner import scrape_one
 async def verify():
- c=pyodbc.connect(_crm_connection_string(),timeout=10); c.autocommit=False; q=c.cursor(); q.execute("SET TRANSACTION ISOLATION LEVEL SNAPSHOT"); q.execute("SELECT GradePortalURL,GradePortalUser,GradePortalPwd,FirstName FROM dbo.tblStudents WHERE Id=?",(38231,)); row=q.fetchone(); c.rollback(); q.close(); c.close()
+ c=pyodbc.connect(_crm_connection_string(),timeout=10); c.autocommit=False; q=c.cursor(); q.execute("SELECT GradePortalURL,GradePortalUser,GradePortalPwd,FirstName FROM dbo.tblStudents WHERE Id=?",(38231,)); row=q.fetchone(); c.rollback(); q.close(); c.close()
  if row is None: return {"status":"failed","reason":"missing_crm_record","course_count":0}
  student={"db_id":38231,"portal":get_portal_key_from_url(str(row[0])),"login_url":str(row[0]),"id":str(row[1]),"password":str(row[2]),"student_name":str(row[3]),"auth_images":[]}
  async with async_playwright() as p:
