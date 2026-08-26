@@ -417,7 +417,7 @@ def parse_parentvue_course_assignments(
         percentage = _assignment_percentage(item)
         status = (
             "missing"
-            if missing
+            if missing or (not excluded and percentage == 0)
             else "low_score"
             if not excluded and percentage is not None and percentage < 80
             else None

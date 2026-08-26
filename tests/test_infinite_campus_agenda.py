@@ -116,6 +116,17 @@ def test_bulk_course_parser_accepts_supported_low_score_shapes(score: str) -> No
     assert [record["status"] for record in records] == ["low_score"]
 
 
+@pytest.mark.parametrize("score", ["0%", "0 / 10"])
+def test_bulk_course_parser_classifies_zero_scores_as_missing(score: str) -> None:
+    records = parse_infinite_campus_course_grades(
+        course_html(assignment_row("Zero work", due="08/21/2026", score=score)),
+        course="Synthetic Mathematics",
+        reference=REFERENCE,
+    )
+
+    assert [record["status"] for record in records] == ["missing"]
+
+
 def test_missing_still_wins_when_turned_in_or_scored() -> None:
     records = parse_infinite_campus_course_grades(
         course_html(
@@ -129,7 +140,6 @@ def test_missing_still_wins_when_turned_in_or_scored() -> None:
         course="Synthetic English",
         reference=REFERENCE,
     )
-
     assert records[0]["status"] == "missing"
 
 

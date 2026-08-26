@@ -120,7 +120,7 @@ def parse_infinite_campus_course_grades(
         percentage = _score_percentage(score_text)
         excluded = _excluded_score_state(score_text)
 
-        if "missing" in flags:
+        if "missing" in flags or (not excluded and percentage == 0):
             status = "missing"
         elif not excluded and percentage is not None and percentage < 80:
             status = "low_score"

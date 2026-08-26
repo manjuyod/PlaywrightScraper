@@ -17,11 +17,15 @@ class FakeLoginControl:
     async def is_visible(self) -> bool:
         return self.visible
 
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        assert state == "hidden"
+        assert timeout == 5_000
+        if self.visible:
+            raise PlaywrightTimeout("login form remained visible")
+
 
 class FakeLoginPage:
-    def __init__(
-        self, *, username_visible: bool, password_visible: bool
-    ) -> None:
+    def __init__(self, *, username_visible: bool, password_visible: bool) -> None:
         self.url = "https://gpsportal.example/login"
         self.username_visible = username_visible
         self.password_visible = password_visible
@@ -97,8 +101,43 @@ def test_login_continues_to_gps_auth_after_the_login_form_disappears(
     assert auth_calls == ["pictographs"]
 
 
+class TransitioningLoginControl(FakeLoginControl):
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        assert state == "hidden"
+        assert timeout == 5_000
+        self.visible = False
+
+
+class TransitioningPasswordPage(FakeLoginPage):
+    def __init__(self) -> None:
+        super().__init__(username_visible=False, password_visible=True)
+        self.username_control = FakeLoginControl(False)
+        self.password_control = TransitioningLoginControl(True)
+
+    def locator(self, selector: str) -> FakeLoginControl:
+        controls = {
+            "input#identification": self.username_control,
+            "input#ember535": self.password_control,
+        }
+        return controls[selector]
+
+
+def test_login_waits_for_transitioning_password_form_before_pictograph_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Would fail if GPS validates during the post-submit form transition."""
+    page = TransitioningPasswordPage()
+    login_calls, auth_calls = _configure_login_dependencies(monkeypatch)
+
+    asyncio.run(_engine(page).login())
+
+    assert login_calls == ["submit"]
+    assert auth_calls == ["pictographs"]
+
+
 def test_login_does_not_resubmit_credentials_when_pictograph_readiness_times_out(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Would fail if a post-submit GPS timeout re-enters the whole login flow."""
     page = FakeLoginPage(username_visible=False, password_visible=False)
@@ -111,10 +150,99 @@ def test_login_does_not_resubmit_credentials_when_pictograph_readiness_times_out
     engine = _engine(page)
 
     with pytest.raises(Exception) as raised:
-        asyncio.run(
-            type(engine).login.retry_with(wait=wait_none())(engine)
-        )
+        asyncio.run(type(engine).login.retry_with(wait=wait_none())(engine))
 
     assert login_calls == ["submit"]
-    assert type(raised.value) is GPS.LoginError
-    assert str(raised.value) == "portal login rejected"
+    assert isinstance(raised.value, RuntimeError)
+    assert not isinstance(raised.value, GPS.LoginError)
+    assert str(raised.value) == "portal pictograph challenge unavailable"
+    assert "portal.login.pictograph_readiness_timeout" in caplog.messages
+    for sentinel in (
+        "gps-user",
+        "gps-password",
+        "first",
+        "second",
+        "third",
+        "sensitive post-submit detail",
+    ):
+        assert sentinel not in caplog.text
+
+
+class FakePictographLocator:
+    def __init__(self, page: FakePictographPage, selector: str) -> None:
+        self.page = page
+        self.selector = selector
+
+    @property
+    def first(self) -> FakePictographLocator:
+        return self
+
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        assert state == "visible"
+        assert timeout == 45_000
+
+    async def click(self) -> None:
+        self.page.clicked_selectors.append(self.selector)
+
+
+class FakePictographPage:
+    def __init__(self) -> None:
+        self.url = "https://gpsportal.example/pictographs"
+        self.clicked_selectors: list[str] = []
+        self.challenge_index = 0
+
+    def locator(self, selector: str) -> FakePictographLocator:
+        return FakePictographLocator(self, selector)
+
+    async def wait_for_load_state(self, state: str) -> None:
+        assert state == "networkidle"
+        raise PlaywrightTimeout("background requests never became idle")
+
+    async def eval_on_selector_all(self, selector: str, expression: str) -> list[str]:
+        assert selector == ".pictograph-list img.tile-icon"
+        assert expression == "imgs => imgs.map(img => img.alt)"
+        answer = ["first", "second", "third"][self.challenge_index]
+        self.challenge_index += 1
+        return ["distractor", answer]
+
+    async def wait_for_timeout(self, timeout: int) -> None:
+        assert timeout == 1000
+
+
+def test_pictograph_auth_succeeds_without_global_network_idle() -> None:
+    """Would fail if GPS readiness depends on unrelated background traffic."""
+    page = FakePictographPage()
+
+    asyncio.run(_engine(page).do_gps_auth())  # type: ignore[arg-type]
+
+    assert page.clicked_selectors == [
+        ".pictograph-list img.tile-icon[alt='first']",
+        ".pictograph-list img.tile-icon[alt='second']",
+        ".pictograph-list img.tile-icon[alt='third']",
+    ]
+
+
+class FakeDelayedPictographLocator(FakePictographLocator):
+    async def wait_for(self, *, state: str, timeout: int) -> None:
+        assert state == "visible"
+        assert timeout == 45_000
+        if timeout < self.page.challenge_ready_after_ms:
+            raise PlaywrightTimeout("challenge was still loading")
+
+
+class FakeDelayedPictographPage(FakePictographPage):
+    def __init__(self, *, challenge_ready_after_ms: int) -> None:
+        super().__init__()
+        self.challenge_ready_after_ms = challenge_ready_after_ms
+
+    def locator(self, selector: str) -> FakePictographLocator:
+        return FakeDelayedPictographLocator(self, selector)
+
+
+def test_pictograph_auth_allows_a_delayed_challenge() -> None:
+    """Would fail if readiness retained the previous 15-second deadline."""
+    page = FakeDelayedPictographPage(challenge_ready_after_ms=44_000)
+
+    asyncio.run(_engine(page).do_gps_auth())  # type: ignore[arg-type]
+
+    assert len(page.clicked_selectors) == 3

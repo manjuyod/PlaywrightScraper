@@ -10,6 +10,9 @@ from tenacity import (
 from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import wait_after_nav
 
+PICTOGRAPH_READINESS_TIMEOUT_MS = 45_000
+LOGIN_TRANSITION_TIMEOUT_MS = 5_000
+
 
 class GPS(PortalEngine):
     """Portal scraper for Gilbert Public Schools' portal.
@@ -29,32 +32,40 @@ class GPS(PortalEngine):
     async def validate_login(self) -> None:
         config = type(self).login_config
         assert config is not None
-        rejected = await self.page.locator(config.username_selector).is_visible()
-        if not rejected:
-            rejected = await self.page.locator(config.password_selector).is_visible()
-        await self.raise_login_error_if(rejected)
+        username_field = self.page.locator(config.username_selector)
+        await self.raise_login_error_if(await username_field.is_visible())
+
+        password_field = self.page.locator(config.password_selector)
+        if not await password_field.is_visible():
+            return
+        try:
+            await password_field.wait_for(
+                state="hidden", timeout=LOGIN_TRANSITION_TIMEOUT_MS
+            )
+        except PlaywrightTimeout:
+            await self.raise_login_error_if(True)
 
     async def after_login(self, first_name: str | None) -> None:
         _ = first_name
         try:
             await self.do_gps_auth()
         except PlaywrightTimeout:
-            raise self.LoginError("portal login rejected") from None
+            self.logger.warning("portal.login.pictograph_readiness_timeout")
+            raise RuntimeError("portal pictograph challenge unavailable") from None
 
     # Login Helper
     async def do_gps_auth(self):
         assert self.auth_images is not None  # must be provided by caller/DB
 
         await self.page.locator(".pictograph-list img.tile-icon").first.wait_for(
-            state="visible", timeout=15_000
+            state="visible", timeout=PICTOGRAPH_READINESS_TIMEOUT_MS
         )
-        await self.page.wait_for_load_state("networkidle")
 
         for _ in range(0, 3):
             images_alts = await self.page.eval_on_selector_all(
                 ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
             )
-            
+
             user_match = None
             for alt in images_alts:
                 if alt in self.auth_images:
@@ -90,6 +101,4 @@ class GPS(PortalEngine):
         from .registry import get_portal
 
         engine = get_portal("infinite_campus")
-        return await engine(
-            self.page, self.sid, self.pw, self.login_url
-        ).fetch_grades()
+        return await engine(self.page, self.sid, self.pw, self.login_url).fetch_grades()
