@@ -319,18 +319,15 @@ async def fetch_agenda(
             await report(slot, failures[slot.key])
             continue
         if not slot.portal:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         try:
             engine = get_portal(slot.portal)
         except ValueError:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         if not engine.agenda_capable:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         workers[asyncio.create_task(collect_slot(slot))] = slot
 

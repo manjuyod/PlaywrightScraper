@@ -225,6 +225,7 @@
             status &&
                 status !== "never" &&
                 status !== "not_configured" &&
+                status !== "unsupported_portal" &&
                 status !== "synced",
         );
     }
@@ -410,6 +411,7 @@
             (status &&
                 status !== "never" &&
                 status !== "not_configured" &&
+                status !== "unsupported_portal" &&
                 status !== "running")
         ) {
             return "danger";
@@ -1278,12 +1280,16 @@
             isConfiguredAgendaSlot(primary) && GRADE_AGENDA_PORTALS.has(primary.portal)
                 ? primary
                 : null;
-        const standaloneSlot = isConfiguredAgendaSlot(secondary)
-            ? secondary
-            : isConfiguredAgendaSlot(primary) && !gradeSlot
-              ? primary
-              : null;
-        return { gradeSlot, standaloneSlot };
+        const standaloneSlot =
+            isConfiguredAgendaSlot(secondary) && secondary.available !== false
+                ? secondary
+                : isConfiguredAgendaSlot(primary) && !gradeSlot && primary.available !== false
+                  ? primary
+                  : null;
+        const unavailableSlot = [secondary, primary].find(
+            (slot) => isConfiguredAgendaSlot(slot) && slot.available === false,
+        );
+        return { gradeSlot, standaloneSlot: standaloneSlot || unavailableSlot || null };
     }
 
     function gradeAgendaByCourse(slot) {
@@ -1315,6 +1321,18 @@
 
     function AgendaCard({ slot }) {
         const heading = `Agenda${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
+        if (slot.available === false) {
+            return h(
+                Card,
+                { className: "tc-report-card tc-agenda-card tc-agenda-card--unavailable p-5" },
+                h("h2", { className: "text-lg font-extrabold text-slate-500" }, heading),
+                h(
+                    "p",
+                    { className: "mt-4 text-sm font-semibold text-slate-500" },
+                    "No valid agenda portal configured.",
+                ),
+            );
+        }
         return h(
             Card,
             { className: "tc-report-card tc-agenda-card p-5" },

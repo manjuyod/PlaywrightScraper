@@ -176,7 +176,7 @@ bulk-parses its rendered assignment rows without opening assignment details.
 An entirely unconfigured slot is cleared to the canonical blank snapshot and
 records `not_configured`, so removed credentials cannot leave stale assignments
 visible. Partial credentials record `configuration_missing`; an unsupported or
-parserless configured portal records `unsupported_portal`. A capable collector
+parserless configured portal produces a neutral empty slot. A capable collector
 that successfully finds no dated work is a successful blank result. Each slot
 posts as soon as it finishes. A successful slot remains committed if the other
 slot later fails or is interrupted; the failed slot keeps its previous snapshot

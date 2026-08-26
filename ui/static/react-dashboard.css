@@ -910,6 +910,12 @@ summary:focus-visible {
     scrollbar-color: rgba(68, 114, 196, 0.55) transparent;
 }
 
+.tc-agenda-card--unavailable {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+    box-shadow: none;
+}
+
 .tc-agenda-class {
     min-width: 0;
     background: #ffffff;

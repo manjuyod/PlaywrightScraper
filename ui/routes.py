@@ -37,6 +37,9 @@ _PORTAL_LABELS = {
     "schooltool": "SchoolTool",
     "student_connection": "Student Connection",
 }
+_AGENDA_PORTALS = frozenset(
+    {"canvas", "google_classroom", "infinite_campus", "parentvue"}
+)
 
 
 def _normalize_grade_filter(raw_filter: str | None) -> str:
@@ -150,6 +153,8 @@ def _agenda_slots(
             "updatedAt": dashboard._iso_timestamp(channel_updated_at),
             "weeks": [],
         }
+        if portal is not None and portal not in _AGENDA_PORTALS:
+            result["available"] = False
         if portal is not None:
             result["portalLabel"] = _PORTAL_LABELS.get(
                 portal, portal.replace("_", " ").title()
@@ -252,7 +257,7 @@ def _agenda_slots(
 def _student_sync_issues(
     student: dashboard.DashboardStudent,
 ) -> list[dict[str, str]]:
-    healthy_statuses = {"never", "not_configured", "synced"}
+    healthy_statuses = {"never", "not_configured", "synced", "unsupported_portal"}
     channels = (
         ("grades", "Grades", student.grade_status),
         ("primary_agenda", "Primary agenda", student.primary_agenda_status),

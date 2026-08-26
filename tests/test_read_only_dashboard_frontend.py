@@ -461,6 +461,74 @@ console.log(JSON.stringify({ tables: collect(tree, "table").length }));
     assert heatmap == {"tables": 1}
 
 
+def test_unsupported_agenda_portal_renders_as_unavailable_without_an_issue() -> None:
+    result = _run_student_page_scenario(
+        """
+function collect(node, predicate, found = []) {
+    if (!node || typeof node !== "object") return found;
+    if (Array.isArray(node)) {
+        for (const child of node) collect(child, predicate, found);
+        return found;
+    }
+    if (predicate(node)) found.push(node);
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+        collect(child, predicate, found);
+    }
+    return found;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+const page = hooks.StudentPage({ data: {
+    backUrl: "#back",
+    logoUrl: "/logo.webp",
+    student: {
+        id: 17,
+        firstName: "Avery",
+        lastName: "Quinn",
+        gradeLevel: 11,
+        status: "synced",
+        gradesSnapshot: [],
+        grades: {},
+        syncIssues: [],
+        agendaItems: [],
+        agendaSlots: [{
+            number: 1,
+            portal: "powerschool",
+            portalLabel: "PowerSchool",
+            available: false,
+            status: "synced",
+            updatedAt: "2026-08-26T12:00:00-07:00",
+            weeks: [],
+        }],
+    },
+} });
+const unavailable = collect(
+    page,
+    (node) => String(node.props?.className || "").includes("tc-agenda-card--unavailable"),
+);
+const issues = collect(
+    page,
+    (node) => String(node.props?.["aria-label"] || "").includes("Issue"),
+);
+console.log(JSON.stringify({
+    unavailableCards: unavailable.length,
+    text: textOf(unavailable[0]),
+    issues: issues.length,
+}));
+"""
+    )
+
+    assert result == {
+        "unavailableCards": 1,
+        "text": "Agenda · PowerSchoolNo valid agenda portal configured.",
+        "issues": 0,
+    }
+
+
 def test_grade_history_only_shows_the_most_recent_completed_week() -> None:
     result = _run_student_page_scenario(
         """

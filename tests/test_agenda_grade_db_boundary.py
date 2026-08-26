@@ -817,17 +817,18 @@ def test_unsupported_and_unidentified_slots_remain_in_empty_bundle() -> None:
     )
     browser = FakeBrowser()
 
-    bundle, _ = asyncio.run(agenda.fetch_agenda(browser, student))
+    result, _ = asyncio.run(agenda.fetch_agenda(browser, student))
 
-    assert bundle == {
+    assert result.bundle == {
         "agenda1": {"portal": "powerschool", "weeks": {}},
         "agenda2": {"portal": None, "weeks": {}},
     }
+    assert result.failures == {}
     assert browser.contexts == []
     assert browser.pages == []
 
 
-def test_unsupported_configured_slot_posts_its_failure_state() -> None:
+def test_unsupported_configured_slot_posts_an_empty_neutral_state() -> None:
     posts = []
     student = _student(7)
     student.update(
@@ -858,9 +859,8 @@ def test_unsupported_configured_slot_posts_its_failure_state() -> None:
     assert failure is None
     assert [post["outcome"] for post in posts] == [
         {
-            "kind": "failure",
-            "channel": "primary_agenda",
-            "code": "unsupported_portal",
+            "kind": "primary_agenda_success",
+            "agenda": {"portal": "powerschool", "weeks": {}},
         },
         {
             "kind": "secondary_agenda_success",
@@ -869,7 +869,7 @@ def test_unsupported_configured_slot_posts_its_failure_state() -> None:
     ]
     assert browser.contexts == []
     assert browser.pages == []
-    assert progress == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
+    assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
 
 
 def test_slot_failure_preserves_the_other_slot_and_posts_only_safe_state(monkeypatch, caplog) -> None:
