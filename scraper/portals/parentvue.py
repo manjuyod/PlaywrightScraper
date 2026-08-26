@@ -14,11 +14,18 @@ from .utils import wait_after_nav
 
 class ParentVUE(PortalEngine):
     portal_key = "parentvue"
-    url_patterns = ("parentvue", "Login_Parent", "Login_Student")
+    url_patterns = (
+        "parentvue",
+        "Login_Parent",
+        "Login_Student",
+        "az-joc.edupoint.com",
+    )
     agenda_capable = True
     login_config = UniversalLoginConfig(
         username_selector="#ctl00_MainContent_username",
         password_selector="#ctl00_MainContent_password",
+        sso_entry_selector='a[href*="sts.windows.net"]',
+        microsoft_sso=True,
     )
     grade_table_config = GradeTableConfig(
         table_selector="div.gb-class-header.gb-class-row",

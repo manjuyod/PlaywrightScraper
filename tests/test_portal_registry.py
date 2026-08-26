@@ -70,6 +70,13 @@ def test_url_detection_is_case_insensitive_and_prefers_longest_pattern(
     )
 
 
+def test_jocombs_root_url_uses_parentvue() -> None:
+    assert (
+        registry.get_portal_key_from_url("https://az-joc.edupoint.com/")
+        == "parentvue"
+    )
+
+
 def test_portal_declaration_rejects_missing_login_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

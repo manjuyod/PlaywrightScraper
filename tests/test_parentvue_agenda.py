@@ -651,6 +651,14 @@ def test_engine_delegates_to_sequential_course_collector(
     assert ParentVUE.agenda_capable is True
 
 
+def test_parentvue_declares_jocombs_microsoft_sso() -> None:
+    config = ParentVUE.login_config
+
+    assert config is not None
+    assert config.sso_entry_selector == 'a[href*="sts.windows.net"]'
+    assert config.microsoft_sso is True
+
+
 class FakeGradebookLink:
     def __init__(self, page: "FakeNavigationPage") -> None:
         self.page = page
