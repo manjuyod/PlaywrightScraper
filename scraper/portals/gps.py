@@ -11,7 +11,6 @@ from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import wait_after_nav
 
 PICTOGRAPH_READINESS_TIMEOUT_MS = 45_000
-LOGIN_TRANSITION_TIMEOUT_MS = 5_000
 
 
 class GPS(PortalEngine):
@@ -28,42 +27,67 @@ class GPS(PortalEngine):
         password_selector="input#ember535",
         post_fill_wait=4000,
     )
+    _AUTH_CONTAINER = ".pictograph-list"
+    _AUTH_TILES = ".pictograph-list img.tile-icon"
+    _AUTH_TIMEOUT_MS = PICTOGRAPH_READINESS_TIMEOUT_MS
 
     async def validate_login(self) -> None:
-        config = type(self).login_config
-        assert config is not None
-        username_field = self.page.locator(config.username_selector)
-        await self.raise_login_error_if(await username_field.is_visible())
+        await self._wait_for_auth_screen()
 
-        password_field = self.page.locator(config.password_selector)
-        if not await password_field.is_visible():
-            return
+    async def _wait_for_auth_screen(self) -> None:
+        starting_url = self.page.url
+        self.logger.info("portal.login.auth_screen_waiting")
         try:
-            await password_field.wait_for(
-                state="hidden", timeout=LOGIN_TRANSITION_TIMEOUT_MS
+            await self.page.locator(self._AUTH_CONTAINER).wait_for(
+                state="visible",
+                timeout=self._AUTH_TIMEOUT_MS,
+            )
+            await self.page.locator(self._AUTH_TILES).first.wait_for(
+                state="visible",
+                timeout=self._AUTH_TIMEOUT_MS,
             )
         except PlaywrightTimeout:
-            await self.raise_login_error_if(True)
+            config = type(self).login_config
+            assert config is not None
+            try:
+                login_form_visible = await self.page.locator(
+                    config.username_selector
+                ).is_visible() or await self.page.locator(
+                    config.password_selector
+                ).is_visible()
+            except Exception:
+                login_form_visible = False
+            self.logger.warning(
+                "portal.login.auth_screen_not_reached",
+                extra={
+                    "login_form_visible": login_form_visible,
+                    "url_changed": self.page.url != starting_url,
+                },
+            )
+            raise self.LoginError("portal login rejected") from None
+        self.logger.info("portal.login.auth_screen_reached")
 
     async def after_login(self, first_name: str | None) -> None:
         _ = first_name
         try:
             await self.do_gps_auth()
         except PlaywrightTimeout:
-            self.logger.warning("portal.login.pictograph_readiness_timeout")
-            raise RuntimeError("portal pictograph challenge unavailable") from None
+            self.logger.warning("portal.login.auth_challenge_timed_out")
+            raise self.LoginError("portal login rejected") from None
 
     # Login Helper
     async def do_gps_auth(self):
-        assert self.auth_images is not None  # must be provided by caller/DB
+        if not self.auth_images:
+            raise self.LoginError("portal login rejected")
 
-        await self.page.locator(".pictograph-list img.tile-icon").first.wait_for(
+        await self.page.locator(self._AUTH_TILES).first.wait_for(
             state="visible", timeout=PICTOGRAPH_READINESS_TIMEOUT_MS
         )
 
-        for _ in range(0, 3):
+        for challenge in range(1, 4):
             images_alts = await self.page.eval_on_selector_all(
-                ".pictograph-list img.tile-icon", "imgs => imgs.map(img => img.alt)"
+                self._AUTH_TILES,
+                "imgs => imgs.map(img => img.alt)",
             )
 
             user_match = None
@@ -72,11 +96,25 @@ class GPS(PortalEngine):
                     user_match = alt
                     break
             if not user_match:
-                raise RuntimeError("pictograph authentication failed")
+                self.logger.warning(
+                    "portal.login.auth_challenge_unmatched",
+                    extra={
+                        "challenge": challenge,
+                        "tile_count": len(images_alts),
+                        "configured_answer_count": len(self.auth_images),
+                    },
+                )
+                raise self.LoginError("portal login rejected")
             await self.page.locator(
                 f".pictograph-list img.tile-icon[alt='{user_match}']"
             ).click()
             await self.page.wait_for_timeout(1000)
+
+        await self.page.locator(self._AUTH_CONTAINER).wait_for(
+            state="hidden",
+            timeout=self._AUTH_TIMEOUT_MS,
+        )
+        self.logger.info("portal.login.auth_completed")
 
     async def nav_to_ic(self):
         # nav to infinite campus portal

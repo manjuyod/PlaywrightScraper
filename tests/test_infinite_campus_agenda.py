@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from datetime import datetime
 import traceback
-from typing import Callable
+from typing import Callable, cast
 
 import pytest
-from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import Error as PlaywrightError, Page
 
 from scraper import agenda
+from scraper.portals import infinite_campus_agenda as ic_agenda
 from scraper.portals import get_portal
 from scraper.portals.infinite_campus import InfiniteCampus
 from scraper.portals.infinite_campus_agenda import (
@@ -1873,4 +1875,180 @@ def test_collected_records_use_shared_week_class_status_structure() -> None:
                 ],
             }
         },
+    }
+class FakeCourseCount:
+    def __init__(self, frame: "FakeFrame") -> None:
+        self.frame: FakeFrame = frame
+
+    async def count(self) -> int:
+        return self.frame.course_count
+
+
+class FakeFrame:
+    def __init__(self) -> None:
+        self.course_count: int = 2
+
+    def locator(self, selector: str) -> FakeCourseCount:
+        assert selector == "div.collapsible-card.grades__card:visible"
+        return FakeCourseCount(self)
+
+    async def content(self) -> str:
+        return "<synthetic-course-grades></synthetic-course-grades>"
+
+
+class FakePage:
+    def __init__(self, frame: FakeFrame) -> None:
+        self.current_frame: FakeFrame = frame
+
+    def frame(self, name: str) -> FakeFrame | None:
+        assert name == "main-workspace"
+        return self.current_frame
+
+
+def test_collector_opens_each_course_once_and_returns_between_courses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = FakeFrame()
+    page = FakePage(frame)
+    actions: list[str] = []
+    current_course = ""
+
+    async def course_titles(_frame: FakeFrame) -> list[str]:
+        return ["First Course", "Second Course"]
+
+    async def open_course(_frame: FakeFrame, index: int, title: str) -> None:
+        nonlocal current_course
+        assert ("First Course", "Second Course")[index] == title
+        current_course = title
+        actions.append(f"open:{title}")
+
+    async def wait_for_course_page(_page: FakePage) -> FakeFrame:
+        actions.append(f"loaded:{current_course}")
+        return frame
+
+    async def open_course_grades(current_frame: FakeFrame) -> FakeFrame:
+        actions.append(f"grades:{current_course}")
+        return current_frame
+
+    async def expand(_frame: FakeFrame) -> None:
+        actions.append(f"expand:{current_course}")
+
+    def parse(
+        _html: str,
+        *,
+        course: str,
+        reference: datetime | None,
+    ) -> list[dict[str, object]]:
+        assert reference == REFERENCE
+        actions.append(f"parse:{course}")
+        return [
+            {
+                "course": course,
+                "title": "Synthetic work",
+                "dueDate": "2026-08-28",
+                "dueTime": None,
+                "status": "due",
+            }
+        ]
+
+    async def return_to_grades() -> None:
+        actions.append("return")
+
+    monkeypatch.setattr(ic_agenda, "_visible_course_titles", course_titles)
+    monkeypatch.setattr(ic_agenda, "_open_course", open_course)
+    monkeypatch.setattr(ic_agenda, "_wait_for_course_page", wait_for_course_page)
+    monkeypatch.setattr(ic_agenda, "_open_course_grades", open_course_grades)
+    monkeypatch.setattr(ic_agenda, "_expand_assignment_categories", expand)
+    monkeypatch.setattr(ic_agenda, "parse_infinite_campus_course_grades", parse)
+
+    records = asyncio.run(
+        collect_infinite_campus_agenda(
+            cast(Page, cast(object, page)),
+            return_to_grades=return_to_grades,
+            reference=REFERENCE,
+        )
+    )
+
+    assert actions == [
+        "open:First Course",
+        "loaded:First Course",
+        "grades:First Course",
+        "expand:First Course",
+        "parse:First Course",
+        "return",
+        "open:Second Course",
+        "loaded:Second Course",
+        "grades:Second Course",
+        "expand:Second Course",
+        "parse:Second Course",
+    ]
+    assert [record["course"] for record in records] == [
+        "First Course",
+        "Second Course",
+    ]
+
+
+def test_engine_navigates_to_grades_and_supplies_return_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = FakePage(FakeFrame())
+    engine = InfiniteCampus(
+        cast(Page, cast(object, page)),
+        "student",
+        "password",
+        "https://ic.example/campus/portal",
+    )
+    navigation: list[bool] = []
+    selected: list[tuple[str, ...]] = []
+    collections = 0
+
+    async def navigate(*, force: bool = False) -> None:
+        navigation.append(force)
+
+    async def select(_frame: FakeFrame, names: tuple[str, ...]) -> str:
+        selected.append(names)
+        return names[0]
+
+    async def collect(
+        page: object,
+        *,
+        return_to_grades: Callable[[], Awaitable[None]],
+    ) -> list[dict[str, object]]:
+        nonlocal collections
+        assert page is engine.page
+        _ = return_to_grades
+        collections += 1
+        return []
+
+    monkeypatch.setattr(engine, "nav_to_grades", navigate)
+    monkeypatch.setattr(engine, "select_timeframe", select)
+    monkeypatch.setattr(
+        "scraper.portals.infinite_campus.collect_infinite_campus_agenda",
+        collect,
+    )
+
+    assert asyncio.run(engine.get_agenda()) == []
+    assert selected == [("QT1", "Q1"), ("QT2", "Q2")]
+    assert collections == 2
+    assert navigation == [False, True, True]
+
+
+def test_timeframes_and_grade_merge_keep_the_later_complete_snapshot() -> None:
+    assert InfiniteCampus.timeframe_groups(1) == (
+        (("QT1", "Q1"), ("QT2", "Q2")),
+        ("S1",),
+    )
+    assert InfiniteCampus.timeframe_groups(2) == (
+        (("QT3", "Q3"), ("QT4", "Q4")),
+        ("S2",),
+    )
+    assert InfiniteCampus.merge_grade_snapshots(
+        [
+            {"Earlier only": 72.0, "Shared": 81.0},
+            {"Current only": 94.0, "Shared": 0.0},
+        ]
+    ) == {
+        "Earlier only": 72.0,
+        "Current only": 94.0,
+        "Shared": 0.0,
     }
