@@ -85,6 +85,8 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
             typeof errorDescription === "function" ? errorDescription : null,
         ErrorStatusBadge:
             typeof ErrorStatusBadge === "function" ? ErrorStatusBadge : null,
+        StudentSyncWarning:
+            typeof StudentSyncWarning === "function" ? StudentSyncWarning : null,
         JobCard: typeof JobCard === "function" ? JobCard : null,
         StudentCard: typeof StudentCard === "function" ? StudentCard : null,
         StudentTable: typeof StudentTable === "function" ? StudentTable : null,
@@ -212,7 +214,7 @@ console.log(JSON.stringify({
     }
 
 
-def test_error_descriptions_are_plain_english_on_every_status_surface() -> None:
+def test_error_descriptions_are_plain_english_for_job_and_channel_codes() -> None:
     result = _run_student_page_scenario(
         """
 function tooltipMessages(node) {
@@ -228,54 +230,25 @@ function tooltipMessages(node) {
     return own.concat(tooltipMessages(node.children || []));
 }
 
-const student = {
-    id: 17,
-    detailUrl: "/franchises/3/students/17",
-    firstName: "Avery",
-    lastName: "Quinn",
-    gradeLevel: 11,
-    portalUrl: null,
-    status: "error",
-    errorCode: "bad_login",
-    updatedAt: "2026-08-20T12:00:00-07:00",
-    standing: "Poor",
-    gradesSnapshot: [],
-    lowGrades: [],
-    highGrades: [],
-    grades: {},
-    agendaSlots: [],
-    agendaItems: [],
-};
-const surfaces = {
-    job: hooks.JobCard({
-        job: {
-            kind: "grade",
-            status: "failed",
-            errorCode: "bad_login",
-            attempted: 1,
-            total: 1,
-            success: 0,
-            errors: 1,
-        },
-    }),
-    studentCard: hooks.StudentCard({ student }),
-    studentTable: hooks.StudentTable({
-        students: [student],
-        sortConfig: { key: "name", direction: "asc" },
-        onSort: () => undefined,
-    }),
-    studentPage: hooks.StudentPage({
-        data: { student, backUrl: "#back", logoUrl: "/logo.webp" },
-    }),
-};
+const job = hooks.JobCard({
+    job: {
+        kind: "grade",
+        status: "failed",
+        errorCode: "bad_login",
+        attempted: 1,
+        total: 1,
+        success: 0,
+        errors: 1,
+    },
+});
 console.log(JSON.stringify({
     known: hooks.errorDescription("bad_login"),
+    configuration: hooks.errorDescription("configuration_missing"),
+    unsupported: hooks.errorDescription("unsupported_portal"),
     agendaFailure: hooks.errorDescription("agenda2_parentvue_failed"),
     missingConfiguration: hooks.errorDescription("agenda1_configuration_missing"),
     unexpected: hooks.errorDescription("mystery_failure"),
-    surfaceMessages: Object.fromEntries(
-        Object.entries(surfaces).map(([name, tree]) => [name, tooltipMessages(tree)]),
-    ),
+    jobTooltips: tooltipMessages(job),
 }));
 """
     )
@@ -283,51 +256,45 @@ console.log(JSON.stringify({
     login_description = "The portal rejected the student's username or password."
     assert result == {
         "known": login_description,
+        "configuration": "The portal URL or login credentials are incomplete.",
+        "unsupported": "This portal does not have a supported agenda collector.",
         "agendaFailure": "Portal 2's ParentVUE agenda could not be collected.",
         "missingConfiguration": "Portal 1 is missing its URL or login credentials.",
         "unexpected": (
             "The scraper reported an unexpected error. "
             "Reference code: mystery_failure."
         ),
-        "surfaceMessages": {
-            "job": [login_description],
-            "studentCard": [login_description],
-            "studentTable": [login_description],
-            "studentPage": [login_description],
-        },
+        "jobTooltips": [login_description],
     }
 
 
-def test_student_page_shows_each_agenda_channel_status() -> None:
+def test_sync_state_lives_on_cards_and_table_uses_only_warning_hint() -> None:
     result = _run_student_page_scenario(
         """
-function strings(node) {
+function collect(node, type, found = []) {
+    if (!node || typeof node !== "object") return found;
     if (Array.isArray(node)) {
-        return node.flatMap(strings);
+        for (const child of node) collect(child, type, found);
+        return found;
     }
-    if (typeof node === "string") {
-        return [node];
+    if (node.type === type) found.push(node);
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+        collect(child, type, found);
     }
-    if (!node || typeof node !== "object") {
-        return [];
-    }
-    return strings(node.children || []);
+    return found;
 }
-
-function tooltipMessages(node) {
-    if (Array.isArray(node)) {
-        return node.flatMap(tooltipMessages);
-    }
-    if (!node || typeof node !== "object") {
-        return [];
-    }
-    const own = node.props && node.props.role === "tooltip"
-        ? [node.children.flat(Infinity).filter((child) => typeof child === "string").join("")]
-        : [];
-    return own.concat(tooltipMessages(node.children || []));
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
 }
-
-const tree = hooks.StudentPage({
+const issues = [
+    { label: "Grades", status: "bad_login" },
+    { label: "Primary agenda", status: "scrape_failed" },
+];
+const warning = hooks.StudentSyncWarning({ issues });
+const page = hooks.StudentPage({
     data: {
         backUrl: "#back",
         logoUrl: "/logo.webp",
@@ -338,12 +305,8 @@ const tree = hooks.StudentPage({
             gradeLevel: 11,
             portalUrl: null,
             status: "synced",
-            errorCode: null,
             updatedAt: "2026-08-20T12:00:00-07:00",
-            standing: "Good",
             gradesSnapshot: [],
-            lowGrades: [],
-            highGrades: [],
             grades: {},
             agendaItems: [],
             agendaSlots: [
@@ -352,15 +315,14 @@ const tree = hooks.StudentPage({
                     portal: "canvas",
                     portalLabel: "Canvas",
                     status: "scrape_failed",
-                    errorCode: "scrape_failed",
                     updatedAt: "2026-08-20T12:01:00-07:00",
                     weeks: [],
                 },
                 {
                     number: 2,
-                    portal: null,
-                    status: "not_configured",
-                    errorCode: null,
+                    portal: "parentvue",
+                    portalLabel: "ParentVUE",
+                    status: "synced",
                     updatedAt: "2026-08-20T12:02:00-07:00",
                     weeks: [],
                 },
@@ -368,16 +330,69 @@ const tree = hooks.StudentPage({
         },
     },
 });
-const visible = strings(tree).filter((value) =>
-    ["Portal 1", "Portal 2", "scrape_failed", "not_configured"].includes(value)
-);
-console.log(JSON.stringify({ visible, tooltips: tooltipMessages(tree) }));
+const table = hooks.StudentTable({
+    students: [{
+        id: 17,
+        detailUrl: "/student/17",
+        firstName: "Avery",
+        lastName: "Quinn",
+        gradeLevel: 11,
+        portalUrl: null,
+        syncIssues: issues,
+        updatedAt: null,
+        standing: "Good",
+        gradesSnapshot: [],
+        lowGrades: [],
+        highGrades: [],
+    }],
+    sortConfig: { key: "name", direction: "asc" },
+    onSort: () => undefined,
+});
+console.log(JSON.stringify({
+    warningLabel: collect(warning, "summary")[0].props["aria-label"],
+    warningText: textOf(warning),
+    cardIssues: collect(page, "summary")
+        .map((node) => node.props?.["aria-label"])
+        .filter((label) => /^(Grades|Assignments|Agenda):/.test(String(label || ""))),
+    hasCompactCardStates: ["Synced", "Issue", "Last synced", "Last checked"]
+        .every((label) => textOf(page).includes(label)),
+    headings: collect(table, "th").map(textOf),
+    tableWarnings: collect(table, "summary")
+        .map((node) => node.props?.["aria-label"])
+        .filter((label) => String(label || "").startsWith("Issue.")),
+}));
 """
     )
 
     assert result == {
-        "visible": ["Portal 1", "scrape_failed", "Portal 2", "not_configured"],
-        "tooltips": ["The portal could not be read successfully."],
+        "warningLabel": (
+            "Issue. Grades: The portal rejected the student's "
+            "username or password. Primary agenda: The portal could not be read "
+            "successfully."
+        ),
+        "warningText": (
+            "IssueGrades: The portal rejected the student's username or password."
+            "Primary agenda: The portal could not be read successfully."
+        ),
+        "cardIssues": [
+            "Assignments: Issue. The portal could not be read successfully.",
+        ],
+        "hasCompactCardStates": True,
+        "headings": [
+            "Student↑",
+            "Primary Portal",
+            "Recent Grades",
+            "Low Grades",
+            "High Grades",
+            "Standing↕",
+            "Grades Updated",
+            "Actions",
+        ],
+        "tableWarnings": [
+            "Issue. Grades: The portal rejected the student's "
+            "username or password. Primary agenda: The portal could not be read "
+            "successfully."
+        ],
     }
 
 
@@ -444,6 +459,74 @@ console.log(JSON.stringify({ tables: collect(tree, "table").length }));
 
     assert "Agenda2026-08-14Archive responseFictional Studies" in flat["text"]
     assert heatmap == {"tables": 1}
+
+
+def test_unsupported_agenda_portal_renders_as_unavailable_without_an_issue() -> None:
+    result = _run_student_page_scenario(
+        """
+function collect(node, predicate, found = []) {
+    if (!node || typeof node !== "object") return found;
+    if (Array.isArray(node)) {
+        for (const child of node) collect(child, predicate, found);
+        return found;
+    }
+    if (predicate(node)) found.push(node);
+    for (const child of (Array.isArray(node.children) ? node.children : [node.children])) {
+        collect(child, predicate, found);
+    }
+    return found;
+}
+function textOf(node) {
+    if (node === null || node === undefined || node === false) return "";
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    return (Array.isArray(node.children) ? node.children : [node.children]).map(textOf).join("");
+}
+const page = hooks.StudentPage({ data: {
+    backUrl: "#back",
+    logoUrl: "/logo.webp",
+    student: {
+        id: 17,
+        firstName: "Avery",
+        lastName: "Quinn",
+        gradeLevel: 11,
+        status: "synced",
+        gradesSnapshot: [],
+        grades: {},
+        syncIssues: [],
+        agendaItems: [],
+        agendaSlots: [{
+            number: 1,
+            portal: "powerschool",
+            portalLabel: "PowerSchool",
+            available: false,
+            status: "synced",
+            updatedAt: "2026-08-26T12:00:00-07:00",
+            weeks: [],
+        }],
+    },
+} });
+const unavailable = collect(
+    page,
+    (node) => String(node.props?.className || "").includes("tc-agenda-card--unavailable"),
+);
+const issues = collect(
+    page,
+    (node) => String(node.props?.["aria-label"] || "").includes("Issue"),
+);
+console.log(JSON.stringify({
+    unavailableCards: unavailable.length,
+    text: textOf(unavailable[0]),
+    issues: issues.length,
+}));
+"""
+    )
+
+    assert result == {
+        "unavailableCards": 1,
+        "text": "Agenda · PowerSchoolNo valid agenda portal configured.",
+        "issues": 0,
+    }
 
 
 def test_grade_history_only_shows_the_most_recent_completed_week() -> None:

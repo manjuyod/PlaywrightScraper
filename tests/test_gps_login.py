@@ -63,7 +63,11 @@ def _configure_login_dependencies(
 
     async def fake_wait_for_auth_screen(self: GPS) -> None:
         page = self.page
-        if page.username_visible or page.password_visible:  # type: ignore[attr-defined]
+        username = page.locator("input#identification")
+        password = page.locator("input#ember535")
+        if isinstance(password, TransitioningLoginControl):
+            await password.wait_for(state="hidden", timeout=5_000)
+        if await username.is_visible() or await password.is_visible():
             raise self.LoginError("portal login rejected")
 
     monkeypatch.setattr(portal_utils, "universal_login_flow", fake_universal_login_flow)

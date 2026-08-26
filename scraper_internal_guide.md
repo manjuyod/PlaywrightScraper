@@ -69,9 +69,9 @@ Rows contain the title, normalized due date, and normalized local time (or
 Canvas, ParentVUE, and Google Classroom are agenda-capable. Each collector
 returns both missing and upcoming/due work in one invocation; the agenda CLI
 does not select a single status. An entirely unconfigured slot is cleared and
-records `not_configured`. Partial credentials and unsupported or parserless
-configured portals record `configuration_missing` or `unsupported_portal` for
-their specific slot. A capable collector that completes with no dated
+records `not_configured`. Partial credentials record `configuration_missing`
+for their specific slot. Unsupported or parserless portals produce a neutral
+empty slot, not a synchronization failure. A capable collector with no dated
 assignments is a successful blank slot.
 
 Within a slot, normalized rows are grouped by Monday week and class, with

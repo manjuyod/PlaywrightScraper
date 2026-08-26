@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import traceback
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from playwright.async_api import Browser, async_playwright
@@ -36,7 +37,7 @@ from scraper.runner import (
     student_from_context,
 )
 
-load_dotenv()
+_ = load_dotenv()
 
 MAX_CONCURRENT_AGENDA_WORKERS = 6
 logger = logging.getLogger("scraper.agenda")
@@ -164,6 +165,8 @@ async def _collect_slot(
     browser: Browser,
     student: Mapping[str, object],
     slot: AgendaSlot,
+    *,
+    diagnostic: bool = False,
 ) -> AgendaWeeks:
     context_token = bind_log_context(portal=slot.portal, slot=slot.number)
     try:
@@ -219,6 +222,23 @@ async def _collect_slot(
         except BaseException as exc:
             primary_exception = exc
             exception_kind = _agenda_exception_kind(exc)
+            if diagnostic and page is not None:
+                traceback.print_exception(exc)
+                _emit_agenda_diagnostic(
+                    "agenda.slot.diagnostic.paused",
+                    {"portal": slot.portal, "slot": slot.number},
+                )
+                try:
+                    await page.pause()
+                except Exception as pause_exc:
+                    _emit_agenda_diagnostic(
+                        "agenda.slot.diagnostic.pause_unavailable",
+                        {
+                            "portal": slot.portal,
+                            "slot": slot.number,
+                            "exception_kind": _agenda_exception_kind(pause_exc),
+                        },
+                    )
             raise
         finally:
             cleanup_exception: BaseException | None = None
@@ -263,13 +283,19 @@ async def fetch_agenda(
     *,
     worker_semaphore: asyncio.Semaphore | None = None,
     on_slot_result: AgendaSlotResultHandler | None = None,
+    diagnostic: bool = False,
 ) -> tuple[AgendaFetchResult, dict[str, Any]]:
     if worker_semaphore is None:
         worker_semaphore = asyncio.Semaphore(MAX_CONCURRENT_AGENDA_WORKERS)
 
     async def collect_slot(slot: AgendaSlot) -> AgendaWeeks:
         async with worker_semaphore:
-            return await _collect_slot(browser, student, slot)
+            return await _collect_slot(
+                browser,
+                student,
+                slot,
+                diagnostic=diagnostic,
+            )
 
     slots = resolve_agenda_slots(student)
     bundle = empty_agenda_bundle([slot.portal for slot in slots])
@@ -293,18 +319,15 @@ async def fetch_agenda(
             await report(slot, failures[slot.key])
             continue
         if not slot.portal:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         try:
             engine = get_portal(slot.portal)
         except ValueError:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         if not engine.agenda_capable:
-            failures[slot.key] = "unsupported_portal"
-            await report(slot, failures[slot.key])
+            await report(slot, None)
             continue
         workers[asyncio.create_task(collect_slot(slot))] = slot
 

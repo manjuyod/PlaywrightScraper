@@ -137,8 +137,10 @@
 
     const ERROR_DESCRIPTIONS = Object.freeze({
         bad_login: "The portal rejected the student's username or password.",
+        configuration_missing: "The portal URL or login credentials are incomplete.",
         no_grades: "The portal opened successfully, but no grades were found.",
         scrape_failed: "The portal could not be read successfully.",
+        unsupported_portal: "This portal does not have a supported agenda collector.",
         agenda_failed: "The student's agenda could not be collected.",
         agenda_runner_failed: "The agenda job stopped before it could finish.",
         runner_failed: "The grade job stopped before it could finish.",
@@ -218,6 +220,124 @@
         );
     }
 
+    function isSyncIssue(status) {
+        return Boolean(
+            status &&
+                status !== "never" &&
+                status !== "not_configured" &&
+                status !== "unsupported_portal" &&
+                status !== "synced",
+        );
+    }
+
+    function syncStateText(status) {
+        if (status === "synced") {
+            return "Synced";
+        }
+        if (status === "never" || status === "not_configured" || !status) {
+            return "Not synced";
+        }
+        return "Issue";
+    }
+
+    function syncTimestampText(status, updatedAt) {
+        if (!updatedAt) {
+            return "No sync recorded";
+        }
+        return `${status === "synced" ? "Last synced" : "Last checked"} ${formatDate(updatedAt)}`;
+    }
+
+    function SyncState({ label, status, updatedAt }) {
+        const issue = isSyncIssue(status);
+        const stateText = syncStateText(status);
+        const description = issue ? errorDescription(status) : null;
+        const accessibleLabel = `${label}: ${stateText}${description ? `. ${description}` : ""}`;
+        return h(
+            "div",
+            {
+                className: cn(
+                    "flex flex-wrap items-center justify-end gap-2 rounded-md",
+                ),
+            },
+            h("span", { className: "text-xs font-bold text-slate-500" }, label),
+            issue
+                ? h(
+                      "details",
+                      { className: "tc-sync-issue" },
+                      h(
+                          "summary",
+                          {
+                              className: "tc-focus-ring",
+                              title: description,
+                              "aria-label": accessibleLabel,
+                          },
+                          h(
+                              Badge,
+                              { tone: "danger" },
+                              h(Icon, { name: "alert", className: "mr-1 h-3.5 w-3.5" }),
+                              stateText,
+                          ),
+                      ),
+                      h(
+                          "span",
+                          { className: "tc-sync-issue__content", role: "note" },
+                          description,
+                      ),
+                  )
+                : h(
+                      Badge,
+                      { tone: status === "synced" ? "success" : "slate" },
+                      h(Icon, { name: status === "synced" ? "check" : "activity", className: "mr-1 h-3.5 w-3.5" }),
+                      stateText,
+                  ),
+            h(
+                "span",
+                { className: "text-xs text-slate-500" },
+                syncTimestampText(status, updatedAt),
+            ),
+        );
+    }
+
+    function StudentSyncWarning({ issues }) {
+        const activeIssues = Array.isArray(issues) ? issues : [];
+        if (!activeIssues.length) {
+            return null;
+        }
+        const description = activeIssues
+            .map((issue) => `${issue.label}: ${errorDescription(issue.status) || "Synchronization issue."}`)
+            .join(" ");
+        return h(
+            "details",
+            { className: "tc-sync-warning" },
+            h(
+                "summary",
+                {
+                    className: "tc-focus-ring",
+                    title: description,
+                    "aria-label": `Issue. ${description}`,
+                },
+                h(
+                    Badge,
+                    { tone: "danger" },
+                    h(Icon, { name: "alert", className: "mr-1 h-3.5 w-3.5" }),
+                    "Issue",
+                ),
+            ),
+            h(
+                "span",
+                { className: "tc-sync-warning__content", role: "note" },
+                activeIssues.map((issue) =>
+                    h(
+                        "span",
+                        { key: issue.channel || issue.label, className: "block" },
+                        h("strong", null, `${issue.label}: `),
+                        errorDescription(issue.status) || "Synchronization issue.",
+                    ),
+                ),
+            ),
+        );
+    }
+
     function Header({ data, title, subtitle, actions }) {
         return h(
             "header",
@@ -291,6 +411,7 @@
             (status &&
                 status !== "never" &&
                 status !== "not_configured" &&
+                status !== "unsupported_portal" &&
                 status !== "running")
         ) {
             return "danger";
@@ -677,10 +798,7 @@
                     h("h2", { className: "text-lg font-extrabold text-slate-900" }, `${student.firstName} ${student.lastName}`),
                     h("p", { className: "mt-1 text-sm text-slate-500" }, `Grade ${student.gradeLevel || "—"} · CRM ${student.id}`),
                 ),
-                h(ErrorStatusBadge, {
-                    status: student.status,
-                    errorCode: student.errorCode,
-                }),
+                h(StudentSyncWarning, { issues: student.syncIssues }),
             ),
             h("div", { className: "my-4 h-px bg-slate-200" }),
             h(GradeList, { grades: student.gradesSnapshot }),
@@ -755,7 +873,7 @@
                 { className: "tc-table-scroll overflow-x-auto" },
                 h(
                     "table",
-                    { className: "tc-data-table min-w-[1480px] w-full border-collapse" },
+                    { className: "tc-data-table min-w-[1360px] w-full border-collapse" },
                     h(
                         "thead",
                         null,
@@ -780,8 +898,7 @@
                                 onSort,
                                 className: headingClass,
                             }),
-                            h("th", { className: headingClass }, "Status"),
-                            h("th", { className: headingClass }, "Last Update"),
+                            h("th", { className: headingClass }, "Grades Updated"),
                             h("th", { className: headingClass }, "Actions"),
                         ),
                     ),
@@ -796,12 +913,17 @@
                                     "td",
                                     { className: cellClass },
                                     h(
-                                        "a",
-                                        {
-                                            href: student.detailUrl,
-                                            className: "font-extrabold text-brand-blueDark hover:text-brand-orangeDark",
-                                        },
-                                        `${student.firstName || ""} ${student.lastName || ""}`.trim(),
+                                        "div",
+                                        { className: "flex items-center gap-2" },
+                                        h(
+                                            "a",
+                                            {
+                                                href: student.detailUrl,
+                                                className: "font-extrabold text-brand-blueDark hover:text-brand-orangeDark",
+                                            },
+                                            `${student.firstName || ""} ${student.lastName || ""}`.trim(),
+                                        ),
+                                        h(StudentSyncWarning, { issues: student.syncIssues }),
                                     ),
                                     h(
                                         "div",
@@ -850,14 +972,6 @@
                                         { tone: standingTone(student.standing) },
                                         student.standing || "Unknown",
                                     ),
-                                ),
-                                h(
-                                    "td",
-                                    { className: cellClass },
-                                    h(ErrorStatusBadge, {
-                                        status: student.status || "never",
-                                        errorCode: student.errorCode,
-                                    }),
                                 ),
                                 h(
                                     "td",
@@ -1150,7 +1264,9 @@
     function isConfiguredAgendaSlot(slot) {
         return Boolean(
             slot &&
-                (slot.portal || (Array.isArray(slot.weeks) && slot.weeks.length)),
+                (slot.portal ||
+                    (Array.isArray(slot.weeks) && slot.weeks.length) ||
+                    isSyncIssue(slot.status)),
         );
     }
 
@@ -1164,12 +1280,16 @@
             isConfiguredAgendaSlot(primary) && GRADE_AGENDA_PORTALS.has(primary.portal)
                 ? primary
                 : null;
-        const standaloneSlot = isConfiguredAgendaSlot(secondary)
-            ? secondary
-            : isConfiguredAgendaSlot(primary) && !gradeSlot
-              ? primary
-              : null;
-        return { gradeSlot, standaloneSlot };
+        const standaloneSlot =
+            isConfiguredAgendaSlot(secondary) && secondary.available !== false
+                ? secondary
+                : isConfiguredAgendaSlot(primary) && !gradeSlot && primary.available !== false
+                  ? primary
+                  : null;
+        const unavailableSlot = [secondary, primary].find(
+            (slot) => isConfiguredAgendaSlot(slot) && slot.available === false,
+        );
+        return { gradeSlot, standaloneSlot: standaloneSlot || unavailableSlot || null };
     }
 
     function gradeAgendaByCourse(slot) {
@@ -1201,10 +1321,31 @@
 
     function AgendaCard({ slot }) {
         const heading = `Agenda${slot.portalLabel ? ` · ${slot.portalLabel}` : ""}`;
+        if (slot.available === false) {
+            return h(
+                Card,
+                { className: "tc-report-card tc-agenda-card tc-agenda-card--unavailable p-5" },
+                h("h2", { className: "text-lg font-extrabold text-slate-500" }, heading),
+                h(
+                    "p",
+                    { className: "mt-4 text-sm font-semibold text-slate-500" },
+                    "No valid agenda portal configured.",
+                ),
+            );
+        }
         return h(
             Card,
             { className: "tc-report-card tc-agenda-card p-5" },
-            h("h2", { className: "text-lg font-extrabold text-slate-900" }, heading),
+            h(
+                "div",
+                { className: "flex flex-wrap items-start justify-between gap-3" },
+                h("h2", { className: "text-lg font-extrabold text-slate-900" }, heading),
+                h(SyncState, {
+                    label: "Agenda",
+                    status: slot.status,
+                    updatedAt: slot.updatedAt,
+                }),
+            ),
             h(
                 "div",
                 {
@@ -1284,50 +1425,6 @@
         );
     }
 
-    function AgendaStatusSummary({ slots }) {
-        return h(
-            Card,
-            { className: "p-5" },
-            h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Agenda sync"),
-            h(
-                "div",
-                { className: "mt-4 grid gap-3 sm:grid-cols-2" },
-                (slots || []).map((slot) =>
-                    h(
-                        "div",
-                        {
-                            key: slot.number,
-                            className: "rounded-lg border border-slate-200 p-4",
-                        },
-                        h(
-                            "div",
-                            { className: "flex items-center justify-between gap-3" },
-                            h(
-                                "span",
-                                { className: "font-bold text-slate-900" },
-                                `Portal ${slot.number}`,
-                            ),
-                            h(ErrorStatusBadge, {
-                                status: slot.status || "never",
-                                errorCode: slot.errorCode,
-                            }),
-                        ),
-                        h(
-                            "p",
-                            { className: "mt-2 text-xs text-slate-500" },
-                            slot.portalLabel || "No portal configured",
-                        ),
-                        h(
-                            "p",
-                            { className: "mt-1 text-xs text-slate-500" },
-                            `Updated ${formatDate(slot.updatedAt)}`,
-                        ),
-                    ),
-                ),
-            ),
-        );
-    }
-
     function StudentPage({ data }) {
         const student = data.student || {};
         const agendaLayout = studentAgendaLayout(student.agendaSlots);
@@ -1369,12 +1466,24 @@
         const currentGradesContent = [
             h(
                 "div",
-                { key: "heading", className: "flex items-center justify-between gap-3" },
+                { key: "heading", className: "flex flex-wrap items-start justify-between gap-3" },
                 h("h2", { className: "text-lg font-extrabold text-slate-900" }, "Current grades"),
-                h(ErrorStatusBadge, {
-                    status: student.status || "never",
-                    errorCode: student.errorCode,
-                }),
+                h(
+                    "div",
+                    { className: "grid justify-items-end gap-2" },
+                    h(SyncState, {
+                        label: "Grades",
+                        status: student.status,
+                        updatedAt: student.updatedAt,
+                    }),
+                    agendaLayout.gradeSlot
+                        ? h(SyncState, {
+                              label: "Assignments",
+                              status: agendaLayout.gradeSlot.status,
+                              updatedAt: agendaLayout.gradeSlot.updatedAt,
+                          })
+                        : null,
+                ),
             ),
             h(
                 "div",
@@ -1388,11 +1497,6 @@
                     grades: student.gradesSnapshot,
                     agendaByCourse: courseAgendas,
                 }),
-            ),
-            h(
-                "p",
-                { key: "updated", className: "mt-4 text-xs text-slate-500" },
-                `Updated ${formatDate(student.updatedAt)}`,
             ),
         ];
         const gradeHistoryHeading = h(
@@ -1445,9 +1549,6 @@
                   h(
                       "div",
                       { className: "grid gap-6" },
-                      student.agendaSlots && student.agendaSlots.length
-                          ? h(AgendaStatusSummary, { slots: student.agendaSlots })
-                          : null,
                       h(
                           "div",
                           { className: "tc-grade-row" },

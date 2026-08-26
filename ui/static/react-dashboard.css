@@ -570,6 +570,50 @@ summary:focus-visible {
     color: #475569;
 }
 
+.tc-sync-warning {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.tc-sync-warning > summary,
+.tc-sync-issue > summary {
+    cursor: pointer;
+    list-style: none;
+    border-radius: 999px;
+}
+
+.tc-sync-warning > summary::-webkit-details-marker,
+.tc-sync-issue > summary::-webkit-details-marker {
+    display: none;
+}
+
+.tc-sync-warning__content,
+.tc-sync-issue__content {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    z-index: 50;
+    width: max-content;
+    max-width: min(22rem, calc(100vw - 2rem));
+    border-radius: 0.5rem;
+    background: var(--tc-blue-deep);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.45;
+    padding: 0.65rem 0.75rem;
+    white-space: normal;
+}
+
+.tc-sync-warning__content > span + span {
+    margin-top: 0.4rem;
+}
+
+.tc-sync-issue {
+    position: relative;
+}
+
 .tc-error-tooltip {
     position: relative;
     display: inline-flex;
@@ -864,6 +908,12 @@ summary:focus-visible {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-color: rgba(68, 114, 196, 0.55) transparent;
+}
+
+.tc-agenda-card--unavailable {
+    border-color: #cbd5e1;
+    background: #f1f5f9;
+    box-shadow: none;
 }
 
 .tc-agenda-class {

@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 from playwright.async_api import Browser
 
+from scraper.agenda import AgendaFetchResult
 from scraper.workflows import test_portal
 from scraper.workflows.test_portal import load_students, select_students, stress_test
 
@@ -144,12 +145,17 @@ def test_portal_agenda_flow_is_explicit(monkeypatch) -> None:
     async def fake_scrape_one(*_args, **_kwargs):
         raise AssertionError("agenda-only tests should not fetch grades")
 
-    async def fake_fetch_agenda(browser, student):
+    async def fake_fetch_agenda(browser, student, *, diagnostic=False):
+        assert diagnostic is False
         observed.append((browser, student))
-        return {
-            "agenda1": {"portal": "canvas", "weeks": {}},
-            "agenda2": {"portal": None, "weeks": {}},
-        }, student
+        return AgendaFetchResult(
+            bundle={
+                "agenda1": {"portal": "canvas", "weeks": {}},
+                "agenda2": {"portal": None, "weeks": {}},
+            },
+            attempted_slots=("agenda1",),
+            failures={},
+        ), student
 
     monkeypatch.setattr(test_portal, "scrape_one", fake_scrape_one)
     monkeypatch.setattr(test_portal, "fetch_student_agenda", fake_fetch_agenda)
