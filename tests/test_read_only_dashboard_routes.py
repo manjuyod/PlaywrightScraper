@@ -154,7 +154,35 @@ def _page_data(response) -> dict[str, Any]:
 
 
 def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
-    client, _routes = _create_client(monkeypatch)
+    client, routes = _create_client(monkeypatch, authenticated=False)
+    data_calls: list[str] = []
+
+    def load_students(**_kwargs):
+        data_calls.append("students")
+        return []
+
+    def load_jobs(**_kwargs):
+        data_calls.append("jobs")
+        return []
+
+    monkeypatch.setattr(routes.dashboard, "load_students", load_students)
+    monkeypatch.setattr(routes.dashboard, "load_jobs", load_jobs)
+
+    response = client.get("/")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/auth/start")
+    assert data_calls == []
+    assert 'id="tc-page-data"' not in response.get_data(as_text=True)
+    assert any(
+        header.startswith(f"{SESSION_COOKIE_NAME}=") and "Max-Age=0" in header
+        for header in response.headers.getlist("Set-Cookie")
+    )
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_authenticated_dev_home_renders_read_only_overview(monkeypatch) -> None:
+    client, _routes = _create_client(monkeypatch, authenticated=True)
 
     response = client.get("/")
     page_data = _page_data(response)
