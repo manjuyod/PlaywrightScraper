@@ -511,11 +511,14 @@ def test_neon_state_reader_sets_transaction_read_only() -> None:
 def test_job_reader_returns_active_plus_twenty_recent_without_private_columns() -> None:
     engine = _FakeEngine([{"id": "job-1", "progress": {"total": 1}}])
 
-    rows = dashboard_data.read_jobs(limit=20, engine=engine)
+    rows = dashboard_data.read_jobs(franchise_id=57, limit=20, engine=engine)
 
     assert rows == [{"id": "job-1", "progress": {"total": 1}}]
     assert engine.connection.calls[0] == ("SET TRANSACTION READ ONLY", None)
-    assert engine.connection.calls[1][1] == {"recent_limit": 20}
+    assert engine.connection.calls[1][1] == {
+        "recent_limit": 20,
+        "franchise_id": 57,
+    }
     job_sql = dashboard_data.NEON_JOBS_SQL.lower()
     assert "status = 'running'" in job_sql
     assert "status <> 'running'" in job_sql

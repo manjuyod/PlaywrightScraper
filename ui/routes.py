@@ -9,6 +9,7 @@ from flask import abort, jsonify, redirect, render_template, request, url_for
 
 from ui import dashboard_data as dashboard
 from ui.app import app
+from ui.auth.guards import current_claims, require_franchise, require_permission
 
 
 GRADE_FILTER_LEVELS = {
@@ -319,11 +320,11 @@ def _unauthorized():
 
 
 @app.get("/")
+@require_permission("dashboard.read")
 def index():
-    if not _is_dev_mode():
-        return _unauthorized()
-    students = dashboard.load_students()
-    jobs = dashboard.load_jobs(limit=20)
+    claims = current_claims()
+    students = dashboard.load_students(franchise_id=claims.franchise_id)
+    jobs = dashboard.load_jobs(claims.franchise_id)
     franchises = dashboard.summarize_franchises(students)
     for franchise in franchises:
         franchise["url"] = url_for("franchise_view", franchise_id=franchise["id"])
@@ -355,10 +356,12 @@ def login():
 
 
 @app.get("/franchise/<int:franchise_id>")
+@require_franchise("students.read")
 def franchise_view(franchise_id: int):
+    trusted_franchise_id = current_claims().franchise_id
     grade_filter = _normalize_grade_filter(request.args.get("grade_filter"))
-    franchise_name = dashboard.load_franchise_name(franchise_id)
-    students = dashboard.load_students(franchise_id=franchise_id)
+    franchise_name = dashboard.load_franchise_name(trusted_franchise_id)
+    students = dashboard.load_students(franchise_id=trusted_franchise_id)
     visible_students = _filter_students_by_grade(students, grade_filter)
     filters = [
         {
@@ -390,8 +393,10 @@ def franchise_view(franchise_id: int):
 
 
 @app.get("/franchise/<int:franchise_id>/student/<int:crmstudentid>")
+@require_franchise("students.read")
 def student_view(franchise_id: int, crmstudentid: int):
-    student = dashboard.load_student(franchise_id, crmstudentid)
+    trusted_franchise_id = current_claims().franchise_id
+    student = dashboard.load_student(trusted_franchise_id, crmstudentid)
     if student is None:
         abort(404)
     page_data = {
@@ -405,7 +410,11 @@ def student_view(franchise_id: int, crmstudentid: int):
 
 
 @app.get("/api/jobs")
+@require_permission("dashboard.read", api=True)
 def jobs_api():
-    if not _is_dev_mode():
-        return _unauthorized()
-    return jsonify({"jobs": dashboard.load_jobs(limit=20)})
+    claims = current_claims()
+    return jsonify(
+        {
+            "jobs": dashboard.load_jobs(claims.franchise_id)
+        }
+    )
