@@ -5,12 +5,14 @@ from flask import Flask, render_template
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ui.dashboard_data import DashboardDataError
+from ui.auth.routes import bp as auth_blueprint
 
 
 load_dotenv()
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.register_blueprint(auth_blueprint)
 
 
 @app.after_request

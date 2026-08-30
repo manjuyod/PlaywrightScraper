@@ -4,10 +4,14 @@ import importlib
 import json
 import re
 import sys
+import time
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from ui import dashboard_data
+from ui.auth.models import GrantIntrospection
+from ui.auth.session import GradeSession, SESSION_COOKIE_NAME, sign_session
 
 
 def _student(
@@ -61,15 +65,48 @@ def _job() -> dict[str, Any]:
     }
 
 
-def _create_client(monkeypatch, *, environment: str = "dev"):
+def _create_client(
+    monkeypatch, *, environment: str = "dev", authenticated: bool = True
+):
     monkeypatch.delenv("SESSION_SECRET", raising=False)
     monkeypatch.setenv("PYTHON_ENV", environment)
     for module_name in ("ui.routes", "ui.app"):
         sys.modules.pop(module_name, None)
 
     app_module = importlib.import_module("ui.app")
+    guards = importlib.import_module("ui.auth.guards")
     routes = importlib.import_module("ui.routes")
     app_module.app.config.update(TESTING=True)
+
+    now = int(time.time())
+    grade_session = GradeSession(
+        device_id="dashboard-test-device",
+        grant_id="dashboard-test-grant",
+        crm_role="2",
+        franchise_id=57,
+        permissions=("dashboard.read", "students.read"),
+        issued_at=now - 60,
+        expires_at=now + 3_600,
+    )
+    grant = GrantIntrospection(
+        active=True,
+        grant_id=grade_session.grant_id,
+        device_id=grade_session.device_id,
+        crm_role=grade_session.crm_role,
+        franchise_id=grade_session.franchise_id,
+        permissions=grade_session.permissions,
+        expires_at=grade_session.expires_at,
+    )
+    config = SimpleNamespace(
+        grade_checker_cookie_secret="dashboard-test-cookie-secret",
+        crm_auth_issuer="https://crm-auth.tutoringclub.com",
+        crm_auth_audience="grade-checker",
+    )
+    rust_client = SimpleNamespace(
+        introspect_grant=lambda _grant_id, _device_id: grant
+    )
+    monkeypatch.setattr(guards, "load_auth_config", lambda: config)
+    monkeypatch.setattr(guards, "RustAuthClient", lambda _config: rust_client)
 
     students = [
         _student(101, grade="7th"),
@@ -96,7 +133,13 @@ def _create_client(monkeypatch, *, environment: str = "dev"):
             None,
         ),
     )
-    return app_module.app.test_client(), routes
+    client = app_module.app.test_client()
+    if authenticated:
+        client.set_cookie(
+            SESSION_COOKIE_NAME,
+            sign_session(grade_session, config.grade_checker_cookie_secret),
+        )
+    return client, routes
 
 
 def _page_data(response) -> dict[str, Any]:
@@ -129,7 +172,9 @@ def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
 def test_non_dev_home_is_unauthorized_without_loading_dashboard_data(
     monkeypatch,
 ) -> None:
-    client, routes = _create_client(monkeypatch, environment="production")
+    client, routes = _create_client(
+        monkeypatch, environment="production", authenticated=False
+    )
 
     def unexpected_call(**_kwargs):
         raise AssertionError("non-dev overview must not query dashboard data")
@@ -138,12 +183,10 @@ def test_non_dev_home_is_unauthorized_without_loading_dashboard_data(
     monkeypatch.setattr(routes.dashboard, "load_jobs", unexpected_call)
 
     response = client.get("/")
-    body = response.get_data(as_text=True)
 
-    assert response.status_code == 200
-    assert "Unauthorized" in body
-    assert "development environment" in body
-    assert 'id="tc-page-data"' not in body
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/auth/start")
+    assert 'id="tc-page-data"' not in response.get_data(as_text=True)
 
 
 def test_login_and_health_are_compatibility_redirects(monkeypatch) -> None:
@@ -161,6 +204,7 @@ def test_web_surface_rejects_old_mutation_routes(monkeypatch) -> None:
     assert client.post("/franchise/57/student/101").status_code == 405
     assert client.post("/login").status_code == 405
     assert client.post("/logout").status_code == 404
+    assert client.post("/auth/logout").status_code == 302
     assert client.get("/status/57").status_code == 404
 
 
@@ -581,7 +625,9 @@ def test_jobs_api_returns_only_shaped_public_fields(monkeypatch) -> None:
 
 
 def test_non_dev_jobs_api_is_unauthorized_without_loading_jobs(monkeypatch) -> None:
-    client, routes = _create_client(monkeypatch, environment="production")
+    client, routes = _create_client(
+        monkeypatch, environment="production", authenticated=False
+    )
 
     def unexpected_call(**_kwargs):
         raise AssertionError("non-dev jobs endpoint must not query Neon")
@@ -590,8 +636,8 @@ def test_non_dev_jobs_api_is_unauthorized_without_loading_jobs(monkeypatch) -> N
 
     response = client.get("/api/jobs")
 
-    assert response.status_code == 200
-    assert "Unauthorized" in response.get_data(as_text=True)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/auth/start")
 
 
 def test_dependency_failure_is_sanitized(monkeypatch) -> None:
