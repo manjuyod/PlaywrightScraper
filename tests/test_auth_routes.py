@@ -140,10 +140,30 @@ def _assert_cookie_cleared(response, name: str) -> None:
     assert "Domain=" not in headers[0]
 
 
+def _assert_callback_rejected_before_rust(
+    response, events: list[tuple[str, ...]], sensitive_value: str
+) -> None:
+    assert response.status_code == 400
+    assert events == []
+    _assert_cookie_cleared(response, transaction.TRANSACTION_COOKIE_NAME)
+    assert not any(
+        header.startswith(f"{SESSION_COOKIE_NAME}=")
+        for header in response.headers.getlist("Set-Cookie")
+    )
+    assert b"Authentication could not be completed." in response.data
+    assert sensitive_value.encode() not in response.data
+
+
 def test_start_uses_fixed_crm_url_one_state_and_s256_challenge(
     app: Flask, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    response = _start(app.test_client(), monkeypatch)
+    # Published independently in RFC 7636 Appendix B, not derived from production.
+    verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    values = iter(("state-token", verifier))
+    monkeypatch.setattr(transaction.secrets, "token_urlsafe", lambda _size: next(values))
+    response = app.test_client().get(
+        "/auth/start", base_url="https://grades.tutoringclub.com"
+    )
     location = response.headers["Location"]
     parsed = urlsplit(location)
     query = parse_qs(parsed.query, strict_parsing=True)
@@ -153,7 +173,7 @@ def test_start_uses_fixed_crm_url_one_state_and_s256_challenge(
     )
     assert query == {
         "state": ["state-token"],
-        "code_challenge": ["7w_YNF9DSfIdPf_pRjSq646_kPr-2-o9NAl16JGghdM"],
+        "code_challenge": ["E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"],
         "code_challenge_method": ["S256"],
     }
     assert location.count("state=") == 1
@@ -259,6 +279,79 @@ def test_callback_requires_exactly_one_nonempty_state_and_code(
     _assert_cookie_cleared(response, transaction.TRANSACTION_COOKIE_NAME)
     assert b"Authentication could not be completed." in response.data
     assert b"opaque-code" not in response.data
+
+
+def test_callback_rejects_mismatched_state_before_rust_and_clears_transaction(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    claims: AuthClaims,
+) -> None:
+    client = app.test_client()
+    _start(client, monkeypatch)
+    events: list[tuple[str, ...]] = []
+    _install_fake(monkeypatch, claims, _grant(claims), events)
+
+    response = client.get(
+        "/auth/callback?state=wrong-state&code=opaque-code",
+        base_url="https://grades.tutoringclub.com",
+    )
+
+    _assert_callback_rejected_before_rust(response, events, "wrong-state")
+
+
+def test_callback_rejects_malformed_transaction_before_rust_and_clears_it(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    claims: AuthClaims,
+) -> None:
+    client = app.test_client()
+    client.set_cookie(
+        transaction.TRANSACTION_COOKIE_NAME,
+        "malformed-transaction",
+        domain="grades.tutoringclub.com",
+        secure=True,
+    )
+    events: list[tuple[str, ...]] = []
+    _install_fake(monkeypatch, claims, _grant(claims), events)
+
+    response = client.get(
+        "/auth/callback?state=state-token&code=opaque-code",
+        base_url="https://grades.tutoringclub.com",
+    )
+
+    _assert_callback_rejected_before_rust(response, events, "malformed-transaction")
+
+
+def test_callback_rejects_expired_transaction_before_rust_and_clears_it(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    claims: AuthClaims,
+) -> None:
+    client = app.test_client()
+    expired = transaction.sign_transaction(
+        transaction.AuthTransaction(
+            state="state-token",
+            code_verifier="expired-verifier",
+            return_path="/",
+            expires_at=1,
+        ),
+        "test-cookie-secret",
+    )
+    client.set_cookie(
+        transaction.TRANSACTION_COOKIE_NAME,
+        expired,
+        domain="grades.tutoringclub.com",
+        secure=True,
+    )
+    events: list[tuple[str, ...]] = []
+    _install_fake(monkeypatch, claims, _grant(claims), events)
+
+    response = client.get(
+        "/auth/callback?state=state-token&code=opaque-code",
+        base_url="https://grades.tutoringclub.com",
+    )
+
+    _assert_callback_rejected_before_rust(response, events, "expired-verifier")
 
 
 def test_callback_compares_state_constant_time_and_transaction_is_one_use(
