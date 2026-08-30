@@ -222,7 +222,7 @@ def test_callback_redeems_then_introspects_and_issues_minimum_session(
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/franchise/16"
     assert events == [
         ("redeem", "opaque-code", "v" * 43),
         ("introspect", claims.grant_id, claims.sub),
@@ -246,6 +246,30 @@ def test_callback_redeems_then_introspects_and_issues_minimum_session(
         forbidden not in signed
         for forbidden in ("opaque-code", "v" * 43, claims.jti, claims.iss)
     )
+
+
+def test_callback_center_admin_keeps_fixed_dashboard_landing(
+    app: Flask,
+    monkeypatch: pytest.MonkeyPatch,
+    claims: AuthClaims,
+) -> None:
+    admin_claims = replace(
+        claims,
+        crm_role="2",
+        permissions=("dashboard.read", "students.read"),
+    )
+    client = app.test_client()
+    _start(client, monkeypatch)
+    _install_fake(monkeypatch, admin_claims, _grant(admin_claims), [])
+    monkeypatch.setattr(routes, "_now", lambda: 1_900_000_001, raising=False)
+
+    response = client.get(
+        "/auth/callback?state=state-token&code=opaque-code",
+        base_url="https://grades.tutoringclub.com",
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/"
 
 
 @pytest.mark.parametrize(

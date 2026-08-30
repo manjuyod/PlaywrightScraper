@@ -85,7 +85,10 @@ def callback() -> Response:
     except ValueError:
         return _auth_error(403)
 
-    response = redirect(auth_tx.return_path)
+    landing_path = auth_tx.return_path
+    if grade_session.crm_role == "3":
+        landing_path = f"/franchise/{grade_session.franchise_id}"
+    response = redirect(landing_path)
     set_session_cookie(
         response,
         sign_session(grade_session, config.grade_checker_cookie_secret),

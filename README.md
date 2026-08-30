@@ -9,7 +9,8 @@ keys and proof operations on the CRM origin:
   fixed CRM device authorization page.
 - `/auth/callback` redeems the returned authorization code through the local
   Rust authentication service, introspects its grant, and creates an HTTP-only
-  Grade session cookie.
+  Grade session cookie. Center admins land on `/`; tutors land on their
+  server-validated `/franchise/<franchise_id>` route.
 - Every protected request validates the Grade session and introspects the live
   Rust grant before loading dashboard data.
 - `/` and `/api/jobs` require `dashboard.read`; franchise and student routes
