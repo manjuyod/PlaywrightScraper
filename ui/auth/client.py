@@ -70,6 +70,7 @@ class RustAuthClient:
         )
 
     def _post(self, path: str, payload: dict[str, str], error_code: str) -> dict[str, Any]:
+        response: Any | None = None
         try:
             response = self.session.post(
                 f"{self.settings.crm_auth_base_url}{path}",
@@ -77,21 +78,31 @@ class RustAuthClient:
                 auth=(self.settings.crm_auth_client_id, self.settings.crm_auth_client_secret),
                 headers={"Accept": "application/json"},
                 timeout=(3, 3),
+                stream=True,
             )
+            if response.status_code < 200 or response.status_code >= 300:
+                raise ClientError(error_code)
+            return self._json(response, error_code)
         except requests.RequestException as exc:
             raise ClientError(error_code) from exc
-        if response.status_code < 200 or response.status_code >= 300:
-            raise ClientError(error_code)
-        return self._json(response, error_code)
+        finally:
+            if response is not None:
+                response.close()
 
     def _jwks(self) -> dict[str, Any]:
+        response: Any | None = None
         try:
-            response = self.session.get(self.settings.crm_auth_jwks_url, timeout=(3, 3))
+            response = self.session.get(
+                self.settings.crm_auth_jwks_url, timeout=(3, 3), stream=True
+            )
+            if response.status_code < 200 or response.status_code >= 300:
+                raise ClientError("jwks_failed")
+            return self._json(response, "jwks_failed")
         except requests.RequestException as exc:
             raise ClientError("jwks_failed") from exc
-        if response.status_code < 200 or response.status_code >= 300:
-            raise ClientError("jwks_failed")
-        return self._json(response, "jwks_failed")
+        finally:
+            if response is not None:
+                response.close()
 
     @staticmethod
     def _json(response: Any, error_code: str) -> dict[str, Any]:

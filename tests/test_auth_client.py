@@ -17,6 +17,7 @@ class _Response:
     status_code: int = 200
     raw_body: bytes | None = None
     json_called: bool = False
+    closed: bool = False
 
     def json(self) -> dict[str, Any]:
         self.json_called = True
@@ -26,6 +27,9 @@ class _Response:
         body = self.raw_body if self.raw_body is not None else json.dumps(self.payload).encode()
         return (body[index : index + chunk_size] for index in range(0, len(body), chunk_size))
 
+    def close(self) -> None:
+        self.closed = True
+
 
 class HttpStub:
     def __init__(self) -> None:
@@ -33,6 +37,9 @@ class HttpStub:
         self.last_json: dict[str, Any] | None = None
         self.last_auth: tuple[str, str] | None = None
         self.last_timeout: tuple[int, int] | None = None
+        self.last_stream: bool | None = None
+        self.post_stream: bool | None = None
+        self.get_stream: bool | None = None
         self.response = _Response({})
         self.get_response = _Response({"keys": []})
 
@@ -41,11 +48,15 @@ class HttpStub:
         self.last_json = kwargs["json"]
         self.last_auth = kwargs["auth"]
         self.last_timeout = kwargs["timeout"]
+        self.last_stream = kwargs.get("stream")
+        self.post_stream = kwargs.get("stream")
         return self.response
 
     def get(self, url: str, **kwargs: Any) -> _Response:
         assert url == "https://crm-auth.tutoringclub.com/.well-known/jwks.json"
         assert kwargs["timeout"] == (3, 3)
+        self.last_stream = kwargs.get("stream")
+        self.get_stream = kwargs.get("stream")
         return self.get_response
 
 
@@ -178,3 +189,27 @@ def test_client_translates_assertion_validation_details(
         RustAuthClient(config, session=http_stub).redeem_authorization_code("opaque-code", "v" * 43)
 
     assert "signature detail" not in str(error.value)
+
+
+def test_client_streams_and_closes_all_http_responses(
+    monkeypatch: pytest.MonkeyPatch, config: AuthConfig, claims: AuthClaims
+) -> None:
+    http_stub = HttpStub()
+    http_stub.response = _Response({"assertion": "signed-assertion"})
+    http_stub.get_response = _Response({"keys": []})
+    monkeypatch.setattr("ui.auth.client.validate_assertion", lambda *_: claims)
+    client = RustAuthClient(config, session=http_stub)
+
+    assert client.redeem_authorization_code("opaque-code", "v" * 43) == claims
+    assert http_stub.post_stream is True
+    assert http_stub.get_stream is True
+    assert http_stub.response.closed is True
+    assert http_stub.get_response.closed is True
+
+    http_stub.response = _Response({}, raw_body=b"x" * 65_537)
+    with pytest.raises(ClientError):
+        client.introspect_grant(claims.grant_id, claims.sub)
+
+    assert http_stub.post_stream is True
+    assert http_stub.response.json_called is False
+    assert http_stub.response.closed is True
