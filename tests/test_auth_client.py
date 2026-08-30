@@ -120,7 +120,7 @@ def test_redeem_and_introspection_shapes_are_exact(
             "crm_role": "3",
             "franchise_id": 16,
             "permissions": ["students.read"],
-            "expires_at": 1_700_001_500,
+            "expires_at": "2023-11-14T22:38:20Z",
         }
     )
     result = client.introspect_grant(claims.grant_id, claims.sub)
@@ -128,6 +128,7 @@ def test_redeem_and_introspection_shapes_are_exact(
     assert http_stub.last_json == {"grant_id": claims.grant_id, "device_id": claims.sub}
     assert result.active is True
     assert result.permissions == ("students.read",)
+    assert result.expires_at == 1_700_001_500
 
 
 def test_client_exposes_controlled_error_without_response_details(

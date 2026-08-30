@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -12,6 +13,16 @@ from .models import AuthClaims, GrantIntrospection
 
 
 _MAX_JSON_BYTES = 65_536
+
+
+def _parse_rfc3339_timestamp(value: Any) -> int:
+    if not isinstance(value, str) or not value:
+        raise ValueError("invalid RFC3339 timestamp")
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        raise ValueError("RFC3339 timestamp must include an offset")
+    return int(parsed.timestamp())
 
 
 @dataclass
@@ -54,11 +65,14 @@ class RustAuthClient:
         if (
             not all(isinstance(response[name], str) and response[name] for name in ("grant_id", "device_id", "crm_role"))
             or type(response["franchise_id"]) is not int
-            or type(response["expires_at"]) is not int
             or not isinstance(response["permissions"], list)
             or not all(isinstance(permission, str) for permission in response["permissions"])
         ):
             raise ClientError("introspection_failed")
+        try:
+            expires_at = _parse_rfc3339_timestamp(response["expires_at"])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ClientError("introspection_failed") from exc
         return GrantIntrospection(
             active=True,
             grant_id=response["grant_id"],
@@ -66,7 +80,7 @@ class RustAuthClient:
             crm_role=response["crm_role"],
             franchise_id=response["franchise_id"],
             permissions=tuple(response["permissions"]),
-            expires_at=response["expires_at"],
+            expires_at=expires_at,
         )
 
     def _post(self, path: str, payload: dict[str, str], error_code: str) -> dict[str, Any]:
