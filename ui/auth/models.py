@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 
@@ -24,8 +24,8 @@ class AuthClaims:
 
     @property
     def is_valid(self) -> bool:
-        now = int(datetime.utcnow().timestamp())
-        return self.nbf <= now <= self.exp
+        now = int(datetime.now(tz=timezone.utc).timestamp())
+        return self.nbf <= now < self.exp
 
 
 @dataclass(frozen=True)

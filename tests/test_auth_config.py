@@ -37,10 +37,19 @@ def test_load_auth_config_accepts_only_the_fixed_v2_contract(
         crm_auth_audience="grade-checker",
         crm_auth_jwks_url="https://crm-auth.tutoringclub.com/.well-known/jwks.json",
         crm_device_authorize_url="https://tutoraid.net/GradeCheckerDeviceAuthorize.aspx",
+        grade_checker_origin="https://grades.tutoringclub.com",
         grade_checker_callback_url="https://grades.tutoringclub.com/auth/callback",
         grade_checker_cookie_secret="test-cookie-secret",
         auth_transaction_ttl_seconds=600,
     )
+
+
+def test_load_auth_config_exposes_the_fixed_grade_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required_environment(monkeypatch)
+
+    assert load_auth_config().grade_checker_origin == "https://grades.tutoringclub.com"
 
 
 @pytest.mark.parametrize(

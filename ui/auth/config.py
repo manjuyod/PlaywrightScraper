@@ -12,6 +12,7 @@ CRM_AUTH_AUDIENCE = "grade-checker"
 CRM_AUTH_JWKS_URL = "https://crm-auth.tutoringclub.com/.well-known/jwks.json"
 CRM_DEVICE_AUTHORIZE_URL = "https://tutoraid.net/GradeCheckerDeviceAuthorize.aspx"
 GRADE_CHECKER_CALLBACK_URL = "https://grades.tutoringclub.com/auth/callback"
+GRADE_CHECKER_ORIGIN = "https://grades.tutoringclub.com"
 AUTH_TRANSACTION_TTL_SECONDS = 600
 
 
@@ -24,6 +25,7 @@ class AuthConfig:
     crm_auth_audience: str
     crm_auth_jwks_url: str
     crm_device_authorize_url: str
+    grade_checker_origin: str
     grade_checker_callback_url: str
     grade_checker_cookie_secret: str
     auth_transaction_ttl_seconds: int
@@ -40,6 +42,7 @@ def load_auth_config() -> AuthConfig:
         crm_device_authorize_url=_require_fixed_url(
             "CRM_DEVICE_AUTHORIZE_URL", CRM_DEVICE_AUTHORIZE_URL
         ),
+        grade_checker_origin=_origin_from_callback(GRADE_CHECKER_CALLBACK_URL),
         grade_checker_callback_url=_require_fixed_url(
             "GRADE_CHECKER_CALLBACK_URL", GRADE_CHECKER_CALLBACK_URL
         ),
@@ -86,3 +89,11 @@ def _require_fixed_ttl() -> int:
     if ttl != AUTH_TRANSACTION_TTL_SECONDS:
         raise RuntimeError("Invalid AUTH_TRANSACTION_TTL_SECONDS")
     return ttl
+
+
+def _origin_from_callback(callback_url: str) -> str:
+    parsed = urlsplit(callback_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    if origin != GRADE_CHECKER_ORIGIN:
+        raise RuntimeError("Invalid GRADE_CHECKER_CALLBACK_URL")
+    return origin

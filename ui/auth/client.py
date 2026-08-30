@@ -11,6 +11,9 @@ from .assertions import validate_assertion
 from .models import AuthClaims, GrantIntrospection
 
 
+_MAX_JSON_BYTES = 65_536
+
+
 @dataclass
 class ClientError(RuntimeError):
     code: str
@@ -30,7 +33,10 @@ class RustAuthClient:
         assertion = response.get("assertion")
         if not isinstance(assertion, str) or not assertion:
             raise ClientError("redeem_failed")
-        return validate_assertion(assertion, self._jwks(), self.settings)
+        try:
+            return validate_assertion(assertion, self._jwks(), self.settings)
+        except ValueError as exc:
+            raise ClientError("redeem_failed") from exc
 
     def introspect_grant(self, grant_id: str, device_id: str) -> GrantIntrospection:
         response = self._post(
@@ -90,9 +96,14 @@ class RustAuthClient:
     @staticmethod
     def _json(response: Any, error_code: str) -> dict[str, Any]:
         try:
-            body = response.json()
-            if not isinstance(body, dict) or len(json.dumps(body)) > 65_536:
+            payload = bytearray()
+            for chunk in response.iter_content(chunk_size=8_192):
+                payload.extend(chunk)
+                if len(payload) > _MAX_JSON_BYTES:
+                    raise ValueError
+            body = json.loads(payload)
+            if not isinstance(body, dict):
                 raise ValueError
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ClientError(error_code) from exc
         return body

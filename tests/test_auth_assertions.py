@@ -10,6 +10,7 @@ import pytest
 
 from ui.auth.assertions import validate_assertion
 from ui.auth.config import AuthConfig
+from ui.auth.models import AuthClaims
 
 
 def _base64url(raw: bytes) -> str:
@@ -26,6 +27,7 @@ def config() -> AuthConfig:
         crm_auth_audience="grade-checker",
         crm_auth_jwks_url="https://crm-auth.tutoringclub.com/.well-known/jwks.json",
         crm_device_authorize_url="https://tutoraid.net/GradeCheckerDeviceAuthorize.aspx",
+        grade_checker_origin="https://grades.tutoringclub.com",
         grade_checker_callback_url="https://grades.tutoringclub.com/auth/callback",
         grade_checker_cookie_secret="test-cookie-secret",
         auth_transaction_ttl_seconds=600,
@@ -33,8 +35,14 @@ def config() -> AuthConfig:
 
 
 @pytest.fixture
-def signed_assertion() -> tuple[str, dict[str, Any], dict[str, Any]]:
-    key = Ed25519PrivateKey.generate()
+def signed_assertion(monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    class FixedDateTime:
+        @classmethod
+        def now(cls, tz: Any = None) -> Any:
+            return type("FixedNow", (), {"timestamp": lambda self: 1_700_000_000})()
+
+    monkeypatch.setattr(jwt.api_jwt, "datetime", FixedDateTime)
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
     public_key = key.public_key().public_bytes_raw()
     jwks = {
         "keys": [
@@ -48,7 +56,7 @@ def signed_assertion() -> tuple[str, dict[str, Any], dict[str, Any]]:
             }
         ]
     }
-    now = int(time.time())
+    now = 1_700_000_000
     claims = {
         "iss": "https://crm-auth.tutoringclub.com",
         "aud": "grade-checker",
@@ -127,3 +135,95 @@ def test_validate_assertion_rejects_algorithm_substitution(
 
     with pytest.raises(ValueError):
         validate_assertion(substituted, jwks, config)
+
+
+def test_validate_assertion_enforces_lifetime_and_claim_boundaries(
+    signed_assertion: tuple[str, dict[str, Any], dict[str, Any]], config: AuthConfig
+) -> None:
+    _, jwks, payload = signed_assertion
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+
+    payload.update(iat=1_700_000_000, nbf=1_700_000_000, exp=1_700_001_500)
+    maximum = jwt.encode(payload, key, algorithm="EdDSA", headers={"kid": "fixture-key"})
+    assert validate_assertion(maximum, jwks, config).exp == 1_700_001_500
+
+    for invalid in (
+        {"exp": 1_700_001_501},
+        {"exp": 1_700_000_000},
+        {"iat": 1_700_000_001},
+    ):
+        candidate = payload.copy()
+        candidate.update(invalid)
+        raw = jwt.encode(candidate, key, algorithm="EdDSA", headers={"kid": "fixture-key"})
+        with pytest.raises(ValueError):
+            validate_assertion(raw, jwks, config)
+
+
+def test_validate_assertion_accepts_the_exact_role_2_permissions(
+    signed_assertion: tuple[str, dict[str, Any], dict[str, Any]], config: AuthConfig
+) -> None:
+    _, jwks, payload = signed_assertion
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+    payload = payload.copy()
+    payload.update(crm_role="2", permissions=["dashboard.read", "students.read"])
+    raw = jwt.encode(payload, key, algorithm="EdDSA", headers={"kid": "fixture-key"})
+
+    assert validate_assertion(raw, jwks, config).permissions == (
+        "dashboard.read",
+        "students.read",
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"crm_role": "99"},
+        {"crm_role": "2", "permissions": ["students.read"]},
+        {"sub": "not-a-uuid"},
+        {"jti": "not-a-uuid"},
+        {"grant_id": "not-a-uuid"},
+        {"franchise_id": True},
+        {"franchise_id": "16"},
+    ],
+)
+def test_validate_assertion_rejects_invalid_typed_authorization_claims(
+    signed_assertion: tuple[str, dict[str, Any], dict[str, Any]], config: AuthConfig, invalid: dict[str, Any]
+) -> None:
+    _, jwks, payload = signed_assertion
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(1, 33)))
+    candidate = payload.copy()
+    candidate.update(invalid)
+    raw = jwt.encode(candidate, key, algorithm="EdDSA", headers={"kid": "fixture-key"})
+
+    with pytest.raises(ValueError):
+        validate_assertion(raw, jwks, config)
+
+
+def test_auth_claims_expire_at_the_exact_utc_epoch_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDateTime:
+        @classmethod
+        def utcnow(cls) -> Any:
+            return type("FixedNow", (), {"timestamp": lambda self: 100})()
+
+        @classmethod
+        def now(cls, tz: Any = None) -> Any:
+            return cls.utcnow()
+
+    monkeypatch.setattr("ui.auth.models.datetime", FixedDateTime)
+    claims = AuthClaims(
+        sub="b4fc2e7f-9ca8-44d6-95ad-09851b690c63",
+        jti="b4fc2e7f-9ca8-44d6-95ad-09851b690c64",
+        iss="https://crm-auth.tutoringclub.com",
+        aud="grade-checker",
+        grant_id="b4fc2e7f-9ca8-44d6-95ad-09851b690c65",
+        crm_role="3",
+        franchise_id=16,
+        permissions=("students.read",),
+        iat=99,
+        nbf=100,
+        exp=100,
+    )
+
+    assert claims.is_valid is False
