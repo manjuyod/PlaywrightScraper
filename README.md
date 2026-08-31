@@ -159,9 +159,10 @@ Dashboard read settings:
 - The CRM SQL Server connection uses encrypted ODBC transport and `ApplicationIntent=ReadOnly`. Its fixed query requires `IsTrail = 'Active'` and complete primary portal credentials but selects only ID, franchise, name, grade, and the primary portal URL.
 - Neon dashboard reads use the existing `GRADES_NEON_*`/`GRADES_NEON_URL` configuration and begin every transaction with `SET TRANSACTION READ ONLY`.
 
-Grade authentication uses the fixed server-to-server endpoints
-`POST https://crm-auth.tutoringclub.com/v2/authorization/redeem` and
-`POST https://crm-auth.tutoringclub.com/v2/grants/introspect`. Grade Checker
+Grade authentication uses the selected profile's fixed server-to-server
+endpoints: `https://crm-auth.tutoringclub.com` in production or
+`https://qa-crm-auth.tutoringclub.com` in QA, with the unchanged
+`/v2/authorization/redeem` and `/v2/grants/introspect` paths. Grade Checker
 authenticates those requests with `CRM_AUTH_CLIENT_ID` and
 `CRM_AUTH_CLIENT_SECRET`; no secret value belongs in this repository, browser
 JavaScript, templates, or logs.

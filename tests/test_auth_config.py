@@ -60,10 +60,11 @@ def test_load_auth_config_exposes_the_fixed_grade_origin(
     assert load_auth_config().grade_checker_origin == "https://grades.tutoringclub.com"
 
 
-def test_load_auth_config_accepts_explicit_production(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("environment", ["", "production"])
+def test_load_auth_config_accepts_empty_or_explicit_production(
+    monkeypatch: pytest.MonkeyPatch, environment: str
 ) -> None:
-    _set_required_environment(monkeypatch, "production")
+    _set_required_environment(monkeypatch, environment)
 
     assert load_auth_config().grade_checker_origin == "https://grades.tutoringclub.com"
 
