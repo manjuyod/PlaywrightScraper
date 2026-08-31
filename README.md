@@ -81,6 +81,7 @@ bash ui/start.sh
 
 Set these Replit published-app Secrets before deploying:
 
+- `GRADE_CHECKER_ENV=production`
 - `PGHOST`
 - `PGDATABASE`
 - `PGUSER`
@@ -100,6 +101,29 @@ Set these Replit published-app Secrets before deploying:
 - `GRADE_CHECKER_CALLBACK_URL=https://grades.tutoringclub.com/auth/callback`
 - `GRADE_CHECKER_COOKIE_SECRET=<protected high-entropy value>`
 - `AUTH_TRANSACTION_TTL_SECONDS=600`
+
+### QA Replit deployment
+
+Publish QA as a separate Autoscale deployment with the custom domain
+`qa-grades.tutoringclub.com`. Generated `replit.dev` and `replit.app` URLs are
+not valid callback or cookie origins for this integration. Configure the QA
+published app with independent CRM/Neon credentials and these auth Secrets:
+
+- `GRADE_CHECKER_ENV=qa`
+- `CRM_AUTH_BASE_URL=https://qa-crm-auth.tutoringclub.com`
+- `CRM_AUTH_CLIENT_ID=grade-checker`
+- `CRM_AUTH_CLIENT_SECRET=<QA-only protected high-entropy value>`
+- `CRM_AUTH_ISSUER=https://qa-crm-auth.tutoringclub.com`
+- `CRM_AUTH_AUDIENCE=grade-checker`
+- `CRM_AUTH_JWKS_URL=https://qa-crm-auth.tutoringclub.com/.well-known/jwks.json`
+- `CRM_DEVICE_AUTHORIZE_URL=https://qa.tutoraid.net/GradeCheckerDeviceAuthorize.aspx`
+- `GRADE_CHECKER_CALLBACK_URL=https://qa-grades.tutoringclub.com/auth/callback`
+- `GRADE_CHECKER_COOKIE_SECRET=<QA-only protected high-entropy value>`
+- `AUTH_TRANSACTION_TTL_SECONDS=600`
+
+`GRADE_CHECKER_ENV` accepts only `production` and `qa`; missing or empty keeps
+the production profile. A profile/URL mismatch fails configuration validation,
+so QA cannot fall back to a production authorization origin.
 
 Optional:
 

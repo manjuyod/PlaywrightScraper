@@ -13,6 +13,12 @@ CRM_AUTH_JWKS_URL = "https://crm-auth.tutoringclub.com/.well-known/jwks.json"
 CRM_DEVICE_AUTHORIZE_URL = "https://tutoraid.net/GradeCheckerDeviceAuthorize.aspx"
 GRADE_CHECKER_CALLBACK_URL = "https://grades.tutoringclub.com/auth/callback"
 GRADE_CHECKER_ORIGIN = "https://grades.tutoringclub.com"
+QA_CRM_AUTH_BASE_URL = "https://qa-crm-auth.tutoringclub.com"
+QA_CRM_AUTH_ISSUER = "https://qa-crm-auth.tutoringclub.com"
+QA_CRM_AUTH_JWKS_URL = "https://qa-crm-auth.tutoringclub.com/.well-known/jwks.json"
+QA_CRM_DEVICE_AUTHORIZE_URL = "https://qa.tutoraid.net/GradeCheckerDeviceAuthorize.aspx"
+QA_GRADE_CHECKER_CALLBACK_URL = "https://qa-grades.tutoringclub.com/auth/callback"
+QA_GRADE_CHECKER_ORIGIN = "https://qa-grades.tutoringclub.com"
 AUTH_TRANSACTION_TTL_SECONDS = 600
 
 
@@ -31,24 +37,69 @@ class AuthConfig:
     auth_transaction_ttl_seconds: int
 
 
+@dataclass(frozen=True)
+class _EnvironmentProfile:
+    crm_auth_base_url: str
+    crm_auth_issuer: str
+    crm_auth_jwks_url: str
+    crm_device_authorize_url: str
+    grade_checker_origin: str
+    grade_checker_callback_url: str
+
+
+_PRODUCTION_PROFILE = _EnvironmentProfile(
+    crm_auth_base_url=CRM_AUTH_BASE_URL,
+    crm_auth_issuer=CRM_AUTH_ISSUER,
+    crm_auth_jwks_url=CRM_AUTH_JWKS_URL,
+    crm_device_authorize_url=CRM_DEVICE_AUTHORIZE_URL,
+    grade_checker_origin=GRADE_CHECKER_ORIGIN,
+    grade_checker_callback_url=GRADE_CHECKER_CALLBACK_URL,
+)
+_QA_PROFILE = _EnvironmentProfile(
+    crm_auth_base_url=QA_CRM_AUTH_BASE_URL,
+    crm_auth_issuer=QA_CRM_AUTH_ISSUER,
+    crm_auth_jwks_url=QA_CRM_AUTH_JWKS_URL,
+    crm_device_authorize_url=QA_CRM_DEVICE_AUTHORIZE_URL,
+    grade_checker_origin=QA_GRADE_CHECKER_ORIGIN,
+    grade_checker_callback_url=QA_GRADE_CHECKER_CALLBACK_URL,
+)
+
+
 def load_auth_config() -> AuthConfig:
+    profile = _load_environment_profile()
+    callback_url = _require_fixed_url(
+        "GRADE_CHECKER_CALLBACK_URL", profile.grade_checker_callback_url
+    )
     return AuthConfig(
-        crm_auth_base_url=_require_fixed_url("CRM_AUTH_BASE_URL", CRM_AUTH_BASE_URL),
+        crm_auth_base_url=_require_fixed_url(
+            "CRM_AUTH_BASE_URL", profile.crm_auth_base_url
+        ),
         crm_auth_client_id=_require_fixed_value("CRM_AUTH_CLIENT_ID", CRM_AUTH_CLIENT_ID),
         crm_auth_client_secret=_require_env("CRM_AUTH_CLIENT_SECRET"),
-        crm_auth_issuer=_require_fixed_url("CRM_AUTH_ISSUER", CRM_AUTH_ISSUER),
+        crm_auth_issuer=_require_fixed_url("CRM_AUTH_ISSUER", profile.crm_auth_issuer),
         crm_auth_audience=_require_fixed_value("CRM_AUTH_AUDIENCE", CRM_AUTH_AUDIENCE),
-        crm_auth_jwks_url=_require_fixed_url("CRM_AUTH_JWKS_URL", CRM_AUTH_JWKS_URL),
+        crm_auth_jwks_url=_require_fixed_url(
+            "CRM_AUTH_JWKS_URL", profile.crm_auth_jwks_url
+        ),
         crm_device_authorize_url=_require_fixed_url(
-            "CRM_DEVICE_AUTHORIZE_URL", CRM_DEVICE_AUTHORIZE_URL
+            "CRM_DEVICE_AUTHORIZE_URL", profile.crm_device_authorize_url
         ),
-        grade_checker_origin=_origin_from_callback(GRADE_CHECKER_CALLBACK_URL),
-        grade_checker_callback_url=_require_fixed_url(
-            "GRADE_CHECKER_CALLBACK_URL", GRADE_CHECKER_CALLBACK_URL
+        grade_checker_origin=_origin_from_callback(
+            callback_url, profile.grade_checker_origin
         ),
+        grade_checker_callback_url=callback_url,
         grade_checker_cookie_secret=_require_env("GRADE_CHECKER_COOKIE_SECRET"),
         auth_transaction_ttl_seconds=_require_fixed_ttl(),
     )
+
+
+def _load_environment_profile() -> _EnvironmentProfile:
+    environment = os.environ.get("GRADE_CHECKER_ENV")
+    if environment in (None, "", "production"):
+        return _PRODUCTION_PROFILE
+    if environment == "qa":
+        return _QA_PROFILE
+    raise RuntimeError("Invalid GRADE_CHECKER_ENV")
 
 
 def _require_env(name: str) -> str:
@@ -91,9 +142,9 @@ def _require_fixed_ttl() -> int:
     return ttl
 
 
-def _origin_from_callback(callback_url: str) -> str:
+def _origin_from_callback(callback_url: str, expected_origin: str) -> str:
     parsed = urlsplit(callback_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    if origin != GRADE_CHECKER_ORIGIN:
+    if origin != expected_origin:
         raise RuntimeError("Invalid GRADE_CHECKER_CALLBACK_URL")
     return origin
