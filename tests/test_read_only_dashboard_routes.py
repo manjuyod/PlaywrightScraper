@@ -153,7 +153,9 @@ def _page_data(response) -> dict[str, Any]:
     return json.loads(match.group(1))
 
 
-def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
+def test_anonymous_home_renders_public_sign_in_without_dashboard_data(
+    monkeypatch,
+) -> None:
     client, routes = _create_client(monkeypatch, authenticated=False)
     data_calls: list[str] = []
 
@@ -169,15 +171,13 @@ def test_home_is_dev_only_overview_without_session_cookie(monkeypatch) -> None:
     monkeypatch.setattr(routes.dashboard, "load_jobs", load_jobs)
 
     response = client.get("/")
+    html = response.get_data(as_text=True)
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/auth/start")
+    assert response.status_code == 200
+    assert 'href="/auth/start"' in html
     assert data_calls == []
-    assert 'id="tc-page-data"' not in response.get_data(as_text=True)
-    assert any(
-        header.startswith(f"{SESSION_COOKIE_NAME}=") and "Max-Age=0" in header
-        for header in response.headers.getlist("Set-Cookie")
-    )
+    assert 'id="tc-page-data"' not in html
+    assert "Set-Cookie" not in response.headers
     assert response.headers["Cache-Control"] == "no-store"
 
 
@@ -197,7 +197,7 @@ def test_authenticated_dev_home_renders_read_only_overview(monkeypatch) -> None:
     assert "Set-Cookie" not in response.headers
 
 
-def test_non_dev_home_is_unauthorized_without_loading_dashboard_data(
+def test_non_dev_anonymous_home_is_public_without_loading_dashboard_data(
     monkeypatch,
 ) -> None:
     client, routes = _create_client(
@@ -211,10 +211,11 @@ def test_non_dev_home_is_unauthorized_without_loading_dashboard_data(
     monkeypatch.setattr(routes.dashboard, "load_jobs", unexpected_call)
 
     response = client.get("/")
+    html = response.get_data(as_text=True)
 
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/auth/start")
-    assert 'id="tc-page-data"' not in response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'href="/auth/start"' in html
+    assert 'id="tc-page-data"' not in html
 
 
 def test_login_and_health_are_compatibility_redirects(monkeypatch) -> None:

@@ -13,8 +13,10 @@ keys and proof operations on the CRM origin:
   server-validated `/franchise/<franchise_id>` route.
 - Every protected request validates the Grade session and introspects the live
   Rust grant before loading dashboard data.
-- `/` and `/api/jobs` require `dashboard.read`; franchise and student routes
-  require `students.read` and the exact franchise in the validated session.
+- `/` returns a data-free sign-in page when no Grade session cookie is present;
+  an existing session still requires `dashboard.read` before the overview loads.
+  `/api/jobs` requires `dashboard.read`; franchise and student routes require
+  `students.read` and the exact franchise in the validated session.
 
 PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary and secondary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
@@ -26,10 +28,11 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 
 Routes:
 
-- `/` shows runnable-student summaries and canonical jobs for the franchise in
-  a validated session with `dashboard.read`.
+- `/` shows a public, data-free CRM sign-in page without a Grade session and
+  shows runnable-student summaries and canonical jobs only for a validated
+  session with `dashboard.read`.
 - `/health` and `/login` redirect to `/` and therefore reach the same
-  authentication guard.
+  session-aware public entry point.
 - `/franchise/<franchise_id>` shows runnable CRM students, grade-level filters, current grade snapshots, standing, status, and CRM primary-portal links.
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
 - `/api/jobs` returns shaped, read-only job progress for the validated session

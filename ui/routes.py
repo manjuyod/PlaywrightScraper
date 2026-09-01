@@ -10,6 +10,7 @@ from flask import abort, jsonify, redirect, render_template, request, url_for
 from ui import dashboard_data as dashboard
 from ui.app import app
 from ui.auth.guards import current_claims, require_franchise, require_permission
+from ui.auth.session import SESSION_COOKIE_NAME
 
 
 GRADE_FILTER_LEVELS = {
@@ -320,8 +321,14 @@ def _unauthorized():
 
 
 @app.get("/")
-@require_permission("dashboard.read")
 def index():
+    if not request.cookies.get(SESSION_COOKIE_NAME):
+        return render_template("sign_in.html")
+    return _dashboard_index()
+
+
+@require_permission("dashboard.read")
+def _dashboard_index():
     claims = current_claims()
     students = dashboard.load_students(franchise_id=claims.franchise_id)
     jobs = dashboard.load_jobs(claims.franchise_id)

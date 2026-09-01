@@ -131,10 +131,26 @@ def boundary_harness(monkeypatch: pytest.MonkeyPatch) -> BoundaryHarness:
     return harness
 
 
+def test_anonymous_root_returns_public_sign_in_before_private_data_loaders(
+    boundary_harness: BoundaryHarness,
+) -> None:
+    boundary_harness.client.delete_cookie(SESSION_COOKIE_NAME)
+
+    response = boundary_harness.client.get("/")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'href="/auth/start"' in html
+    assert 'id="tc-page-data"' not in html
+    assert "Set-Cookie" not in response.headers
+    assert response.headers["Cache-Control"] == "no-store"
+    assert boundary_harness.rust.calls == []
+    assert boundary_harness.data_calls == []
+
+
 @pytest.mark.parametrize(
     "path",
     (
-        "/",
         "/api/jobs",
         "/franchise/57",
         "/franchise/57/student/101",
