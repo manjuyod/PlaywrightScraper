@@ -1,8 +1,26 @@
 # Student Grade Checker
 
+## Grade Checker authentication flow
+
+Grade Checker uses CRM-owned browser-device authorization and keeps all device
+keys and proof operations on the CRM origin:
+
+- `/auth/start` creates a short-lived PKCE transaction and redirects to the
+  fixed CRM device authorization page.
+- `/auth/callback` redeems the returned authorization code through the local
+  Rust authentication service, introspects its grant, and creates an HTTP-only
+  Grade session cookie. Center admins land on `/`; tutors land on their
+  server-validated `/franchise/<franchise_id>` route.
+- Every protected request validates the Grade session and introspects the live
+  Rust grant before loading dashboard data.
+- `/` returns a data-free sign-in page when no Grade session cookie is present;
+  an existing session still requires `dashboard.read` before the overview loads.
+  `/api/jobs` requires `dashboard.read`; franchise and student routes require
+  `students.read` and the exact franchise in the validated session.
+
 PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary and secondary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
-The Flask dashboard is a public, read-only operations view. It uses the same runnable-student definition (`IsTrail = 'Active'` plus complete primary portal credentials), reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
+The Flask dashboard is an authenticated, read-only operations view. It uses the same runnable-student definition (`IsTrail = 'Active'` plus complete primary portal credentials), reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
 ## Dashboard
 
@@ -10,13 +28,19 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 
 Routes:
 
-- `/` shows runnable-student summaries for every CRM franchise plus active and recent canonical jobs only when `PYTHON_ENV=dev`; other environments receive a restricted page with HTTP 200 so deployment health checks remain successful.
-- `/health` and `/login` redirect to `/` and therefore reach the same environment gate.
+- `/` shows a public, data-free CRM sign-in page without a Grade session and
+  shows runnable-student summaries and canonical jobs only for a validated
+  session with `dashboard.read`.
+- `/health` and `/login` redirect to `/` and therefore reach the same
+  session-aware public entry point.
 - `/franchise/<franchise_id>` shows runnable CRM students, grade-level filters, current grade snapshots, standing, status, and CRM primary-portal links.
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
-- `/api/jobs` returns shaped, read-only job progress only in dev mode and is polled by the overview every 15 seconds.
+- `/api/jobs` returns shaped, read-only job progress for the validated session
+  franchise and is polled by the overview every 15 seconds.
 
-Franchise and student pages never provide navigation to the overview. Outside dev mode, those pages are available only through their direct URLs and the overview does not enumerate them. Anyone with a direct franchise or student URL can view the corresponding student names and grades.
+Franchise and student pages never provide navigation to the overview. A direct
+URL still requires `students.read`, and its franchise ID must exactly match the
+validated session before any private loader executes.
 
 ## Local Dashboard Run
 
@@ -32,7 +56,8 @@ Start Flask:
 uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
 ```
 
-Open `http://127.0.0.1:8080/`. The dashboard immediately performs read-only CRM and Neon queries; no sign-in is required.
+Open `http://127.0.0.1:8080/`. Grade Checker redirects an unauthenticated
+browser to the CRM-owned device authorization flow before any dashboard query.
 
 The Replit/nginx entrypoint is `ui/start.sh`. It runs Gunicorn on `127.0.0.1:3000` and proxies public traffic through nginx on port `8080`.
 
@@ -59,6 +84,7 @@ bash ui/start.sh
 
 Set these Replit published-app Secrets before deploying:
 
+- `GRADE_CHECKER_ENV=production`
 - `PGHOST`
 - `PGDATABASE`
 - `PGUSER`
@@ -68,6 +94,39 @@ Set these Replit published-app Secrets before deploying:
 - `CRMSrvDb` or `CRMSrvDbQA`
 - `CRMSrvUs`
 - `CRMSrvPs`
+- `CRM_AUTH_BASE_URL=https://crm-auth.tutoringclub.com`
+- `CRM_AUTH_CLIENT_ID=grade-checker`
+- `CRM_AUTH_CLIENT_SECRET=<protected high-entropy value>`
+- `CRM_AUTH_ISSUER=https://crm-auth.tutoringclub.com`
+- `CRM_AUTH_AUDIENCE=grade-checker`
+- `CRM_AUTH_JWKS_URL=https://crm-auth.tutoringclub.com/.well-known/jwks.json`
+- `CRM_DEVICE_AUTHORIZE_URL=https://tutoraid.net/GradeCheckerDeviceAuthorize.aspx`
+- `GRADE_CHECKER_CALLBACK_URL=https://grades.tutoringclub.com/auth/callback`
+- `GRADE_CHECKER_COOKIE_SECRET=<protected high-entropy value>`
+- `AUTH_TRANSACTION_TTL_SECONDS=600`
+
+### QA Replit deployment
+
+Publish QA as a separate Autoscale deployment with the custom domain
+`qa-grades.tutoringclub.com`. Generated `replit.dev` and `replit.app` URLs are
+not valid callback or cookie origins for this integration. Configure the QA
+published app with independent CRM/Neon credentials and these auth Secrets:
+
+- `GRADE_CHECKER_ENV=qa`
+- `CRM_AUTH_BASE_URL=https://qa-crm-auth.tutoringclub.com`
+- `CRM_AUTH_CLIENT_ID=grade-checker`
+- `CRM_AUTH_CLIENT_SECRET=<QA-only protected high-entropy value>`
+- `CRM_AUTH_ISSUER=https://qa-crm-auth.tutoringclub.com`
+- `CRM_AUTH_AUDIENCE=grade-checker`
+- `CRM_AUTH_JWKS_URL=https://qa-crm-auth.tutoringclub.com/.well-known/jwks.json`
+- `CRM_DEVICE_AUTHORIZE_URL=https://qa.tutoraid.net/GradeCheckerDeviceAuthorize.aspx`
+- `GRADE_CHECKER_CALLBACK_URL=https://qa-grades.tutoringclub.com/auth/callback`
+- `GRADE_CHECKER_COOKIE_SECRET=<QA-only protected high-entropy value>`
+- `AUTH_TRANSACTION_TTL_SECONDS=600`
+
+`GRADE_CHECKER_ENV` accepts only `production` and `qa`; missing or empty keeps
+the production profile. A profile/URL mismatch fails configuration validation,
+so QA cannot fall back to a production authorization origin.
 
 Optional:
 
@@ -103,11 +162,20 @@ Dashboard read settings:
 - The CRM SQL Server connection uses encrypted ODBC transport and `ApplicationIntent=ReadOnly`. Its fixed query requires `IsTrail = 'Active'` and complete primary portal credentials but selects only ID, franchise, name, grade, and the primary portal URL.
 - Neon dashboard reads use the existing `GRADES_NEON_*`/`GRADES_NEON_URL` configuration and begin every transaction with `SET TRANSACTION READ ONLY`.
 
+Grade authentication uses the selected profile's fixed server-to-server
+endpoints: `https://crm-auth.tutoringclub.com` in production or
+`https://qa-crm-auth.tutoringclub.com` in QA, with the unchanged
+`/v2/authorization/redeem` and `/v2/grants/introspect` paths. Grade Checker
+authenticates those requests with `CRM_AUTH_CLIENT_ID` and
+`CRM_AUTH_CLIENT_SECRET`; no secret value belongs in this repository, browser
+JavaScript, templates, or logs.
+
 The bundled nginx config forwards `X-Forwarded-For` and `X-Forwarded-Proto`; Flask applies trusted proxy handling for Replit deployment URLs.
 
 Optional:
 
-- `PYTHON_ENV=dev` enables the dashboard overview and jobs API and affects runner notification behavior. When unset or set to any other value, `/` and `/api/jobs` return a restricted response with HTTP 200 while direct franchise and student URLs remain available.
+- `PYTHON_ENV=dev` affects runner notification behavior. It does not bypass the
+  Grade session or live-grant checks on private routes.
 - `SLACK_WEBHOOK_URL` enables Slack notifications.
 - `SLACK_NOTIFY_IN_DEV=1` allows Slack notifications in dev.
 - `LOG_LEVEL` sets the runner and portal log level (default `INFO`).
