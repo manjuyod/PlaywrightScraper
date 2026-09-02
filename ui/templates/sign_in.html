@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Grade Checker</title>
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+        <link
+            rel="stylesheet"
+            href="{{ url_for('static', filename='react-dashboard.css') }}"
+        />
+    </head>
+    <body>
+        <main class="tc-login-page">
+            <div class="tc-login-ambient" aria-hidden="true">
+                <span class="tc-login-aurora tc-login-aurora--one"></span>
+                <span class="tc-login-aurora tc-login-aurora--two"></span>
+                <span class="tc-login-aurora tc-login-aurora--three"></span>
+                <span class="tc-login-sheen"></span>
+            </div>
+            <section class="tc-login-card tc-unauthorized-card" aria-labelledby="sign-in-title">
+                <img
+                    class="tc-unauthorized-logo"
+                    src="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+                    alt="Tutoring Club"
+                />
+                <p class="tc-unauthorized-code">Secure CRM access</p>
+                <h1 id="sign-in-title">Grade Checker</h1>
+                <p class="tc-unauthorized-message">
+                    Sign in through Tutoraid to open your authorized Grade Checker view.
+                </p>
+                <p class="tc-unauthorized-hint">
+                    <a class="tc-button tc-button--orange" href="{{ url_for('auth.start_auth') }}">
+                        Sign in with CRM
+                    </a>
+                </p>
+            </section>
+        </main>
+    </body>
+</html>

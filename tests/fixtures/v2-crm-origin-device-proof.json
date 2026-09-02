@@ -1,0 +1,19 @@
+{
+  "version": "crm-device-auth/v2",
+  "device_id": "b4fc2e7f-9ca8-44d6-95ad-09851b690c63",
+  "challenge_id": "98ef0a02-92e2-49e3-9b4e-e19ed65ef21b",
+  "nonce": "bm9uY2U",
+  "franchise_id": 16,
+  "canonical_message": "crm-device-auth/v2\nclient_id=grade-checker\ndevice_id=b4fc2e7f-9ca8-44d6-95ad-09851b690c63\nchallenge_id=98ef0a02-92e2-49e3-9b4e-e19ed65ef21b\nnonce=bm9uY2U\nfranchise_id=16",
+  "public_key_jwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "HhhTL9R1TALzBB2cdc6zO4P_2BrHzk_ogsyxyYvFiW4",
+    "y": "pGwxHE4v9A3ZajZT5uRURdMt_khuztdcepDGoYiBwKM",
+    "ext": true,
+    "key_ops": [
+      "verify"
+    ]
+  },
+  "signature": "oE_YqvgqBHC43HgjCIC84zXFSfGp3b05GYK24iTyqh0FZmwktFpJItro9AhszKuFMgqCv4N2kQkMmjARzlQVFA"
+}

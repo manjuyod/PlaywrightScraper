@@ -77,6 +77,7 @@ WITH active_jobs AS (
         completed_at
     FROM grade_scrape_jobs
     WHERE status = 'running'
+      AND grade_scrape_jobs.franchise_id = :franchise_id
 ),
 recent_jobs AS (
     SELECT
@@ -92,6 +93,7 @@ recent_jobs AS (
         completed_at
     FROM grade_scrape_jobs
     WHERE status <> 'running'
+      AND grade_scrape_jobs.franchise_id = :franchise_id
     ORDER BY created_at DESC
     LIMIT :recent_limit
 )
@@ -272,14 +274,17 @@ def read_neon_states(
 
 
 def read_jobs(
+    franchise_id: int,
     limit: int = 20,
     *,
     engine: Engine | Any | None = None,
 ) -> list[dict[str, Any]]:
+    if franchise_id is None:
+        raise ValueError("franchise_id is required")
     recent_limit = min(max(int(limit), 1), 100)
     return _read_neon(
         text(NEON_JOBS_SQL),
-        {"recent_limit": recent_limit},
+        {"recent_limit": recent_limit, "franchise_id": franchise_id},
         engine=engine,
     )
 
@@ -303,8 +308,10 @@ def load_student(franchise_id: int, crmstudentid: int) -> DashboardStudent | Non
     return students[0] if students else None
 
 
-def load_jobs(limit: int = 20) -> list[dict[str, Any]]:
-    return [shape_job_row(row) for row in read_jobs(limit=limit)]
+def load_jobs(franchise_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    if franchise_id is None:
+        raise ValueError("franchise_id is required")
+    return [shape_job_row(row) for row in read_jobs(franchise_id=franchise_id, limit=limit)]
 
 
 @dataclass(frozen=True)

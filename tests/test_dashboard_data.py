@@ -511,16 +511,61 @@ def test_neon_state_reader_sets_transaction_read_only() -> None:
 def test_job_reader_returns_active_plus_twenty_recent_without_private_columns() -> None:
     engine = _FakeEngine([{"id": "job-1", "progress": {"total": 1}}])
 
-    rows = dashboard_data.read_jobs(limit=20, engine=engine)
+    rows = dashboard_data.read_jobs(franchise_id=57, limit=20, engine=engine)
 
     assert rows == [{"id": "job-1", "progress": {"total": 1}}]
     assert engine.connection.calls[0] == ("SET TRANSACTION READ ONLY", None)
-    assert engine.connection.calls[1][1] == {"recent_limit": 20}
+    assert engine.connection.calls[1][1] == {
+        "recent_limit": 20,
+        "franchise_id": 57,
+    }
     job_sql = dashboard_data.NEON_JOBS_SQL.lower()
     assert "status = 'running'" in job_sql
     assert "status <> 'running'" in job_sql
+    assert job_sql.count("grade_scrape_jobs.franchise_id = :franchise_id") == 2
+    assert "franchise_id is null" not in job_sql
     for forbidden in ("runner_id", "lease_token", "payload", "summary"):
         assert forbidden not in job_sql
+
+
+def test_job_reader_requires_franchise_scope() -> None:
+    engine = _FakeEngine([])
+
+    with pytest.raises(TypeError):
+        dashboard_data.read_jobs(limit=20, engine=engine)
+
+    assert engine.connection.calls == []
+
+
+def test_job_loader_requires_franchise_scope(monkeypatch) -> None:
+    monkeypatch.setattr(dashboard_data, "read_jobs", lambda **_kwargs: [])
+
+    with pytest.raises(TypeError):
+        dashboard_data.load_jobs(limit=20)
+
+
+def test_job_reader_rejects_explicit_none_before_query() -> None:
+    engine = _FakeEngine([])
+
+    with pytest.raises(ValueError):
+        dashboard_data.read_jobs(None, limit=20, engine=engine)
+
+    assert engine.connection.calls == []
+
+
+def test_job_loader_rejects_explicit_none_before_reader(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def read_jobs(**kwargs: Any) -> list[dict[str, Any]]:
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(dashboard_data, "read_jobs", read_jobs)
+
+    with pytest.raises(ValueError):
+        dashboard_data.load_jobs(None, limit=20)
+
+    assert calls == []
 
 
 def test_load_students_reads_neon_in_one_batch(monkeypatch) -> None:
@@ -551,6 +596,6 @@ def test_neon_engine_creation_failure_is_wrapped_without_details(monkeypatch) ->
     )
 
     with pytest.raises(dashboard_data.DashboardDataError) as error:
-        dashboard_data.read_jobs()
+        dashboard_data.read_jobs(57)
 
     assert str(error.value) == "dashboard_data_unavailable"
