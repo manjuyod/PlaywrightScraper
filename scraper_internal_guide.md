@@ -1,100 +1,156 @@
 # Student Grade Scraper Internal Developer Guide
 
-This project combines Playwright-based portal scraping, Postgres persistence, and a Flask dashboard for franchise operators.
+This project combines Playwright-based portal scraping, a local Windows Rust CRM/Neon write boundary, and a public read-only Flask dashboard.
 
 ## Repository Layout
 
 ```text
 PlaywrightScraper/
-├── db.py                         # Postgres access, Student model, encryption helpers
 ├── scraper/
 │   ├── runner.py                 # grade collection entrypoint
 │   ├── agenda.py                 # agenda collection entrypoint
 │   ├── portals/                  # portal-specific login and parsing engines
-│   └── work_flows/               # sheet sync, grade insertion, verification workflows
+│   └── db_cli.py                 # JSON subprocess adapter for grade-db.exe
+├── grade_db/                     # focused Rust CLI and human-run SQL artifacts
 ├── ui/
-│   ├── app.py                    # Flask app, sessions, auth helpers
-│   ├── routes.py                 # dashboard routes
-│   ├── controllers.py            # report/status computation helpers
-│   ├── ext_jobs.py               # background job execution and progress state
-│   ├── templates/                # health, franchise, student, heatmap views
-│   └── static/                   # dashboard styles and assets
+│   ├── app.py                    # Flask app and response/error policy
+│   ├── dashboard_data.py         # fixed read-only CRM/Neon queries and display models
+│   ├── routes.py                 # GET-only dashboard routes
+│   ├── templates/                # generic React shell and sanitized 503 page
+│   └── static/                   # read-only React UMD dashboard, styles, and assets
 ├── batches/                      # Windows batch pipeline wrappers
 ├── tests/                        # unit and integration tests
 └── pyproject.toml
 ```
 
+Portal engines are self-describing and automatically discovered. Their class
+metadata owns the portal key, URL-detection patterns, universal-login selectors,
+and optional shared grade-table selectors. Portal-specific behavior belongs in
+login validation/post-login hooks or a focused method override. Grade engines
+return a normalized `dict[str, float]`; the runner owns the surrounding result
+payload and database boundary.
+
 ## High-Level Flow
 
-1. `scraper.runner` loads active students from Postgres.
-2. Portal URLs are mapped to registered portal engines.
-3. Each portal engine logs in, handles portal-specific page structure, and extracts grades.
-4. Grade results are inserted by `scraper.work_flows.insert_grades`.
-5. The dashboard reads students from Postgres, computes report fields, and shows franchise/student views.
-6. Dashboard refresh buttons start background jobs in `ui.ext_jobs`; templates poll `/status/<job_id>` until completion.
+1. `scraper.runner` or `scraper.agenda` starts a leased job through `grade-db.exe`.
+2. Rust selects CRM students whose `GradePortalURL`, `GradePortalUser`, and `GradePortalPwd` are all trimmed and nonblank, left-joins optional secondary credentials from `dbo.tblStudentGradePortalSecondary`, then merges the remaining Neon-owned runner configuration.
+3. Python uses Playwright to collect a bounded number of students concurrently, controlled by `scraper.runner.MAX_CONCURRENT_GRADE_WORKERS`, while posting completed results serially and immediately.
+4. Rust rechecks CRM eligibility and atomically records the audit result and canonical `students_grades_20262027` update in Neon.
+5. The dashboard independently selects the runnable CRM roster, batch-reads canonical Neon state, and merges strictly by `crmstudentid`.
+6. In dev mode, the overview reads `grade_scrape_jobs` and polls `/api/jobs` every 15 seconds. It cannot start, heartbeat, complete, or fail jobs.
 
-Agenda collection follows the same dashboard job pattern through `scraper.agenda`.
+## Agenda Collection Contract
+
+`scraper.agenda` preserves the two CRM credential positions as fixed agenda
+slots: Portal 1 is always primary, and Portal 2 is always secondary. It never
+sorts or otherwise reassigns slots based on portal type. Each slot is audited
+and persisted independently in `primary_agenda` or `secondary_agenda`:
+
+```json
+{
+  "portal": "canvas",
+  "weeks": {
+    "2026-08-10": {
+      "Example class": {
+        "missing": [],
+        "due": [{"title": "Example work", "dueDate": "2026-08-14", "dueTime": null}]
+      }
+    }
+  }
+}
+```
+
+`portal` is a safe lowercase registry key or `null`; it is not a portal URL.
+`weeks` is always an object. Week keys are canonical ISO Monday dates calculated from each usable
+assignment due date. Class buckets always contain `missing` and `due` arrays.
+Rows contain the title, normalized due date, and normalized local time (or
+`null`); undated work is omitted because it cannot be placed in a week.
+
+Canvas, ParentVUE, and Google Classroom are agenda-capable. Each collector
+returns both missing and upcoming/due work in one invocation; the agenda CLI
+does not select a single status. An entirely unconfigured slot is cleared and
+records `not_configured`. Partial credentials record `configuration_missing`
+for their specific slot. Unsupported or parserless portals produce a neutral
+empty slot, not a synchronization failure. A capable collector with no dated
+assignments is a successful blank slot.
+
+Within a slot, normalized rows are grouped by Monday week and class, with
+missing and due status buckets. Identical rows from the same portal may be
+collapsed by stable source identity (with missing taking precedence over due),
+but rows are never deduplicated, merged, or reordered across slots.
+
+The Rust result boundary recursively counts every JSON object, array, and
+primitive value and accepts at most 1,000 nodes. Normalization therefore caps
+each slot's `weeks` subtree at 497 nodes.
+
+Each audited result targets exactly one channel. Grade status may be `never`,
+`synced`, `bad_login`, `no_grades`, or `scrape_failed`. Agenda status may be
+`never`, `not_configured`, `synced`, `bad_login`, `configuration_missing`,
+`scrape_failed`, or `unsupported_portal`. Rust rejects failure codes that do not belong to the
+result channel. Job-level failures use the separate process codes
+`lease_renewal_failed`, `lease_expired`, `neon_unavailable`,
+`result_post_failed`, `runner_failed`, and `agenda_runner_failed`.
+The cap is applied separately to both slots, so a large `agenda1` cannot reduce
+the capacity available to `agenda2`. Rows are retained from the already
+canonical order (week, case-insensitive class, missing before due, then
+date/time/title), and no empty class or week scaffolding is emitted when its
+first row cannot fit. This is bounded current-state storage: a sufficiently
+large portal response is deterministically truncated rather than rejected by
+the database boundary.
+
+The runner starts workers only for configured agenda-capable slots and uses
+separate browser pages. It posts one `agenda_success` bundle only after every
+started worker succeeds. If any such worker fails during login, request,
+parsing, or normalization, it posts a controlled failure rather than a partial
+bundle; the database boundary leaves the prior stored snapshot in place.
+
+The snapshot must never include credentials, portal URLs, student identifiers,
+cookies, tokens, session values, or raw portal responses. Logs and controlled
+failure outcomes likewise contain only safe codes and aggregate context.
 
 ## Dashboard Architecture
 
-`ui.wsgi` imports the Flask app and registers `ui.routes`.
+`ui.wsgi` imports the Flask app and registers `ui.routes`. The web application is intentionally public and contains no application authentication, sessions, CSRF state, forms, or write routes.
 
-Key routes:
+Routes:
 
-- `/` is the protected handoff route. Normal access requires `X-Franchise` and `X-Internal-Key`; without valid headers users are redirected to `/login`. Dev access can use `DEV_BYPASS=1`.
-- `/login` authenticates against CRM using `ui/auth.py` (`dbo.usp_login`) and starts a franchise-scoped CRM session.
-- `/logout` clears the session and ends dashboard access.
-- `/health` shows active franchises, scraper health, grouped errors, bad logins, malformed inputs, nonconfigured portals, and active jobs.
-- `/franchise/<franchise_id>` shows the franchise student list, grade snapshots, low/high grades, standing, status, search/sort, edit/delete actions, and franchise-wide grade/agenda refresh buttons.
-- `/franchise/<franchise_id>/student/<student_id>` shows one student's current snapshot, agenda, grade history table, and heatmap tab.
-- `/status/<job_id>` returns progress JSON for grade and agenda progress bars.
+- `GET /` shows all runnable franchises plus active and 20 recent jobs only when `PYTHON_ENV=dev`; otherwise it returns a restricted page with HTTP 200 for deployment health checks without querying either database.
+- `GET /health` and `GET /login` redirect to `/` for old bookmarks and inherit its environment gate.
+- `GET /franchise/<franchise_id>` shows CRM-runnable students with grade filters.
+- `GET /franchise/<franchise_id>/student/<crmstudentid>` shows grade, agenda, history, and heatmap data. Ineligible or missing students return 404.
+- `GET /api/jobs` returns a fixed job shape only in dev mode; otherwise it returns 403 without querying Neon.
 
-Job IDs are derived from dashboard scope:
+Outside dev mode, exact franchise and student URLs remain read-only and accessible. Their headers omit the overview link so the root page does not provide franchise discovery.
 
-- Franchise grades: `<franchise_id>`
-- Franchise agenda: `<franchise_id>_agenda`
-- Student grades: `<franchise_id>_<student_id>`
-- Student agenda: `<franchise_id>_<student_id>_agenda`
+POST requests to dashboard pages return 405; retired logout and status paths return 404. Responses use `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`, and `X-Content-Type-Options: nosniff`.
+
+The CRM dashboard query selects only student ID, franchise, name, grade, and primary portal URL. Credential columns occur only in eligibility predicates. Neon queries never select alternate credentials, GPS answers, job leases, runner IDs, result payloads, or event payloads. Every Neon dashboard transaction begins with `SET TRANSACTION READ ONLY`.
 
 ## Configuration
 
-The app uses `.env` through `python-dotenv`.
+The app reads `.env` through `python-dotenv` where loaded by the entrypoint/runtime.
 
-Database:
+Shared CRM/Neon settings:
 
-- `GRADES_NEON_URL`, or all of:
-- `GRADES_NEON_HOST`
-- `GRADES_NEON_DB`
-- `GRADES_NEON_USER`
-- `GRADES_NEON_PASSWORD`
-- `GRADES_NEON_PORT`
+- `CRMSrvAddress`, `CRMSrvDb` (or `CRMSrvDbQA`), `CRMSrvUs`, `CRMSrvPs`
+- `CRM_TRUST_SERVER_CERTIFICATE`
+- `GRADES_NEON_URL`, or `GRADES_NEON_HOST`, `GRADES_NEON_DB`, `GRADES_NEON_USER`, `GRADES_NEON_PASSWORD`, and `GRADES_NEON_PORT`
+- Legacy `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and `PGPORT` remain supported by `db_core.py`.
 
-`GRADES_NEON_URL` is preferred when set. Otherwise, the app builds the
-Postgres connection from the component variables above. Legacy `PG*` variables
-are intentionally ignored because Replit may overwrite them.
+Runner-only settings:
 
-Dashboard:
+- `GRADE_DB_CLI_PATH`
+- `GRADE_RUNNER_ID`
+- `GRADE_JOB_LEASE_SECONDS`
+- `PYTHON_ENV=dev` enables the web overview and jobs endpoint and controls development notification behavior
+- `SLACK_WEBHOOK_URL` and `SLACK_NOTIFY_IN_DEV`
+- `OPENAI_API_KEY` and `OPENAI_MODEL` for GPT-assisted portal utilities
 
-- `INTERNAL_KEY` gates production-style dashboard entry.
-- `CRMSrvAddress`, `CRMSrvDb`, `CRMSrvDbQA`, `CRMSrvUs`, `CRMSrvPs` configure CRM authentication. `CRMSrvDb` is preferred when set, with `CRMSrvDbQA` as fallback.
-- `CRM_TRUST_SERVER_CERTIFICATE` controls CRM certificate trust (default `no`). Acceptable true values are `1`, `true`, and `yes` (case-insensitive). Other values default to `no`.
-- CRM SQL Server traffic is encrypted. The value of `CRM_TRUST_SERVER_CERTIFICATE` controls `TrustServerCertificate`.
-- `SESSION_SECRET` signs Flask sessions. Outside `DEV_BYPASS`, use a strong non-default value of at least 32 characters.
-- `DEV_BYPASS=1` opens local dashboard access without the internal handoff headers.
-
-nginx forwards client IP/protocol headers and Flask applies trusted proxy handling for login rate limiting and deployment-aware secure cookies.
-
-Notifications and utilities:
-
-- `PYTHON_ENV`
-- `SLACK_WEBHOOK_URL`
-- `SLACK_NOTIFY_IN_DEV`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+`SESSION_SECRET`, `INTERNAL_KEY`, `DEV_BYPASS`, login headers, and CRM user-login credentials are not dashboard settings.
 
 ## Run
 
-Install dependencies:
+Install dependencies and Playwright browsers:
 
 ```bash
 uv sync
@@ -104,54 +160,53 @@ uv run playwright install
 Run the local dashboard:
 
 ```bash
-DEV_BYPASS=1 SESSION_SECRET=dev-session-secret \
 uv run flask --app ui.wsgi:app run --host 127.0.0.1 --port 8080
 ```
 
-Run grade collection:
+Run grade or agenda collection:
 
 ```bash
-uv run python -m scraper.runner
 uv run python -m scraper.runner --franchise-id 57
 uv run python -m scraper.runner --franchise-id 57 --student-id 123
-```
-
-Run agenda collection:
-
-```bash
 uv run python -m scraper.agenda --franchise-id 57
 ```
 
-## Add a Portal
+For UI-only agenda verification, use the fixture-backed preview:
 
-1. Create or update `scraper/portals/<name>.py`.
-2. Register the portal key in `scraper/portals/__init__.py`.
-3. Confirm `scraper/portals/utils.py` maps the stored portal URL to that key.
-4. Add fixture-backed tests when parsing logic changes.
-5. Run focused tests and at least one integration path for the affected franchise when credentials are available.
+```bash
+uv run python tests/support/student_agenda_preview.py --port 8765
+```
+
+It binds only to localhost and serves fictional data. It never imports
+dashboard routes, opens a database, or uses live data; do not replace its
+fixture with authorized student information.
+
+Replit/nginx uses `ui/start.sh`: Gunicorn binds the private upstream at `127.0.0.1:3000`, and nginx exposes port `8080`.
+
+## Testing
+
+```bash
+uv run pytest -q
+uv run ruff check .
+node --check ui/static/react-dashboard.js
+uv run pytest -q --run-integration
+```
+
+Integration tests require explicit opt-in and may access live services. Agentic implementation and normal unit tests must use fakes and must not execute SQL against live CRM or Neon.
 
 ## Troubleshooting
 
 | Symptom | Likely fix |
 | --- | --- |
-| `ModuleNotFoundError: utils` | Run commands from the repository root so top-level packages resolve. |
-| Dashboard returns 403 | In normal mode, include `X-Franchise` and `X-Internal-Key`; for local development, set `DEV_BYPASS=1`. |
-| Dashboard has no students | Check Postgres env vars and confirm the `student` table has active rows for the franchise. |
-| Progress bar disappears | `/status/<job_id>` returned 404, usually because the job finished, was never started, or the process restarted. |
-| CAPTCHA screenshot appears | Inspect `captcha.png`; re-run the student or update the portal flow if the site changed. |
+| Dashboard returns 503 | Confirm Replit has the CRM and Neon secrets and can reach both databases. Dependency details are intentionally hidden from HTTP responses. |
+| Dashboard shows no students | Confirm CRM has nonblank `GradePortalURL`, `GradePortalUser`, and `GradePortalPwd`; only runnable students are visible. |
+| Student history exists but is hidden | The CRM student is currently ineligible or outside the requested franchise. Neon history is retained, not deleted. |
+| Jobs do not update | Confirm the runner is writing `grade_scrape_jobs` and that `/api/jobs` returns shaped progress. |
+| `grade-db executable is unavailable` | Build the Rust crate for Windows or set `GRADE_DB_CLI_PATH`. |
 | Portal iframe or selector never loads | The portal layout likely changed; update the portal engine wait condition or selector. |
-
-## Tests
-
-```bash
-uv run pytest -q
-uv run pytest -q --run-integration
-TEST_FRANCHISE_ID=19 uv run pytest -q --run-integration
-```
 
 ## Pending Enhancements
 
-- More consistent logging across CLI runs, dashboard jobs, and portal engines.
-- Cleaner error propagation from retries into dashboard-visible status fields.
-- Additional portal coverage and fixture tests.
-- More robust dashboard job persistence if the web process restarts during a refresh.
+- Provision a dedicated least-privilege Neon reader for the public Replit deployment.
+- Continue adding portal engines and fixture coverage.
+- Keep error codes sanitized and consistent between runners and dashboard presentation.
