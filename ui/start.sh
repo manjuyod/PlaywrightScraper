@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export ODBCSYSINI="${ODBCSYSINI:-$HOME/.odbc}"
+if [[ "$(uname -s)" == "Linux" ]]; then
+    export ODBCSYSINI="${ODBCSYSINI:-$HOME/.odbc}"
+    bash setup_odbc.sh
+fi
 
-bash setup_odbc.sh
 mkdir -p ui/tmp
 
 # stop old nginx if needed
@@ -15,4 +17,4 @@ uv run gunicorn --workers "${WEB_CONCURRENCY:-1}" --bind 127.0.0.1:3000 ui.wsgi:
 sleep 2
 
 # start nginx in foreground using config
-exec nginx -p "$PWD" -c ui/nginx.conf -g 'daemon off;'
+exec nginx -p "$PWD" -e /tmp/nginx_error.log -c ui/nginx.conf -g 'daemon off;'

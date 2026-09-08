@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from collections.abc import Iterable
 
 from bs4 import BeautifulSoup, Tag
 
-from . import LoginError, register_portal
-from .base import PortalEngine, PlaywrightTimeout
+from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
 from .utils import canonicalize_course_title, canonicalize_grade
 
 
@@ -27,8 +26,10 @@ _GRADE_LABEL_RE = re.compile(r"\b(current\s+grade|overall\s+grade|grade|average|
 _COURSE_HEADER_RE = re.compile(r"\b(course|class)\b", re.I)
 
 
-@register_portal("allenisd")
 class AllenISD(PortalEngine):
+    portal_key = "allenisd"
+    url_patterns = ("portal.allenisd.org",)
+
     async def login(self, first_name: str | None = None) -> None:
         del first_name
 
@@ -66,7 +67,7 @@ class AllenISD(PortalEngine):
         await skyward_page.wait_for_timeout(4000)
         self.page = skyward_page
 
-    async def fetch_grades(self) -> Dict[str, Any]:
+    async def fetch_grades(self) -> GradeMap:
         await self.page.get_by_role("menuitem", name="Gradebook").click()
         await self.page.wait_for_load_state("domcontentloaded")
         await self.page.wait_for_timeout(2500)
@@ -83,7 +84,7 @@ class AllenISD(PortalEngine):
         parsed = self.parse_gradebook_html(html)
         if not parsed:
             raise LoginError("AllenISD gradebook loaded but no course grades were parsed")
-        return {"parsed_grades": parsed}
+        return parsed
 
     def _login_start_url(self) -> str:
         if self.login_url and "portal.allenisd.org" in self.login_url.lower():
@@ -112,12 +113,12 @@ class AllenISD(PortalEngine):
             return ""
 
     @classmethod
-    def parse_gradebook_html(cls, html: str) -> Dict[str, float]:
+    def parse_gradebook_html(cls, html: str) -> GradeMap:
         soup = BeautifulSoup(html, "html.parser")
         for elem in soup.select("script, style, noscript"):
             elem.decompose()
 
-        parsed: Dict[str, float] = {}
+        parsed: GradeMap = {}
         for table in soup.select("table"):
             cls._parse_header_table(table, parsed)
             cls._parse_section_table(table, parsed)
@@ -125,7 +126,7 @@ class AllenISD(PortalEngine):
         return parsed
 
     @classmethod
-    def _parse_header_table(cls, table: Tag, parsed: Dict[str, float]) -> None:
+    def _parse_header_table(cls, table: Tag, parsed: GradeMap) -> None:
         rows = table.select("tr")
         if not rows:
             return
@@ -143,7 +144,7 @@ class AllenISD(PortalEngine):
             cls._add_grade(parsed, cells[course_idx], cells[grade_idx])
 
     @classmethod
-    def _parse_section_table(cls, table: Tag, parsed: Dict[str, float]) -> None:
+    def _parse_section_table(cls, table: Tag, parsed: GradeMap) -> None:
         current_course: str | None = None
         for row in table.select("tr"):
             cells = cls._row_cells(row)
@@ -158,7 +159,7 @@ class AllenISD(PortalEngine):
                     parsed[current_course] = grade
 
     @classmethod
-    def _parse_generic_rows(cls, table: Tag, parsed: Dict[str, float]) -> None:
+    def _parse_generic_rows(cls, table: Tag, parsed: GradeMap) -> None:
         for row in table.select("tr"):
             cells = cls._row_cells(row)
             if len(cells) < 2:
@@ -183,7 +184,7 @@ class AllenISD(PortalEngine):
         return None
 
     @classmethod
-    def _add_grade(cls, parsed: Dict[str, float], course_text: str, grade_text: str) -> None:
+    def _add_grade(cls, parsed: GradeMap, course_text: str, grade_text: str) -> None:
         course = cls._normalize_course(course_text)
         grade = cls._grade_from_text(grade_text)
         if course and grade is not None:
@@ -200,7 +201,7 @@ class AllenISD(PortalEngine):
         return canonicalize_course_title(text)
 
     @classmethod
-    def _grade_from_cells(cls, cells: Any) -> float | None:
+    def _grade_from_cells(cls, cells: Iterable[str]) -> float | None:
         for text in cells:
             grade = cls._grade_from_text(text)
             if grade is not None:

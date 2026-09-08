@@ -1,279 +1,222 @@
 # -*- coding: utf-8 -*-
-# builtins
+from __future__ import annotations
+
 import argparse
 import asyncio
-import json
+import logging
 import os
 import pathlib
-import pprint
-import queue
 import random
 import sys
 import textwrap
+import traceback
 from time import time
-from traceback import format_exception_only
-from typing import Dict
+from typing import Any, Mapping
 
-# db
-from db_core import get_connection
 from dotenv import load_dotenv
-from sqlalchemy.engine import Connection
-from sqlalchemy.exc import SQLAlchemyError
-
-# external
 from playwright.async_api import Browser, async_playwright
 
-from scraper.notif import Severity, send_notification_to_slack
-from scraper.portals import LoginError, get_portal, managed_portals
+from scraper.db_cli import (
+    GradeDbClient,
+    GradeDbError,
+    GradeDbLeaseExpired,
+    GradeDbUnavailable,
+)
+from scraper.config.notifications import Severity, send_notification_to_slack
+from scraper.config.logging import bind_log_context, configure_logging, reset_log_context
+from scraper.portals import LoginError, get_portal
 from scraper.portals.utils import get_portal_key_from_url
 
 load_dotenv()
-print("[runner] module import OK", flush=True)
 
+HEARTBEAT_INTERVAL_SECONDS = 60.0
+MAX_CONCURRENT_GRADE_WORKERS = 1
+logger = logging.getLogger("scraper.runner")
+StudentContext = dict[str, Any]
+RawStudentContext = Mapping[str, Any]
 
-def _debug_env():
-    print("[runner] CWD:", os.getcwd(), flush=True)
-    import sys as _sys
+class RunnerFatalError(RuntimeError):
+    code: str
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(f"grade job failed: {code}")
 
-    print("[runner] Python:", _sys.executable, _sys.version, flush=True)
-    print("[runner] ENV (Prod/Dev):", os.getenv("PYTHON_ENV"), flush=True)
-    print(
-        "[runner] ENV GRADES_NEON_URL set:",
-        bool(os.getenv("GRADES_NEON_URL")),
-        flush=True,
-    )
-    print("[runner] ENV GRADES_NEON_HOST:", os.getenv("GRADES_NEON_HOST"), flush=True)
-    print("[runner] ENV GRADES_NEON_DB:", os.getenv("GRADES_NEON_DB"), flush=True)
-    print(
-        "[runner] ENV GRADES_NEON_USER set:",
-        bool(os.getenv("GRADES_NEON_USER")),
-        flush=True,
-    )
-    print("[runner] ENV GRADES_NEON_PORT:", os.getenv("GRADES_NEON_PORT"), flush=True)
-    print(
-        "[runner] ENV GRADES_NEON_PASSWORD set:",
-        bool(os.getenv("GRADES_NEON_PASSWORD")),
-        flush=True,
-    )
-
-
-def db_conn() -> Connection:
-    print("[runner] db_conn(): creating connection...", flush=True)
-    return get_connection()
-
-
-def _load_student_auth_map(conn: Connection) -> Dict[int, dict]:
-    """
-    Returns {StudentID -> {"type": AuthType, "answers": list[str]}}
-    from student_auth where each row stores JSON or CSV-like in answers.
-    """
-    rows = conn.exec_driver_sql(
-        "SELECT studentid, authtype, answers FROM student_auth"
-    ).mappings().all()
-    out: Dict[int, dict] = {}
-    for row in rows:
-        sid = row["studentid"]
-        auth_type = row["authtype"]
-        answers_raw = row["answers"]
-        answers_raw = (answers_raw or "").strip("{}")
-        answers = [a.strip('" ').strip() for a in answers_raw.split(",") if a.strip()]
-        out[sid] = {"type": auth_type, "answers": answers}
-    return out
-
-
-def get_students_from_db(
-    franchise_id: int | None = None,
-    student_id: int | None = None,
-    portal: str | None = None,
-    status: str | None = None,
-):
-    """Return a list of student dicts to scrape.
-
-    If student_id is provided, it takes precedence over franchise_id.
-    If `portal` is provided, we filter in Python (post auto-detection) so rows with portal=NULL aren't dropped.
-    """
-    print(
-        f"[runner] get_students_from_db(): fid={franchise_id} sid={student_id} portal={portal} status={status}",
-        flush=True,
-    )
-    students_list = []
+async def _send_slack_notification(severity: Severity, message: str) -> None:
+    if not os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
+        return
     try:
-        with db_conn() as conn:
-            print("[runner] Successfully connected to database.", flush=True)
-            student_auth_map = _load_student_auth_map(conn)
-
-            base = """
-                SELECT ID, FirstName, P1Username, P1Password, Portal1, p2username, p2password, portal2, portal,
-                       YearStart, YearEnd, PasswordGood, FranchiseID, track_agenda, status
-                FROM Student
-            """
-            conditions = [
-                "PasswordGood = 1",
-                "(YearStart IS NULL OR YearStart = '' OR date(YearStart) <= CURRENT_DATE)",
-                "(YearEnd IS NULL OR YearEnd = '' OR CURRENT_DATE <= date(YearEnd))",
-            ]
-            params: list = []
-
-            if student_id is not None:
-                conditions.append("ID = %s")
-                params.append(student_id)
-            if franchise_id is not None:
-                conditions.append("FranchiseID = %s")
-                params.append(franchise_id)
-            if status is not None:
-                conditions.append("status = %s")
-                params.append(status)
-
-            query = base + " WHERE " + " AND ".join(conditions)
-            print("[runner] SQL:", query, flush=True)
-            print("[runner] SQL params:", params, flush=True)
-            rows = conn.exec_driver_sql(query, tuple(params)).mappings().all()
-
-            want_portal = (portal or "").strip().lower() or None
-
-            print(f"[runner] fetched {len(rows)} Student rows", flush=True)
-            for row in rows:
-                login_url = row["portal1"]
-                portal_raw = row["portal"]
-                portal_key = (portal_raw or "").strip().lower()
-                if not portal_key:
-                    portal_key = get_portal_key_from_url(login_url) or ""
-
-                if want_portal and portal_key != want_portal:
-                    continue
-
-                auth = student_auth_map.get(row["id"])
-                auth_images = (
-                    auth["answers"]
-                    if auth and auth["type"] == "gps_pictograph"
-                    else None
-                )
-
-                if not portal_key:
-                    print(
-                        f"[WARN] Skipping ID={row['id']}: missing portal (login_url={login_url!r})",
-                        flush=True,
-                    )
-                    bad_login(row["id"])
-                    continue
-
-                students_list.append(
-                    {
-                        "db_id": row["id"],
-                        "student_name": row["firstname"],
-                        "login_url": login_url,
-                        "id": row["p1username"],
-                        "password": row["p1password"],
-                        "alt_login_url": row["portal2"],
-                        "alt_id": row["p2username"],
-                        "alt_password": row["p2password"],
-                        "portal": portal_key,
-                        "auth_images": auth_images,
-                        "track_agenda": row["track_agenda"],
-                        "status": row["status"],
-                        "passwordgood": row["passwordgood"],
-                    }
-                )
-
-    except SQLAlchemyError as e:
-        print(f"Database error: {e}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    return students_list
+        _ = await asyncio.to_thread(send_notification_to_slack, severity, message)
+    except Exception as exc:
+        logger.error(
+            "runner.notification.failed",
+            extra={"exception_type": type(exc).__name__},
+        )
 
 
-def filter_students(
-    _students: list[dict[str, str]], key: str, value
-) -> list[dict[str, str]]:
+def _debug_env() -> None:
+    logger.debug(
+        "runner.environment",
+        extra={
+            "cwd": os.getcwd(),
+            "python_executable": sys.executable,
+            "python_version": sys.version,
+            "environment": os.getenv("PYTHON_ENV"),
+            "grade_db_cli_configured": bool(os.getenv("GRADE_DB_CLI_PATH")),
+        },
+    )
+
+
+def student_from_context(context: RawStudentContext) -> StudentContext:
+    portal = str(context.get("portal") or "").strip().lower()
+    if not portal:
+        portal = get_portal_key_from_url(context.get("portal1") or "")
+    raw_known_course_titles = context.get("known_course_titles")
+    known_course_titles = (
+        raw_known_course_titles
+        if isinstance(raw_known_course_titles, list)
+        else []
+    )
+    return {
+        "db_id": int(context["crmstudentid"]),
+        "student_name": str(context.get("firstname") or ""),
+        "login_url": context.get("portal1"),
+        "id": context.get("p1username"),
+        "password": context.get("p1password"),
+        "alt_login_url": context.get("portal2"),
+        "alt_id": context.get("p2username"),
+        "alt_password": context.get("p2password"),
+        "portal": portal,
+        "auth_images": list(context.get("auth_images") or []),
+        "auth_type": context.get("auth_type"),
+        "track_agenda": bool(context.get("track_agenda")),
+        "known_course_titles": [
+            title
+            for title in known_course_titles
+            if isinstance(title, str) and title.strip()
+        ],
+        "grade_status": context.get("grade_status"),
+        "passwordgood": context.get("passwordgood"),
+        "franchise_id": context.get("franchiseid"),
+        "grade": context.get("grade"),
+    }
+
+
+# Compatibility for internal callers written before this became a shared boundary helper.
+_student_from_context = student_from_context
+
+
+def _filter_contexts(
+    contexts: list[dict[str, Any]],
+    *,
+    portal: str | None,
+    status: str | None,
+) -> list[dict[str, Any]]:
+    wanted_portal = (portal or "").strip().lower()
+    wanted_status = (status or "").strip().lower()
     return [
-        student
-        for student in _students
-        if key in student.keys() and value in student.values()
+        context
+        for context in contexts
+        if (not wanted_portal or context.get("portal") == wanted_portal)
+        and (
+            not wanted_status
+            or str(context.get("grade_status") or "").strip().lower() == wanted_status
+        )
     ]
-
-
-def students(
-    franchise_id: int | None = None,
-    student_id: int | None = None,
-    portal: str | None = None,
-    status: str | None = None,
+    
+async def scrape_one(
+    browser: Browser,
+    student: dict[str, Any],
+    *,
+    login_only: bool = False,
+    diagnostic: bool = False,
 ):
-    return get_students_from_db(
-        franchise_id=franchise_id, student_id=student_id, portal=portal, status=status
-    )
-
-
-def bad_login(student_id: int):
-    """Set PasswordGood=0 for a student in the database."""
-    print(
-        f"[runner] bad_login(): setting PasswordGood=0 for student ID={student_id}",
-        flush=True,
-    )
-    with db_conn() as conn:
-        conn.exec_driver_sql("UPDATE Student SET PasswordGood = 0 WHERE ID = %s", (student_id,))
-        conn.commit()
-
-
-async def scrape_one(browser: Browser, student: dict):
-    """Scrape a single student using the appropriate portal engine."""
+    """Log in and optionally collect grades without database reads or writes."""
     await asyncio.sleep(random.uniform(0, 1.0))
     context = await browser.new_context()
-
     page = await context.new_page()
     page.set_default_timeout(15_000)
     page.set_default_navigation_timeout(15_000)
-
-    Engine = get_portal(student["portal"])
-    scraper = Engine(
-        page,
-        student["id"],
-        student["password"],
-        student_name=student.get("student_name"),
-        login_url=student["login_url"],
-        alt_portal_url=student.get("alt_login_url"),
-    )
-
-    if student.get("auth_images") and student["portal"] == "gps":
-        print(f"Setting auth_images for student ID={student['db_id']}: {student['auth_images']}", flush=True)
-        setattr(scraper, "auth_images", student["auth_images"])
+    log_context = {
+        "portal": str(student["portal"]),
+        "student_record_id": int(student["db_id"]),
+    }
+    context_token = bind_log_context(**log_context)
+    logger.info("portal.scrape.started", extra=log_context)
 
     try:
-        print(f"Starting login for {student['id']}", flush=True)
+        engine = get_portal(student["portal"])
+        scraper = engine(
+            page,
+            student["id"],
+            student["password"],
+            student_name=student.get("student_name"),
+            login_url=student["login_url"],
+            alt_portal_url=student.get("alt_login_url"),
+            alt_student_id=student.get("alt_id"),
+            alt_password=student.get("alt_password"),
+        )
+        if student.get("auth_images") and student["portal"] == "gps":
+            setattr(scraper, "auth_images", student["auth_images"])
+
         try:
             if not scraper.sid or not scraper.pw:
-                raise ValueError(
-                    f"Invalid login credentials for ID={student['db_id']};\nMissing username or password"
-                )
+                raise LoginError("portal login rejected")
             await scraper.login(first_name=student.get("student_name"))
-        except ValueError:
-            bad_login(int(student["db_id"]))
-            raise
-        except Exception as e:
-            bad_login(int(student["db_id"]))
-            print(
-                f"[RUNNER] Invalid credentials for ID={student['db_id']}; PasswordGood set to 0"
+        except LoginError:
+            logger.warning("portal.login.rejected", extra=log_context)
+            raise LoginError("portal login rejected") from None
+        except Exception as exc:
+            logger.error(
+                "portal.login.failed",
+                extra={**log_context, "exception_type": type(exc).__name__},
             )
-            raise LoginError(
-                f"{e}\nLikely bad username/password for student"
-            )
-        print(f"Login successful for {student['id']}, fetching grades…", flush=True)
+            if diagnostic:
+                raise
+            raise RuntimeError("portal login failed") from None
 
-        grades = await scraper.fetch_grades()
+        logger.info("portal.login.succeeded", extra=log_context)
+        if login_only:
+            return {
+                "db_id": student["db_id"],
+                "id": student["id"],
+                "parsed_grades": None,
+            }
 
-        if isinstance(grades, dict) and "parsed_grades" in grades:
-            parsed = grades["parsed_grades"]
-        else:
-            parsed = grades
-
-        if isinstance(grades, dict) and "raw_html" in grades:
-            out_dir = pathlib.Path("output/phase1totuples")
-            out_dir.mkdir(parents=True, exist_ok=True)
-            html_file = out_dir / f"{student['id']}_grades.html"
-            html_file.write_text(grades["raw_html"], encoding="utf-8")
-
-        return {"db_id": student["db_id"], "id": student["id"], "parsed_grades": parsed}
+        parsed = await scraper.fetch_grades()
+        result = {
+            "db_id": student["db_id"],
+            "id": student["id"],
+            "parsed_grades": parsed,
+        }
+        logger.info(
+            "portal.scrape.completed",
+            extra={
+                **log_context,
+                "course_count": len(parsed),
+            },
+        )
+        return result
+    except Exception as exc:
+        if diagnostic:
+            traceback.print_exception(exc)
+            logger.warning("portal.diagnostic.paused", extra=log_context)
+            try:
+                await page.pause()
+            except Exception as pause_exc:
+                logger.warning(
+                    "portal.diagnostic.pause_unavailable",
+                    extra={
+                        **log_context,
+                        "exception_type": type(pause_exc).__name__,
+                    },
+                )
+        raise
     finally:
-        await page.close()
-        await context.close()
+        try:
+            await page.close()
+            await context.close()
+        finally:
+            reset_log_context(context_token)
 
 
 def project_root() -> pathlib.Path:
@@ -284,9 +227,274 @@ def project_root() -> pathlib.Path:
     return pathlib.Path.cwd()
 
 
-out_dir = pathlib.Path("output/phase1totuples")
-out_dir.mkdir(parents=True, exist_ok=True)
-out_file = project_root() / out_dir / "grades.jsonl"
+def _new_progress(total: int) -> dict[str, int]:
+    return {"total": total, "attempted": 0, "success": 0, "errors": 0}
+
+
+def _advance_progress(progress: dict[str, int], *, success: bool) -> None:
+    progress["attempted"] += 1
+    if success:
+        progress["success"] += 1
+    else:
+        progress["errors"] += 1
+
+
+async def _process_grade_students(
+    client: GradeDbClient,
+    session: Mapping[str, Any],
+    browser: Browser,
+    student_list: list[dict[str, Any]],
+    progress: dict[str, int],
+    lease_failed: asyncio.Event,
+) -> str | None:
+    if not student_list:
+        return None
+    if lease_failed.is_set():
+        return "lease_renewal_failed"
+
+    worker_count = min(MAX_CONCURRENT_GRADE_WORKERS, len(student_list))
+    student_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    result_queue: asyncio.Queue[
+        tuple[
+            dict[str, Any],
+            dict[str, Any],
+            bool,
+            asyncio.Future[None],
+        ]
+    ] = asyncio.Queue()
+    for student in student_list:
+        student_queue.put_nowait(student)
+    for _ in range(worker_count):
+        student_queue.put_nowait(None)
+
+    async def collect_students() -> None:
+        while True:
+            student = await student_queue.get()
+            try:
+                if student is None or lease_failed.is_set():
+                    return
+                try:
+                    result = await scrape_one(browser, student)
+                    parsed_grades = result.get("parsed_grades")
+                    if isinstance(parsed_grades, dict) and parsed_grades:
+                        outcome = {
+                            "kind": "grade_success",
+                            "parsed_grades": parsed_grades,
+                        }
+                        scrape_succeeded = True
+                    else:
+                        outcome = {
+                            "kind": "failure",
+                            "channel": "grade",
+                            "code": "no_grades",
+                            "passwordgood": None,
+                        }
+                        scrape_succeeded = False
+                except LoginError:
+                    outcome = {
+                        "kind": "failure",
+                        "channel": "grade",
+                        "code": "bad_login",
+                        "passwordgood": False,
+                    }
+                    scrape_succeeded = False
+                except Exception as exc:
+                    logger.error(
+                        "portal.scrape.failed",
+                        extra={
+                            "portal": student["portal"],
+                            "student_record_id": student["db_id"],
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+                    outcome = {
+                        "kind": "failure",
+                        "channel": "grade",
+                        "code": "scrape_failed",
+                        "passwordgood": None,
+                    }
+                    scrape_succeeded = False
+
+                acknowledged = asyncio.get_running_loop().create_future()
+                await result_queue.put(
+                    (student, outcome, scrape_succeeded, acknowledged)
+                )
+                await acknowledged
+            finally:
+                student_queue.task_done()
+
+    workers = {asyncio.create_task(collect_students()) for _ in range(worker_count)}
+    posted_results = 0
+    try:
+        while posted_results < len(student_list):
+            if lease_failed.is_set():
+                return "lease_renewal_failed"
+            try:
+                (
+                    student,
+                    outcome,
+                    scrape_succeeded,
+                    acknowledged,
+                ) = await asyncio.wait_for(result_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+
+            try:
+                if lease_failed.is_set():
+                    return "lease_renewal_failed"
+                try:
+                    response = await asyncio.to_thread(
+                        client.post_result,
+                        job_id=session["job_id"],
+                        lease_token=session["lease_token"],
+                        crmstudentid=student["db_id"],
+                        outcome=outcome,
+                    )
+                except GradeDbLeaseExpired:
+                    return "lease_expired"
+                except GradeDbUnavailable:
+                    return "neon_unavailable"
+                except GradeDbError:
+                    return "result_post_failed"
+
+                applied_success = scrape_succeeded and bool(response.get("applied"))
+                _advance_progress(progress, success=applied_success)
+                posted_results += 1
+                acknowledged.set_result(None)
+            finally:
+                result_queue.task_done()
+
+        await asyncio.gather(*workers)
+        return None
+    finally:
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+
+
+async def _heartbeat_loop(
+    client: GradeDbClient,
+    session: Mapping[str, Any],
+    progress: dict[str, int],
+    stop: asyncio.Event,
+    lease_failed: asyncio.Event,
+) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_INTERVAL_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        try:
+            await asyncio.to_thread(
+                client.heartbeat,
+                job_id=session["job_id"],
+                lease_token=session["lease_token"],
+                progress=progress.copy(),
+            )
+        except GradeDbError:
+            lease_failed.set()
+            return
+
+
+async def _run_grade_job(
+    franchise_id: int | None = None,
+    student_id: int | None = None,
+    portal: str | None = None,
+    status: str | None = None,
+):
+    client = GradeDbClient()
+    session = await asyncio.to_thread(
+        client.start_job,
+        kind="grade",
+        franchise_id=franchise_id,
+        student_id=student_id,
+    )
+    contexts = [student_from_context(row) for row in session.get("students", [])]
+    student_list = _filter_contexts(contexts, portal=portal, status=status)
+    progress = _new_progress(len(student_list))
+
+    if not student_list:
+        await asyncio.to_thread(
+            client.complete_job,
+            job_id=session["job_id"],
+            lease_token=session["lease_token"],
+            progress=progress,
+        )
+        return progress
+
+    stop_heartbeat = asyncio.Event()
+    lease_failed = asyncio.Event()
+    heartbeat = asyncio.create_task(
+        _heartbeat_loop(client, session, progress, stop_heartbeat, lease_failed)
+    )
+    begin_time = time()
+    failure_code: str | None = None
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            try:
+                failure_code = await _process_grade_students(
+                    client,
+                    session,
+                    browser,
+                    student_list,
+                    progress,
+                    lease_failed,
+                )
+            finally:
+                await browser.close()
+    except Exception:
+        failure_code = failure_code or "runner_failed"
+    finally:
+        stop_heartbeat.set()
+        await heartbeat
+
+    if lease_failed.is_set():
+        failure_code = failure_code or "lease_renewal_failed"
+    if failure_code:
+        try:
+            await asyncio.to_thread(
+                client.fail_job,
+                job_id=session["job_id"],
+                lease_token=session["lease_token"],
+                code=failure_code,
+            )
+        except GradeDbError:
+            pass
+        raise RunnerFatalError(failure_code)
+
+    await asyncio.to_thread(
+        client.complete_job,
+        job_id=session["job_id"],
+        lease_token=session["lease_token"],
+        progress=progress,
+    )
+
+    elapsed = int(time() - begin_time)
+    summary = textwrap.dedent(
+        f"""
+        Grade scraping complete.
+        Successfully processed {progress["success"]} / {progress["attempted"]} students
+        in {elapsed // 60} minutes {elapsed % 60} seconds.
+        Errors encountered: {progress["errors"]}
+        """
+    ).strip()
+    severity = Severity.Crit if progress["errors"] else Severity.Info
+    await _send_slack_notification(severity, summary)
+    logger.info(
+        "runner.completed",
+        extra={
+            "attempted": progress["attempted"],
+            "success": progress["success"],
+            "errors": progress["errors"],
+            "elapsed_seconds": elapsed,
+        },
+    )
+    return progress
 
 
 async def main(
@@ -294,184 +502,54 @@ async def main(
     student_id: int | None = None,
     portal: str | None = None,
     status: str | None = None,
-    job_id: str | None = None,
-    state_q: queue.Queue | None = None,
 ):
-    print(
-        f"[runner] main(): start fid={franchise_id} sid={student_id} portal={portal}",
-        flush=True,
-    )
-
-    student_list = students(
-        franchise_id=franchise_id, student_id=student_id, portal=portal, status=status
-    )
-    print(f"[runner] main(): fetched {len(student_list)} students", flush=True)
-
-    if not student_list:
-        if student_id is not None:
-            print(f"No active student found with ID = {student_id}.", flush=True)
-        else:
-            print("No active students found for the given filters.", flush=True)
-        return
-
-    label = (
-        f"student_id={student_id}"
-        if student_id is not None
-        else f"franchise_id={franchise_id}"
-        if franchise_id is not None
-        else "all active"
-    )
-    if portal is not None:
-        label += f", portal={portal}"
-    print(f"Found {len(student_list)} students to scrape ({label}).", flush=True)
-
-    if job_id and state_q:
-        from ui.ext_jobs import JobState
-        state = JobState(total=len(student_list), steps=len(student_list) + 2)
-        state.next_step()
-        state_q.put((job_id, state))
-    else:
-        state = None
-
-    portal_attempted = {portal: 0 for portal in managed_portals.keys()}
-    portal_success = {portal: 0 for portal in managed_portals.keys()}
-    errors = []
-    with open(out_file, "w", encoding="utf-8") as f:
-        async with async_playwright() as p:
-            begin_time = time()
-            browser_args = ["--disable-blink-features=AutomationControlled"]
-            browser = await p.chromium.launch(headless=False, args=browser_args)
-            for student in student_list:
-                portal_attempted[student.get("portal")] += 1
-                try:
-                    print(
-                        f"Attempting to scrape {student['id']}... [{sum(portal_attempted.values())} / {len(student_list)}]",
-                        flush=True,
-                    )
-                    result = await scrape_one(browser, student)
-                    f.write(json.dumps(result) + "\n")
-                    portal_success[student.get("portal")] += 1
-                    if state and state_q:
-                        state.next_step()
-                        state_q.put((job_id, state))
-                    print(
-                        f"SUCCESS: {student['id']}, [{sum(portal_attempted.values())} / {len(student_list)}]",
-                        flush=True,
-                    )
-                except Exception as e:
-                    if "Connection closed while reading from the driver" not in str(e):
-                        error_result = {
-                            "db_id": student["db_id"],
-                            "student_id": student["id"],
-                            "error": f"{type(e).__name__}: {e}",
-                            "traceback": format_exception_only(type(e), e),
-                        }
-                        f.write(json.dumps(error_result) + "\n")
-                        errors.append(error_result)
-                        print(f"ERROR: {student['id']} (details in grades.jsonl)", flush=True)
-
-            end_time = time()
-    time_elapsed = int(end_time - begin_time)
-    time_per_student = time_elapsed / max(1, len(student_list))
-
-    portal_success_rates = {
-        portal: float(success) / attempted * 100
-        for portal, success, attempted in zip(
-            portal_attempted.keys(), portal_success.values(), portal_attempted.values()
+    configure_logging()
+    try:
+        return await _run_grade_job(
+            franchise_id=franchise_id,
+            student_id=student_id,
+            portal=portal,
+            status=status,
         )
-        if attempted != 0
-    }
-    low_success_rates = {
-        portal: success_rate
-        for portal, success_rate in portal_success_rates.items()
-        if success_rate < 75
-    }
-
-    attempted_count = sum(portal_attempted.values())
-    success_count = sum(portal_success.values())
-    error_count = attempted_count - success_count
-
-    low_success_rates_summary = pprint.pformat(low_success_rates)
-    error_summary = pprint.pformat(errors)
-    results_log = f"""
-    Scraping complete! {f"Franchise ({franchise_id if franchise_id else 'all'})"} {f"Student ({student_id if student_id else 'all'})"}
-
-    Successfully processed {success_count} / {attempted_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student
-
-    Low success rates
-    ==================
-
-    {low_success_rates_summary if len(low_success_rates) > 0 else "No low success rates encountered"}
-
-    Error summary | Encountered {error_count} errors
-    ==============
-
-    {error_summary if error_summary else "Nothing to show"}
-    """
-
-    results_log = textwrap.dedent(results_log.strip())
-    results_log.replace("'", "")
-    results_log.replace("\\n", "")
-
-    if state and state_q:
-        state.next_step()
-        state_q.put((job_id, state))
-
-    if os.getenv("PYTHON_ENV") != "dev" or os.getenv("SLACK_NOTIFY_IN_DEV") == "1":
-        severity = Severity.Crit if error_count > 0 else Severity.Info
-        try:
-            send_notification_to_slack(severity, results_log)
-        except Exception as e:
-            print(f"[runner] Slack notification failed: {e}", flush=True)
-
-    print(f"\nScraping complete! Results saved to {out_file}", flush=True)
-    print(
-        f"Successfully processed {success_count} students in {int(time_elapsed / 60)} minutes {time_elapsed % 60} seconds, at {time_per_student:.2f}s per student",
-        flush=True,
-    )
-    print(f"Errors encountered: {error_count}", flush=True)
-    print("Script finished.", flush=True)
-
-    print(results_log, flush=True)
+    except Exception as exc:
+        failure_code = (
+            exc.code if isinstance(exc, RunnerFatalError) else "unhandled_exception"
+        )
+        logger.critical(
+            "runner.fatal",
+            extra={
+                "failure_code": failure_code,
+                "exception_type": type(exc).__name__,
+            },
+            exc_info=os.getenv("LOG_INCLUDE_TRACEBACKS") == "1",
+        )
+        await _send_slack_notification(
+            Severity.Crit,
+            textwrap.dedent(
+                f"""
+                Grade scraping stopped because of a fatal error.
+                Failure code: {failure_code}
+                Exception type: {type(exc).__name__}
+                """
+            ).strip(),
+        )
+        raise
 
 
 if __name__ == "__main__":
-    print("[runner] __main__ starting", flush=True)
+    configure_logging()
     _debug_env()
     parser = argparse.ArgumentParser(description="Scrape student grades.")
-    parser.add_argument(
-        "-f",
-        "--franchise-id",
-        type=int,
-        help="Only scrape students for a specific FranchiseID.",
-    )
-    parser.add_argument(
-        "-s",
-        "--student-id",
-        type=int,
-        help="Scrape a single student by database ID. Takes precedence over --franchise-id.",
-    )
-    parser.add_argument(
-        "-p", "--portal", type=str, help="Test a single portal by name."
-    )
-    parser.add_argument(
-        "-stat", "--status", type=str, help="Filter for the status of students."
-    )
+    parser.add_argument("-f", "--franchise-id", type=int)
+    parser.add_argument("-s", "--student-id", type=int)
+    parser.add_argument("-p", "--portal", type=str)
+    parser.add_argument("-stat", "--status", type=str)
     args = parser.parse_args()
-    print("[runner] CLI args:", args, flush=True)
-
-    try:
-        asyncio.run(
-            main(
-                franchise_id=args.franchise_id,
-                student_id=args.student_id,
-                portal=args.portal,
-                status=args.status,
-            )
+    asyncio.run(
+        main(
+            franchise_id=args.franchise_id,
+            student_id=args.student_id,
+            portal=args.portal,
+            status=args.status,
         )
-    except Exception as e:
-        import traceback as _tb
-
-        print("[runner] FATAL EXCEPTION:", repr(e), flush=True)
-        _tb.print_exc()
-        raise
+    )

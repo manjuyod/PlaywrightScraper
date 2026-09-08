@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{{ page_title }}</title>
+        <link
+            rel="icon"
+            type="image/webp"
+            href="{{ url_for('static', filename='imgs/tc_logo.webp') }}"
+        />
+        {% include "_react_assets.html" %}
+    </head>
+    <body>
+        <div id="tc-react-root"></div>
+        <script id="tc-page-data" type="application/json">{{ page_data|tojson }}</script>
+    </body>
+</html>

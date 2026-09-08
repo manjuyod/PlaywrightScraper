@@ -20,8 +20,4 @@ if errorlevel 1 (
 if not exist ".env" (
   echo [WARN] ".env" not found in repo root: %CD%
 )
-if not exist "sheet_mod_grades.json" (
-  echo [WARN] "sheet_mod_grades.json" not found in repo root: %CD%
-)
-
 exit /b 0

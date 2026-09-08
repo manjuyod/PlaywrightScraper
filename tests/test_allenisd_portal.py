@@ -180,7 +180,7 @@ def test_fetch_grades_opens_view_all_grades_and_parses_page() -> None:
     assert ("get_by_role", "menuitem", "Gradebook") in page.calls
     assert ("get_by_role", "link", "Display Options") in page.calls
     assert ("get_by_role", "link", "View All Grades") in page.calls
-    assert result["parsed_grades"]["ENGLISH II"] == 92.5
+    assert result["ENGLISH II"] == 92.5
 
 
 def test_login_raises_sanitized_error_on_auth_blocker() -> None:

@@ -91,6 +91,7 @@ def test_parse_classwork_html_extracts_current_percentages() -> None:
 
 def test_login_uses_shared_selectors_and_fetch_grades_reads_iframe(monkeypatch: pytest.MonkeyPatch) -> None:
     from scraper.portals import homeaccess as homeaccess_module
+    from scraper.portals import utils as portal_utils
     from scraper.portals.homeaccess import HomeAccess
 
     page = FakePage(frame_html=FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -118,7 +119,7 @@ def test_login_uses_shared_selectors_and_fetch_grades_reads_iframe(monkeypatch: 
     async def fake_exists(locator, timeout: int = 1000) -> bool:
         return getattr(locator, "visible", False)
 
-    monkeypatch.setattr(homeaccess_module, "universal_login_flow", fake_universal_login_flow)
+    monkeypatch.setattr(portal_utils, "universal_login_flow", fake_universal_login_flow)
     monkeypatch.setattr(homeaccess_module, "wait_after_nav", fake_wait_after_nav)
     monkeypatch.setattr(homeaccess_module, "exists", fake_exists)
 
@@ -135,4 +136,4 @@ def test_login_uses_shared_selectors_and_fetch_grades_reads_iframe(monkeypatch: 
     assert calls["selectors"] == ("#LogOnDetails_UserName", "#LogOnDetails_Password")
     assert page.goto_calls == ["https://homeaccess.example.org/HomeAccess/Classes/Classwork"]
     assert page.frame_calls
-    assert grades["parsed_grades"]["LANGUAGE ARTS 7"] == 92.5
+    assert grades["LANGUAGE ARTS 7"] == 92.5
