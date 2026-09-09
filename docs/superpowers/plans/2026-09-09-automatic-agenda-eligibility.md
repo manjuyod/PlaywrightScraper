@@ -519,7 +519,7 @@ Commit message: `feat: filter agenda jobs and isolate preparation failures`.
 
 **Interfaces:** Consumes the unchanged `JobStartRequest`, `JobStartResponse`, `ResultPostRequest`, `ResultPostResponse`, `NeonGateway`, and CRM gateway. Produces the same JSON shapes with candidate selection and result authorization independent of `track_agenda`. Both primary and secondary channels remain independent.
 
-- [ ] **Step 1: Run upstream impact for the two service methods and the old tracking-only test.** Disambiguate the service method from the trait method using context/UID. At planning time the service UID is `Function:grade_db/src/service.rs:BoundaryService.start_job#1`.
+- [x] **Step 1: Run upstream impact for the two service methods and the old tracking-only test.** Disambiguate the service method from the trait method using context/UID. At planning time the service UID is `Function:grade_db/src/service.rs:BoundaryService.start_job#1`.
 
 ```powershell
 npx gitnexus impact --uid 'Function:grade_db/src/service.rs:BoundaryService.start_job#1' --repo PlaywrightScraper --direction upstream --include-tests --summary-only
@@ -529,7 +529,7 @@ npx gitnexus impact agenda_job_returns_only_students_with_tracking_enabled --fil
 
 Use `gitnexus_rename` to rename `agenda_job_returns_only_students_with_tracking_enabled` to `agenda_job_returns_all_grade_eligible_students_regardless_of_tracking`, first previewing the rename and then applying it. If an unused test reports UNKNOWN risk, inspect its test attribute and text references rather than declaring it safe from the empty graph alone.
 
-- [ ] **Step 2: Replace the renamed test with the following matrix using the existing `FakeCrm`, `FakeNeon`, and `crm_student` helpers.** This tests both job kinds to protect grade behavior. Student 1 has false state, 2 true state, 3 missing state, 4 incomplete primary with complete secondary, and 5 another franchise.
+- [x] **Step 2: Replace the renamed test with the following matrix using the existing `FakeCrm`, `FakeNeon`, and `crm_student` helpers.** This tests both job kinds to protect grade behavior. Student 1 has false state, 2 true state, 3 missing state, 4 incomplete primary with complete secondary, and 5 another franchise.
 
 ```rust
 #[tokio::test]
@@ -577,7 +577,7 @@ async fn agenda_job_returns_all_grade_eligible_students_regardless_of_tracking()
 }
 ```
 
-- [ ] **Step 3: Add positive results and negative authorization tests.** Keep existing tests intact. The new success/failure cases verify applied results and safe audit contents when the flag is false or no state was returned. Repeated successful submissions must retain the same channel key; `FakeNeon` always returns `duplicate=false`, so existing SQL idempotency tests still provide the storage-level evidence.
+- [x] **Step 3: Add positive results and negative authorization tests.** Keep existing tests intact. The new success/failure cases verify applied results and safe audit contents when the flag is false or no state was returned. Repeated successful submissions must retain the same channel key; `FakeNeon` always returns `duplicate=false`, so existing SQL idempotency tests still provide the storage-level evidence.
 
 ```rust
 #[tokio::test]
@@ -665,7 +665,7 @@ async fn agenda_result_guards_remain_enforced_without_tracking() {
 
 The franchise-mismatch case is rejected by the CRM query's scope filter before the explicit franchise guard, matching real gateway behavior. Do not weaken either guard to force a different error code.
 
-- [ ] **Step 4: Add this lifecycle compatibility test to `grade_db/tests/protocol.rs`.** SQL remains unchanged; pair this model test with existing `lifecycle_mutations_require_the_current_unexpired_lease` and a review that `HEARTBEAT`/`COMPLETE_JOB` still replace the progress JSON.
+- [x] **Step 4: Add this lifecycle compatibility test to `grade_db/tests/protocol.rs`.** SQL remains unchanged; pair this model test with existing `lifecycle_mutations_require_the_current_unexpired_lease` and a review that `HEARTBEAT`/`COMPLETE_JOB` still replace the progress JSON.
 
 ```rust
 #[test]
@@ -684,7 +684,7 @@ fn agenda_filtered_totals_include_zero_without_changing_lifecycle_rules() {
 }
 ```
 
-- [ ] **Step 5: Run the focused Rust tests before changing service behavior.**
+- [x] **Step 5: Run the focused Rust tests before changing service behavior.**
 
 ```powershell
 cargo test --manifest-path grade_db/Cargo.toml --test service --test protocol --test sql_contracts
@@ -692,7 +692,7 @@ cargo test --manifest-path grade_db/Cargo.toml --test service --test protocol --
 
 Expected RED: mixed candidates still exclude false/missing states; valid agenda results return `agenda_not_enabled`. Guard and progress tests should already pass.
 
-- [ ] **Step 6: Make the two minimal service changes.** In `start_job`, the selection becomes:
+- [x] **Step 6: Make the two minimal service changes.** In `start_job`, the selection becomes:
 
 ```rust
 let students: Vec<_> = eligible
@@ -717,7 +717,7 @@ if job.kind == JobKind::Agenda {
 
 Remove `JobKind` from the `service.rs` imports if these deletions leave it unused. Preserve the initial state reads/merge in `start_job`, all model fields, schema checks, result channels, and everything before/after the removed result guard. No SQL or protocol mutation is needed.
 
-- [ ] **Step 7: Format edited Rust files and rerun the focused checks.**
+- [x] **Step 7: Format edited Rust files and rerun the focused checks.**
 
 ```powershell
 rustfmt --edition 2021 grade_db/src/service.rs grade_db/tests/service.rs grade_db/tests/protocol.rs
@@ -726,7 +726,7 @@ cargo test --manifest-path grade_db/Cargo.toml --test service --test protocol --
 
 Expected GREEN, including the retained-field serialization test in `contracts.rs`. Do not claim fake-gateway tests verify live database transactions.
 
-- [ ] **Step 8: Stage the three Rust files, inspect change detection and whitespace checks, then commit.**
+- [x] **Step 8: Stage the three Rust files, inspect change detection and whitespace checks, then commit.**
 
 Commit message: `feat: remove legacy agenda tracking gates from Rust boundary`.
 
@@ -1009,3 +1009,4 @@ Before execution, read both this plan and the linked spec. After each code task,
 - Task 1: all 24 new eligibility cases failed for the missing helper before implementation; 68 focused eligibility/registry/agenda tests passed afterward.
 - Task 2: 12 new preparation/startup tests failed against the unfiltered runner; all 92 focused preparation, agenda, grade-runner, logging, and secret-redaction tests passed after implementation.
 - Task 2 integration adjustment: agenda CLI now initializes the existing structured logger, matching the grade CLI. Its new regression failed before the two-line wiring change. All 93 focused tests passed afterward. No shared logger implementation changed.
+- Task 3: the roster and channel-acceptance regressions failed against the legacy gates; all 32 focused Rust service/protocol/CRM/SQL/model tests passed after removing those gates. Test rename used the GitNexus MCP rename tool through a temporary local stdio connection because the app connector transport was closed.

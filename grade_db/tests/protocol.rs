@@ -210,3 +210,44 @@ fn lifecycle_requests_validate_progress_and_safe_failure_codes() {
     .validate()
     .is_err());
 }
+
+#[test]
+fn agenda_filtered_totals_include_zero_without_changing_lifecycle_rules() {
+    for total in [0, 1, 3] {
+        let job_id = Uuid::from_u128(19);
+        let lease_token = Uuid::from_u128(42);
+        let progress = Progress {
+            total,
+            attempted: total,
+            success: total,
+            errors: 0,
+        };
+        assert!(JobHeartbeatRequest {
+            job_id,
+            lease_token,
+            progress
+        }
+        .validate()
+        .is_ok());
+        assert!(JobCompleteRequest {
+            job_id,
+            lease_token,
+            progress
+        }
+        .validate()
+        .is_ok());
+    }
+    let unfinished = Progress {
+        total: 1,
+        attempted: 0,
+        success: 0,
+        errors: 0,
+    };
+    assert!(JobCompleteRequest {
+        job_id: Uuid::from_u128(19),
+        lease_token: Uuid::from_u128(42),
+        progress: unfinished,
+    }
+    .validate()
+    .is_err());
+}

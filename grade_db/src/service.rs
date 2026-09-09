@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::{
-    deterministic_result_key, merge_runner_student, ActiveJob, CrmStudent, JobKind, JobLease,
+    deterministic_result_key, merge_runner_student, ActiveJob, CrmStudent, JobLease,
     JobStartRequest, JobStartResponse, Progress, ResultPostRequest, ResultPostResponse,
     StudentGradeState,
 };
@@ -100,7 +100,6 @@ impl BoundaryService {
         let students: Vec<_> = eligible
             .into_iter()
             .map(|row| merge_runner_student(row, state_by_id.get(&row.crmstudentid)))
-            .filter(|row| request.kind != JobKind::Agenda || row.track_agenda)
             .collect();
         let total = u32::try_from(students.len()).map_err(|_| AppError::Internal)?;
         let lease = self
@@ -154,16 +153,6 @@ impl BoundaryService {
         if crm_student.franchiseid != job.franchise_id.unwrap_or(crm_student.franchiseid) {
             return self.record_rejected(request, "job_scope_mismatch").await;
         }
-        if job.kind == JobKind::Agenda {
-            let states = self.neon.states_by_crm_ids(&[request.crmstudentid]).await?;
-            if !states
-                .get(&request.crmstudentid)
-                .is_some_and(|row| row.track_agenda)
-            {
-                return self.record_rejected(request, "agenda_not_enabled").await;
-            }
-        }
-
         let result_channel = request.outcome.channel();
         let idempotency_key =
             deterministic_result_key(job.job_id, request.crmstudentid, result_channel.as_str());

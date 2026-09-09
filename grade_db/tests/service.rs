@@ -182,34 +182,73 @@ async fn exact_ineligible_student_starts_an_empty_franchise_scoped_job() {
 }
 
 #[tokio::test]
-async fn agenda_job_returns_only_students_with_tracking_enabled() {
-    let crm = Arc::new(FakeCrm::default());
-    crm.students
-        .lock()
-        .unwrap()
-        .extend([crm_student(1, Some("pw")), crm_student(2, Some("pw"))]);
-    let neon = Arc::new(FakeNeon::default());
-    neon.states.lock().unwrap().insert(
-        2,
-        StudentGradeState {
-            crmstudentid: 2,
-            track_agenda: true,
-            ..Default::default()
-        },
-    );
-    let service = BoundaryService::new(crm, neon, "worker-a".into(), 600);
-
-    let response = service
-        .start_job(JobStartRequest {
-            kind: JobKind::Agenda,
-            franchise_id: Some(19),
-            student_id: None,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(response.students.len(), 1);
-    assert_eq!(response.students[0].crmstudentid, 2);
+async fn agenda_job_returns_all_grade_eligible_students_regardless_of_tracking() {
+    for kind in [JobKind::Agenda, JobKind::Grade] {
+        for (franchise_id, student_id, expected) in [
+            (Some(19), None, vec![1_i64, 2, 3]),
+            (None, Some(1), vec![1]),
+            (None, Some(4), vec![]),
+            (None, None, vec![1, 2, 3, 5]),
+            (Some(20), None, vec![5]),
+        ] {
+            let crm = Arc::new(FakeCrm::default());
+            let mut incomplete = crm_student(4, None);
+            incomplete.portal2 = Some("https://canvas.example/login".into());
+            incomplete.p2username = Some("secondary".into());
+            incomplete.p2password = Some("secondary-secret".into());
+            let mut outside = crm_student(5, Some("pw"));
+            outside.franchiseid = 20;
+            crm.students.lock().unwrap().extend([
+                crm_student(1, Some("pw")),
+                crm_student(2, Some("pw")),
+                crm_student(3, Some("pw")),
+                incomplete,
+                outside,
+            ]);
+            let neon = Arc::new(FakeNeon::default());
+            for (id, enabled) in [(1, false), (2, true)] {
+                neon.states.lock().unwrap().insert(
+                    id,
+                    StudentGradeState {
+                        crmstudentid: id,
+                        track_agenda: enabled,
+                        ..Default::default()
+                    },
+                );
+            }
+            let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
+            let response = service
+                .start_job(JobStartRequest {
+                    kind,
+                    franchise_id,
+                    student_id,
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                response
+                    .students
+                    .iter()
+                    .map(|s| s.crmstudentid)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(response.progress.total as usize, expected.len());
+            assert_eq!(
+                response.lease.franchise_id,
+                if student_id.is_some() {
+                    Some(19)
+                } else {
+                    franchise_id
+                }
+            );
+            for student in &response.students {
+                assert_eq!(student.track_agenda, student.crmstudentid == 2);
+            }
+            assert!(!neon.states.lock().unwrap().get(&1).unwrap().track_agenda);
+            assert!(neon.states.lock().unwrap().get(&2).unwrap().track_agenda);
+        }
+    }
 }
 
 #[tokio::test]
@@ -367,4 +406,130 @@ async fn agenda_pull_results_use_independent_slot_idempotency_keys() {
         deterministic_result_key(Uuid::from_u128(19), 1, "secondary_agenda")
     );
     assert_ne!(writes[0].idempotency_key, writes[1].idempotency_key);
+}
+
+#[tokio::test]
+async fn agenda_results_ignore_legacy_tracking_for_both_channels() {
+    for stored_flag in [None, Some(false), Some(true)] {
+        let crm = Arc::new(FakeCrm::default());
+        crm.students
+            .lock()
+            .unwrap()
+            .push(crm_student(1, Some("pw")));
+        let neon = Arc::new(FakeNeon::default());
+        if let Some(track_agenda) = stored_flag {
+            neon.states.lock().unwrap().insert(
+                1,
+                StudentGradeState {
+                    crmstudentid: 1,
+                    track_agenda,
+                    ..Default::default()
+                },
+            );
+        }
+        *neon.active_job.lock().unwrap() = Some(ActiveJob {
+            job_id: Uuid::from_u128(19),
+            lease_token: Uuid::from_u128(42),
+            kind: JobKind::Agenda,
+            franchise_id: Some(19),
+            student_id: None,
+        });
+        let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
+        for channel in ["primary_agenda", "secondary_agenda"] {
+            for failure in [false, true, false] {
+                let outcome = if failure {
+                    json!({"kind": "failure", "channel": channel, "code": "scrape_failed"})
+                } else {
+                    json!({"kind": format!("{channel}_success"),
+                           "agenda": {"portal": "canvas", "weeks": {}}})
+                };
+                let request = serde_json::from_value(json!({
+                    "job_id": Uuid::from_u128(19), "lease_token": Uuid::from_u128(42),
+                    "crmstudentid": 1, "outcome": outcome,
+                }))
+                .unwrap();
+                let response = service.post_result(request).await.unwrap();
+                assert!(response.applied);
+                assert!(response.rejection_code.is_none());
+                let writes = neon.writes.lock().unwrap();
+                let write = writes.last().unwrap();
+                assert!(write.applied);
+                assert_eq!(
+                    write.idempotency_key,
+                    deterministic_result_key(Uuid::from_u128(19), 1, channel)
+                );
+                assert!(!write.audit_payload.to_string().contains("pw"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn agenda_result_guards_remain_enforced_without_tracking() {
+    for scenario in [
+        "expired",
+        "student_scope",
+        "franchise_scope",
+        "crm_missing",
+        "crm_ineligible",
+    ] {
+        let crm = Arc::new(FakeCrm::default());
+        if scenario != "crm_missing" {
+            crm.students.lock().unwrap().push(crm_student(
+                1,
+                if scenario == "crm_ineligible" {
+                    None
+                } else {
+                    Some("pw")
+                },
+            ));
+        }
+        let neon = Arc::new(FakeNeon::default());
+        if scenario != "expired" {
+            *neon.active_job.lock().unwrap() = Some(ActiveJob {
+                job_id: Uuid::from_u128(19),
+                lease_token: Uuid::from_u128(42),
+                kind: JobKind::Agenda,
+                franchise_id: Some(if scenario == "franchise_scope" {
+                    20
+                } else {
+                    19
+                }),
+                student_id: if scenario == "student_scope" {
+                    Some(2)
+                } else {
+                    None
+                },
+            });
+        }
+        let service = BoundaryService::new(crm, neon.clone(), "worker-a".into(), 600);
+        let request = serde_json::from_value(json!({
+            "job_id": Uuid::from_u128(19), "lease_token": Uuid::from_u128(42),
+            "crmstudentid": 1, "outcome": {"kind": "primary_agenda_success",
+                "agenda": {"portal": "canvas", "weeks": {}}},
+        }))
+        .unwrap();
+        let response = service.post_result(request).await;
+        if scenario == "expired" {
+            assert!(matches!(response, Err(AppError::LeaseExpired)));
+            assert!(neon.writes.lock().unwrap().is_empty());
+        } else {
+            let response = response.unwrap();
+            assert!(!response.applied);
+            assert_eq!(
+                response.rejection_code.as_deref(),
+                Some(if scenario == "student_scope" {
+                    "job_scope_mismatch"
+                } else {
+                    "crm_ineligible"
+                })
+            );
+            assert!(neon
+                .writes
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|write| !write.applied));
+        }
+    }
 }
