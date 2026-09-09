@@ -161,6 +161,20 @@ def resolve_agenda_slots(
     )
 
 
+def is_agenda_eligible(student: Mapping[str, object]) -> bool:
+    """Check slot credentials and current registry metadata without collection."""
+    for slot in resolve_agenda_slots(student):
+        if not all((slot.login_url, slot.username, slot.password, slot.portal)):
+            continue
+        try:
+            engine = get_portal(slot.portal)
+        except ValueError:
+            continue
+        if engine.agenda_capable:
+            return True
+    return False
+
+
 async def _collect_slot(
     browser: Browser,
     student: Mapping[str, object],

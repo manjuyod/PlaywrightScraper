@@ -74,7 +74,7 @@ Planning validation parsed all six Python examples, the inline diagnostic, and a
 - The helper accepts already converted runner contexts. Rust supplies the grade prerequisite; do not duplicate CRM eligibility in Python.
 - `ValueError` from `get_portal` means no registered engine for that slot. Unexpected exceptions propagate to Task 2's preparation boundary. Do not catch errors around reading `engine.agenda_capable` here.
 
-- [ ] **Step 1: Add the failing eligibility matrix.** Create this test module. Every URL is synthetic and matched locally; no portal instance is created.
+- [x] **Step 1: Add the failing eligibility matrix.** Create this test module. Every URL is synthetic and matched locally; no portal instance is created.
 
 ```python
 from __future__ import annotations
@@ -165,7 +165,7 @@ def test_new_engine_capability_applies_on_next_evaluation(monkeypatch):
     assert agenda.is_agenda_eligible(student)
 ```
 
-- [ ] **Step 2: Run the new tests and confirm the missing helper is the failure.**
+- [x] **Step 2: Run the new tests and confirm the missing helper is the failure.**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_agenda_eligibility.py -q
@@ -173,7 +173,7 @@ def test_new_engine_capability_applies_on_next_evaluation(monkeypatch):
 
 Expected RED: `scraper.agenda` has no `is_agenda_eligible`. Resolve environment/import failures separately; they are not the intended RED result.
 
-- [ ] **Step 3: Add this helper without changing existing slot resolution or collection functions.**
+- [x] **Step 3: Add this helper without changing existing slot resolution or collection functions.**
 
 ```python
 def is_agenda_eligible(student: Mapping[str, object]) -> bool:
@@ -189,7 +189,7 @@ def is_agenda_eligible(student: Mapping[str, object]) -> bool:
     return False
 ```
 
-- [ ] **Step 4: Run eligibility and existing registry/slot tests.**
+- [x] **Step 4: Run eligibility and existing registry/slot tests.**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_agenda_eligibility.py tests/test_portal_registry.py tests/test_agenda_grade_db_boundary.py -q
@@ -197,7 +197,7 @@ def is_agenda_eligible(student: Mapping[str, object]) -> bool:
 
 Expected GREEN. Existing tests already cover collection of both slots, credential ownership, unsupported neutral results, and per-slot failure independence; preserve those assertions.
 
-- [ ] **Step 5: Review, stage these two files, run GitNexus change detection and whitespace checks, then commit.**
+- [x] **Step 5: Review, stage these two files, run GitNexus change detection and whitespace checks, then commit.**
 
 Commit message: `feat: determine agenda eligibility from portal capability`.
 
@@ -1002,3 +1002,8 @@ Require `GRADE_DB_CLI_PATH` to resolve to the verified binary for this process. 
 | Documentation, compiled executable, coordinated validation/rollback | Task 4 and operational checklist |
 
 Before execution, read both this plan and the linked spec. After each code task, report its tests and reviewed diff; do not deploy intermediate commits. Execution choice is inline with `superpowers:executing-plans`, or delegated with `superpowers:subagent-driven-development` if the user selects that approach.
+
+## Execution Record
+
+- Baseline: 500 Python tests passed, 1 skipped, 1 integration test deselected; all 34 Rust tests passed.
+- Task 1: all 24 new eligibility cases failed for the missing helper before implementation; 68 focused eligibility/registry/agenda tests passed afterward.
