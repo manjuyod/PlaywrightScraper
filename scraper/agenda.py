@@ -25,6 +25,7 @@ from scraper.db_cli import (
 )
 from scraper.config.logging import (
     bind_log_context,
+    configure_logging,
     reset_log_context,
     suspend_log_context,
 )
@@ -173,6 +174,48 @@ def is_agenda_eligible(student: Mapping[str, object]) -> bool:
         if engine.agenda_capable:
             return True
     return False
+
+
+def _prepare_agenda_students(
+    rows: list[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    students: list[dict[str, Any]] = []
+    counts = {
+        "candidate_count": len(rows),
+        "eligible_count": 0,
+        "filtered_count": 0,
+        "preparation_error_count": 0,
+    }
+    for row in rows:
+        try:
+            student = student_from_context(row)
+            eligible = is_agenda_eligible(student)
+        except Exception:
+            counts["preparation_error_count"] += 1
+            continue
+        if eligible:
+            students.append(student)
+            counts["eligible_count"] += 1
+        else:
+            counts["filtered_count"] += 1
+    return students, counts
+
+
+def _log_agenda_preparation(counts: Mapping[str, int]) -> None:
+    extra = {
+        key: counts[key]
+        for key in (
+            "candidate_count", "eligible_count", "filtered_count", "preparation_error_count"
+        )
+    }
+    token = suspend_log_context()
+    try:
+        level = logging.WARNING if extra["preparation_error_count"] else logging.INFO
+        logger.log(level, "agenda.preparation.completed", extra=extra)
+    except Exception:
+        pass
+    finally:
+        reset_log_context(token)
 
 
 async def _collect_slot(
@@ -519,7 +562,8 @@ async def main(
         franchise_id=franchise_id,
         student_id=student_id,
     )
-    students = [student_from_context(row) for row in session.get("students", [])]
+    students, preparation_counts = _prepare_agenda_students(session.get("students", []))
+    _log_agenda_preparation(preparation_counts)
     progress = _new_progress(len(students))
 
     if not students:
@@ -594,4 +638,5 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--franchise-id", type=int)
     parser.add_argument("-s", "--student", type=int)
     args = parser.parse_args()
+    configure_logging()
     asyncio.run(main(args.franchise_id, args.student))

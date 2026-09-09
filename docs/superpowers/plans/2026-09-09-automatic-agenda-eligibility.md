@@ -212,13 +212,13 @@ Commit message: `feat: determine agenda eligibility from portal capability`.
 - Count keys: `candidate_count`, `eligible_count`, `filtered_count`, `preparation_error_count`.
 - Preserves `main(franchise_id: int | None, student_id: int | None)` and its existing return/progress, lease, browser, and completion paths.
 
-- [ ] **Step 1: Run upstream impact on `main` before editing it.** Use the MCP tool with `file_path="scraper/agenda.py"`; if transport is unavailable, use:
+- [x] **Step 1: Run upstream impact on `main` before editing it.** Use the MCP tool with `file_path="scraper/agenda.py"`; if transport is unavailable, use:
 
 ```powershell
 npx gitnexus impact main --file scraper/agenda.py --repo PlaywrightScraper --direction upstream --include-tests --summary-only
 ```
 
-- [ ] **Step 2: Add preparation/error tests to the Task 1 module.** The first candidate fails at each of the three boundaries in separate cases; the second must remain selectable. Inject a `ContextFilter` as production logging does so identifiers would leak if log context were not suspended.
+- [x] **Step 2: Add preparation/error tests to the Task 1 module.** The first candidate fails at each of the three boundaries in separate cases; the second must remain selectable. Inject a `ContextFilter` as production logging does so identifiers would leak if log context were not suspended.
 
 ```python
 @pytest.mark.parametrize("phase", ["conversion", "url", "capability"])
@@ -307,7 +307,7 @@ def test_preparation_logging_failure_does_not_abort_or_leak_context(monkeypatch)
         reset_log_context(token)
 ```
 
-- [ ] **Step 3: Add a fake job harness and lifecycle tests.** Mock the boundary client and Playwright factory before calling `main`; never resolve or launch a real executable/browser. Keep `_collect_and_post_agendas` mocked here because its independent slot/result behavior has separate existing tests.
+- [x] **Step 3: Add a fake job harness and lifecycle tests.** Mock the boundary client and Playwright factory before calling `main`; never resolve or launch a real executable/browser. Keep `_collect_and_post_agendas` mocked here because its independent slot/result behavior has separate existing tests.
 
 ```python
 @pytest.fixture
@@ -448,13 +448,13 @@ def test_main_empty_candidate_list_completes(job_harness, monkeypatch):
 
 The no-post assertion is the persistence guarantee for skipped students: all agenda-state mutations occur through the Rust result boundary. Do not invent a Python snapshot-clearing/state-write method for the fake or for production.
 
-- [ ] **Step 4: Run the module and observe failures for missing preparation helpers, unfiltered totals, and the zero-student browser path.**
+- [x] **Step 4: Run the module and observe failures for missing preparation helpers, unfiltered totals, and the zero-student browser path.**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_agenda_eligibility.py -q
 ```
 
-- [ ] **Step 5: Add the helpers below and replace only `main`'s current student list comprehension.** Place the helpers beside `is_agenda_eligible`. Keep the original progress initialization, empty-job branch, heartbeat loop, and collection/completion code after the replacement.
+- [x] **Step 5: Add the helpers below and replace only `main`'s current student list comprehension.** Place the helpers beside `is_agenda_eligible`. Keep the original progress initialization, empty-job branch, heartbeat loop, and collection/completion code after the replacement.
 
 ```python
 def _prepare_agenda_students(
@@ -501,7 +501,7 @@ _log_agenda_preparation(preparation_counts)
 
 Do not extend `_emit_agenda_diagnostic` just to change severity; its existing callers log slot phases and have a different field contract. The small dedicated preparation logger uses the same suspend/reset pattern and a fixed allowlist.
 
-- [ ] **Step 6: Run focused regressions; retain the existing concurrency, per-slot isolation, lease, and browser-cleanup assertions.**
+- [x] **Step 6: Run focused regressions; retain the existing concurrency, per-slot isolation, lease, and browser-cleanup assertions.**
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_agenda_eligibility.py tests/test_agenda_grade_db_boundary.py tests/test_runner_grade_db_boundary.py tests/test_logging_config.py tests/test_secret_redaction.py -q
@@ -509,7 +509,7 @@ Do not extend `_emit_agenda_diagnostic` just to change severity; its existing ca
 
 Expected GREEN. The existing browser-cleanup test returns a fully capable synthetic `_student(7)`, so it should still exercise collection without weakening the new filter.
 
-- [ ] **Step 7: Review, stage the two task files, run change detection and whitespace checks, then commit.**
+- [x] **Step 7: Review, stage the two task files, run change detection and whitespace checks, then commit.**
 
 Commit message: `feat: filter agenda jobs and isolate preparation failures`.
 
@@ -1007,3 +1007,5 @@ Before execution, read both this plan and the linked spec. After each code task,
 
 - Baseline: 500 Python tests passed, 1 skipped, 1 integration test deselected; all 34 Rust tests passed.
 - Task 1: all 24 new eligibility cases failed for the missing helper before implementation; 68 focused eligibility/registry/agenda tests passed afterward.
+- Task 2: 12 new preparation/startup tests failed against the unfiltered runner; all 92 focused preparation, agenda, grade-runner, logging, and secret-redaction tests passed after implementation.
+- Task 2 integration adjustment: agenda CLI now initializes the existing structured logger, matching the grade CLI. Its new regression failed before the two-line wiring change. All 93 focused tests passed afterward. No shared logger implementation changed.
