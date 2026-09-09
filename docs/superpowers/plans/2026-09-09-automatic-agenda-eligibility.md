@@ -736,7 +736,7 @@ Commit message: `feat: remove legacy agenda tracking gates from Rust boundary`.
 
 **Interfaces:** Documents the same Python/Rust command and result contracts. Produces focused/current documentation, recorded verification output, and an identified Windows release binary for later deployment.
 
-- [ ] **Step 1: Add automatic eligibility documentation and remove active-control wording.** In the root README's Rust boundary section, insert:
+- [x] **Step 1: Add automatic eligibility documentation and remove active-control wording.** In the root README's Rust boundary section, insert:
 
 ```markdown
 ### Automatic agenda eligibility
@@ -794,7 +794,7 @@ warning diagnostics. Progress totals count retained students; zero retained
 students complete with zero counts and no Playwright startup or result posts.
 ```
 
-- [ ] **Step 2: Check documentation scope and retained compatibility fields.**
+- [x] **Step 2: Check documentation scope and retained compatibility fields.**
 
 ```powershell
 rg -n 'track_agenda|agenda tracking|agenda_not_enabled' README.md grade_db/README.md scraper_internal_guide.md scraper grade_db/src grade_db/sql/operations
@@ -804,7 +804,7 @@ git diff -- grade_db/src/models.rs grade_db/src/neon.rs scraper/runner.py scrape
 
 Expected: live-control wording is gone from current guides; code retains model/serialized/schema fields and removes the service gates; operation SQL changes only comments; reference-only production files have no feature changes. Historical specs remain historical.
 
-- [ ] **Step 3: Run focused tests, then full non-live Python/Rust suites and required Rust checks.** Stop on an unexpected failure and diagnose it; do not loosen behavior tests to make them pass. Record unrelated pre-existing failures separately if encountered, with evidence from the unchanged baseline.
+- [x] **Step 3: Run focused tests, then full non-live Python/Rust suites and required Rust checks.** Stop on an unexpected failure and diagnose it; do not loosen behavior tests to make them pass. Record unrelated pre-existing failures separately if encountered, with evidence from the unchanged baseline.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_agenda_eligibility.py tests/test_agenda_grade_db_boundary.py tests/test_portal_registry.py tests/test_runner_grade_db_boundary.py tests/test_db_cli.py tests/test_secret_redaction.py -q
@@ -816,7 +816,7 @@ cargo clippy --manifest-path grade_db/Cargo.toml --all-targets -- -D warnings
 
 Expected: all selected tests/checks pass. Do not run integration tests or any `GradeDbClient.start_job` command as an automated smoke test. Audit uncommitted files if tests create artifacts.
 
-- [ ] **Step 4: Build and identify the matching executable without starting a job.** The explicit path avoids Python selecting an older default release binary.
+- [x] **Step 4: Build and identify the matching executable without starting a job.** The explicit path avoids Python selecting an older default release binary.
 
 ```powershell
 cargo build --manifest-path grade_db/Cargo.toml --target x86_64-pc-windows-msvc --release
@@ -828,7 +828,7 @@ git diff --check
 
 Record source commit and binary hash together in the implementation handoff. Building a binary does not deploy it or prove live schema readiness.
 
-- [ ] **Step 5: Review the full feature diff and spec coverage; stage only the documentation/comment files and run change detection before committing.**
+- [x] **Step 5: Review the full feature diff and spec coverage; stage only the documentation/comment files and run change detection before committing.**
 
 Commit message: `docs: document automatic agenda eligibility and rollout`.
 
@@ -1010,3 +1010,11 @@ Before execution, read both this plan and the linked spec. After each code task,
 - Task 2: 12 new preparation/startup tests failed against the unfiltered runner; all 92 focused preparation, agenda, grade-runner, logging, and secret-redaction tests passed after implementation.
 - Task 2 integration adjustment: agenda CLI now initializes the existing structured logger, matching the grade CLI. Its new regression failed before the two-line wiring change. All 93 focused tests passed afterward. No shared logger implementation changed.
 - Task 3: the roster and channel-acceptance regressions failed against the legacy gates; all 32 focused Rust service/protocol/CRM/SQL/model tests passed after removing those gates. Test rename used the GitNexus MCP rename tool through a temporary local stdio connection because the app connector transport was closed.
+
+- Task 4: all 105 final focused Python checks and the full Python suite passed (538 passed, 1 skipped, 1 integration test deselected). All 37 Rust tests passed; Cargo fmt check and Clippy with warnings denied passed.
+- Windows MSVC release build passed; executable reports `grade-db 0.1.0`. Compiled application source is commit `0d07632`; subsequent changes are documentation only.
+- Release artifact: `grade_db/target/x86_64-pc-windows-msvc/release/grade-db.exe`; SHA-256 `399dedda68a67df0e300cf093a9b9545e93ae166838e5adb861c97c91e403ac2`.
+- Read-only doctor on that exact local executable returned `ok=true` and all five checks true (configuration, CRM, CRM secondary schema, Neon, and schema). No job/result/configuration writes were performed.
+- Inline review checked the complete implementation against the spec: shared grade conversion, models, Neon persistence SQL, portal engines, concurrency, per-slot handling, and dashboard code are unchanged. SQL operation templates differ only in compatibility comments. No blocking code-review findings remain.
+- GitNexus graph/FTS was rebuilt successfully after an index file-rename error; change detection was repeated against the refreshed graph.
+- Remaining operator work: coordinated deployment, headed non-persisting portal validation with a selected student, and a separately authorized franchise pilot. Saved snapshots for skipped students intentionally retain their previous status/timestamps and can be stale.

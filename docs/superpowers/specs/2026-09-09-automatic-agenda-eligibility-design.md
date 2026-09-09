@@ -1,6 +1,6 @@
 # Automatic Agenda Eligibility Design
 
-Updated: September 9, 2026. Status: design revision; implementation is pending.
+Updated: September 9, 2026. Status: implementation and local verification complete; deployment and live portal/pilot validation are pending. See the [implementation execution record](../plans/2026-09-09-automatic-agenda-eligibility.md#execution-record).
 
 ## Context
 

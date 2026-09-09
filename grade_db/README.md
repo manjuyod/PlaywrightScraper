@@ -26,6 +26,12 @@ grade-db.exe doctor
 
 All job/result request bodies are JSON on stdin. `doctor` performs read-only CRM, Neon, configuration, and schema checks. There is deliberately no SQL, server, scheduler, auth-key, or migration command.
 
+Agenda job start returns all grade-eligible students in the requested scope.
+Python filters their current portal slots by registered agenda capability before
+collection. Rust validates leases, CRM eligibility, scope, result channels, and
+idempotency independently of the legacy `track_agenda` value. The field remains
+serialized and stored for compatibility; no migration or flag update is needed.
+
 ## Environment
 
 - Neon: `GRADES_NEON_URL`, or `GRADES_NEON_HOST`, `GRADES_NEON_DB`/`GRADES_NEON_DATABASE`, `GRADES_NEON_USER`, `GRADES_NEON_PASSWORD`, and optional `GRADES_NEON_PORT`.
@@ -43,7 +49,7 @@ Agents do not execute these files:
 - `sql/002_drop_neon_secondary_portal.sql`: transactional cleanup for existing Neon databases after the CRM-backed executable is deployed and verified.
 - `sql/003_split_student_scrape_state.sql`: splits grade, primary-agenda, and secondary-agenda data, status, and timestamps while migrating existing agenda snapshots.
 - `sql/004_drop_shared_scrape_state.sql`: removes the replaced shared agenda, status, error, and timestamp columns after the new contract is deployed and verified.
-- `sql/operations/`: human-run updates for Neon-owned portal override, agenda, and GPS configuration on rows that already exist.
+- `sql/operations/`: human-run updates for Neon-owned portal override and GPS configuration on rows that already exist; retained `track_agenda` values are compatibility data, not an agenda scheduling control.
 
 The separate CRM frontend owns `dbo.tblStudentGradePortalSecondary`. Pause old
 runners and wait for active jobs to finish before the expand/backfill migration;

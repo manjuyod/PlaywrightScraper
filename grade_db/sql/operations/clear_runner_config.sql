@@ -1,3 +1,4 @@
+-- track_agenda is deprecated compatibility data; it does not control agenda runs.
 -- Human-reviewed template. Replace crmstudentid before running.
 BEGIN;
 

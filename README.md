@@ -284,9 +284,31 @@ Database rollout is intentionally human-operated:
 6. Deploy the matching Python, dashboard, and `grade-db.exe` build together, then require `grade-db.exe doctor` to pass before resuming runners.
 7. Pilot one student, one franchise, and an agenda job. Verify channel statuses and result audit rows.
 8. Apply [`grade_db/sql/004_drop_shared_scrape_state.sql`](grade_db/sql/004_drop_shared_scrape_state.sql) only after the new readers and writers are verified.
-9. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override, agenda tracking, and GPS fields. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
+9. Use the templates in `grade_db/sql/operations/` to set or clear the Neon-owned portal override and GPS fields; the retained `track_agenda` parameter is deprecated compatibility data and does not enable or disable agenda runs. The separate CRM frontend owns rows in `dbo.tblStudentGradePortalSecondary`.
 
 `grade-db.exe` exposes only `job start`, `job heartbeat`, `result post`, `job complete`, `job fail`, and read-only `doctor`. It has no listener, arbitrary SQL command, scheduler, or migration command.
+
+### Automatic agenda eligibility
+
+Agenda jobs receive the grade-eligible CRM roster, then Python selects students
+with a complete portal slot whose registered engine advertises agenda support.
+The primary URL, username, and password must still satisfy grade eligibility;
+secondary-only credentials do not qualify a student. Both capable slots are
+collected with their own credentials.
+
+`track_agenda` is deprecated compatibility data. Its stored value and default
+are retained for rollback, but it no longer controls agenda selection or result
+acceptance. No flag update, backfill, or migration enables this behavior.
+
+Students skipped entirely receive no agenda result posts: their previous
+snapshots, statuses, and timestamps remain unchanged and can be stale. Retained
+students keep the existing independent per-slot result behavior. Job progress
+counts retained students; `agenda.preparation.completed` logs candidate,
+eligible, filtered, and preparation-error counts separately.
+
+Deploy the matching Python and rebuilt Rust executable together while agenda
+runners are stopped. Normal job creation, completion, and result persistence
+write to Neon and require explicit live-run authorization during this rollout.
 
 ## Tests
 

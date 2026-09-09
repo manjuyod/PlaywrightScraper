@@ -34,12 +34,14 @@ payload and database boundary.
 
 1. `scraper.runner` or `scraper.agenda` starts a leased job through `grade-db.exe`.
 2. Rust selects CRM students whose `GradePortalURL`, `GradePortalUser`, and `GradePortalPwd` are all trimmed and nonblank, left-joins optional secondary credentials from `dbo.tblStudentGradePortalSecondary`, then merges the remaining Neon-owned runner configuration.
-3. Python uses Playwright to collect a bounded number of students concurrently, controlled by `scraper.runner.MAX_CONCURRENT_GRADE_WORKERS`, while posting completed results serially and immediately.
+3. Python filters agenda candidates by current portal capability, then uses Playwright for collection. Grade collection uses `scraper.runner.MAX_CONCURRENT_GRADE_WORKERS`; agenda slot collectors share `scraper.agenda.MAX_CONCURRENT_AGENDA_WORKERS`. Completed results are posted serially and immediately.
 4. Rust rechecks CRM eligibility and atomically records the audit result and canonical `students_grades_20262027` update in Neon.
 5. The dashboard independently selects the runnable CRM roster, batch-reads canonical Neon state, and merges strictly by `crmstudentid`.
 6. In dev mode, the overview reads `grade_scrape_jobs` and polls `/api/jobs` every 15 seconds. It cannot start, heartbeat, complete, or fail jobs.
 
 ## Agenda Collection Contract
+
+`track_agenda` is deprecated compatibility data: its value and default remain stored, but agenda selection and result acceptance ignore it. Complete primary credentials and the existing CRM/scope checks remain prerequisites; secondary-only credentials do not make a student grade-eligible.
 
 `scraper.agenda` preserves the two CRM credential positions as fixed agenda
 slots: Portal 1 is always primary, and Portal 2 is always secondary. It never
@@ -66,9 +68,10 @@ assignment due date. Class buckets always contain `missing` and `due` arrays.
 Rows contain the title, normalized due date, and normalized local time (or
 `null`); undated work is omitted because it cannot be placed in a week.
 
-Canvas, ParentVUE, and Google Classroom are agenda-capable. Each collector
-returns both missing and upcoming/due work in one invocation; the agenda CLI
-does not select a single status. An entirely unconfigured slot is cleared and
+Agenda capability is declared by each engine in the Python portal registry.
+Each capable collector returns both missing and upcoming/due work in one
+invocation; the agenda CLI does not select a single status. For students
+retained for collection, an entirely unconfigured slot is cleared and
 records `not_configured`. Partial credentials record `configuration_missing`
 for their specific slot. Unsupported or parserless portals produce a neutral
 empty slot, not a synchronization failure. A capable collector with no dated
@@ -98,11 +101,15 @@ first row cannot fit. This is bounded current-state storage: a sufficiently
 large portal response is deterministically truncated rather than rejected by
 the database boundary.
 
-The runner starts workers only for configured agenda-capable slots and uses
-separate browser pages. It posts one `agenda_success` bundle only after every
-started worker succeeds. If any such worker fails during login, request,
-parsing, or normalization, it posts a controlled failure rather than a partial
-bundle; the database boundary leaves the prior stored snapshot in place.
+The agenda runner filters grade-eligible candidates using the current registry
+before opening a browser. Complete capable slots receive workers with the
+existing shared agenda-worker limit. Each slot posts its own primary or secondary
+result, so one slot's failure does not discard the other slot's success.
+
+Students skipped entirely preserve saved agendas, statuses, and timestamps.
+Unexpected preparation errors skip only that student and appear in aggregate
+warning diagnostics. Progress totals count retained students; zero retained
+students complete with zero counts and no Playwright startup or result posts.
 
 The snapshot must never include credentials, portal URLs, student identifiers,
 cookies, tokens, session values, or raw portal responses. Logs and controlled
