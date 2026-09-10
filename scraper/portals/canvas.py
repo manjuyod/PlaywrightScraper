@@ -16,6 +16,7 @@ from scraper.agenda_contract import AgendaRecord
 
 from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
 from .canvas_agenda import collect_canvas_agenda
+from .canvas_entry import is_ccsd_clever_entry
 from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow
 
 
@@ -49,6 +50,14 @@ _MICROSOFT_CONTINUATION_HOSTS = frozenset(
         "login.live.com",
     }
 )
+
+
+_CCSD_CANVAS_HOST = "ccsd.instructure.com"
+_CCSD_STUDENT_LOGIN_PATH = "/login/saml/1904"
+_CCSD_CLEVER_ASSERT_PATH = "/saml-canvas/assert/51e5622080da6210550053a4"
+_CLEVER_LOGIN_HOST = "clever.com"
+_CLEVER_LOGIN_PATH = "/oauth/ldap/login"
+_CLEVER_SAML_HOST = "samlidp.clever.com"
 
 
 class CanvasTrustError(LoginError):
@@ -189,6 +198,83 @@ class _CanvasAuthRoute:
         ):
             raise CanvasTrustError()
         return origin
+
+class _CcsdCanvasAuthRoute:
+    """CCSD's published Students link uses Clever, independently of HUSD SSO."""
+
+    def __init__(self, entry_url: str) -> None:
+        self.entry_origin, host = _normalized_https_origin(entry_url)
+        if host != _CCSD_CANVAS_HOST:
+            raise CanvasTrustError()
+        self.reset()
+
+    def reset(self) -> None:
+        self._phase = "entry"
+        self._current_host = _CCSD_CANVAS_HOST
+        self._current_path = ""
+        self._password_submitted = False
+
+    def observe(self, url: str) -> None:
+        origin, host = _normalized_https_origin(url)
+        path = urlparse(url).path
+        next_phase = None
+        if self._phase == "entry":
+            if origin == self.entry_origin and path == _CCSD_STUDENT_LOGIN_PATH:
+                next_phase = "entry"
+            elif host == _CLEVER_SAML_HOST and path == _CCSD_CLEVER_ASSERT_PATH:
+                next_phase = "clever_broker"
+        elif self._phase == "clever_broker":
+            if host == _CLEVER_SAML_HOST and path == _CCSD_CLEVER_ASSERT_PATH:
+                next_phase = "clever_broker"
+            elif host == _CLEVER_LOGIN_HOST and path == "/oauth/authorize":
+                next_phase = "clever"
+        elif self._phase == "clever":
+            if host == _CLEVER_LOGIN_HOST and path in ("/oauth/authorize", _CLEVER_LOGIN_PATH):
+                next_phase = "clever"
+            elif self._password_submitted and host == _CLEVER_LOGIN_HOST and path == "/oauth/authn_error":
+                next_phase = "rejected"
+            elif (self._password_submitted and host == _CLEVER_SAML_HOST
+                  and path in ("/saml-canvas/oauth", "/saml-canvas/assert")):
+                next_phase = "postauth_broker"
+        elif self._phase == "postauth_broker":
+            if host == _CLEVER_SAML_HOST and path in ("/saml-canvas/oauth", "/saml-canvas/assert"):
+                next_phase = "postauth_broker"
+            elif origin == self.entry_origin and path == "/login/saml":
+                next_phase = "canvas_return"
+        elif self._phase == "canvas_return":
+            if origin == self.entry_origin:
+                next_phase = "canvas_return"
+            elif host == _CANVAS_TRANSIT_HOST and path == "/delegated_auth_pass_through":
+                next_phase = "canvas_return"
+        elif self._phase == "rejected" and host == _CLEVER_LOGIN_HOST and path == "/oauth/authn_error":
+            next_phase = "rejected"
+        if next_phase is None:
+            raise CanvasTrustError()
+        self._phase = next_phase
+        self._current_host = host
+        self._current_path = path
+
+    def require_clever_credentials(self) -> None:
+        if (self._phase != "clever" or self._current_host != _CLEVER_LOGIN_HOST
+                or self._current_path != _CLEVER_LOGIN_PATH or self._password_submitted):
+            raise CanvasTrustError()
+
+    def require_login_not_rejected(self) -> None:
+        if self._phase == "rejected":
+            raise LoginError("portal login rejected")
+
+    def mark_password_submitted(self) -> None:
+        self.require_clever_credentials()
+        self._password_submitted = True
+
+    def verified_canvas_origin(self, url: str) -> str:
+        origin, host = _normalized_https_origin(url)
+        self.observe(url)
+        if (self._phase != "canvas_return" or not self._password_submitted
+                or host != _CCSD_CANVAS_HOST):
+            raise CanvasTrustError()
+        return origin
+
 
 def _origin(url: str) -> str:
     u = urlparse(url)
@@ -478,7 +564,7 @@ class CanvasEngine(PortalEngine):
         route.observe(self.page.url)
         route.require_microsoft_credentials()
 
-    def _install_canvas_route_guard(self, route: _CanvasAuthRoute) -> None:
+    def _install_canvas_route_guard(self, route: _CanvasAuthRoute | _CcsdCanvasAuthRoute) -> None:
         self._canvas_route_error: CanvasTrustError | None = None
 
         def observe_main_frame(request: Any) -> None:
@@ -566,6 +652,67 @@ class CanvasEngine(PortalEngine):
             route.require_microsoft_continuation()
             await self._run_canvas_auth_action(self.page.click("#idSIButton9"))
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.8, min=0.8, max=3),
+        retry=retry_if_exception_type(PlaywrightTimeout),
+        reraise=True,
+    )
+    async def _prepare_ccsd_login(self, route: _CcsdCanvasAuthRoute) -> None:
+        route.reset()
+        # /login/canvas is the Community login; students use the district's
+        # published Students SAML provider even when the old URL is configured.
+        await self._run_canvas_auth_action(self.page.goto(
+            urljoin(route.entry_origin, _CCSD_STUDENT_LOGIN_PATH),
+            wait_until="domcontentloaded",
+        ))
+        await self._run_canvas_auth_action(self.page.wait_for_url(
+            lambda url: (_normalized_https_origin(url)[1] == _CLEVER_LOGIN_HOST
+                         and urlparse(str(url)).path == "/oauth/authorize"),
+            timeout=15_000, wait_until="domcontentloaded",
+        ))
+        route.observe(self.page.url)
+        await self._run_canvas_auth_action(self.page.get_by_role(
+            "link", name="Log in with Active Directory", exact=True,
+        ).click())
+        await self._run_canvas_auth_action(self.page.wait_for_url(
+            lambda url: (_normalized_https_origin(url)[1] == _CLEVER_LOGIN_HOST
+                         and urlparse(str(url)).path == _CLEVER_LOGIN_PATH),
+            timeout=15_000, wait_until="domcontentloaded",
+        ))
+        route.observe(self.page.url)
+        route.require_clever_credentials()
+
+    async def _check_ccsd_credential_target(self, route: _CcsdCanvasAuthRoute, form: Any) -> None:
+        self._raise_canvas_route_error()
+        route.observe(self.page.url)
+        route.require_clever_credentials()
+        target = await self._run_canvas_auth_action(form.evaluate(
+            "form => ({action: form.action, method: form.method})"
+        ))
+        _, host = _normalized_https_origin(target["action"])
+        if (host != _CLEVER_LOGIN_HOST or urlparse(target["action"]).path != _CLEVER_LOGIN_PATH
+                or target["method"].lower() != "post"):
+            raise CanvasTrustError()
+        route.observe(self.page.url)
+        route.require_clever_credentials()
+
+    async def _submit_ccsd_credentials_once(self, route: _CcsdCanvasAuthRoute) -> None:
+        form = self.page.locator('form:has(input[name="username"]):has(input[name="password"])')
+        # CCSD's Clever AD login expects the username without its Google domain.
+        username = self.sid
+        local, separator, domain = username.rpartition("@")
+        if separator and local and "@" not in local and domain.lower() == "nv.ccsd.net":
+            username = local
+        for selector, value in (("username", username), ("password", self.pw)):
+            await self._check_ccsd_credential_target(route, form)
+            await self._run_canvas_auth_action(form.locator(f'input[name="{selector}"]').fill(value))
+        await self._check_ccsd_credential_target(route, form)
+        route.mark_password_submitted()
+        await self._run_canvas_auth_action(form.get_by_role("button", name="Log in", exact=True).click())
+        await self._run_canvas_auth_action(self.page.wait_for_load_state("domcontentloaded"))
+        route.require_login_not_rejected()
+
     async def login(self, first_name: Optional[str] = None):
         """
         Fill creds, submit, and land in a valid post-login Canvas state.
@@ -575,11 +722,22 @@ class CanvasEngine(PortalEngine):
         if not self.login_url:
             raise LoginError("portal login rejected")
 
-        route = _CanvasAuthRoute(self.login_url)
+        # Saved Clever portal links carry an unrelated/expired OAuth session.
+        # Start a fresh Canvas SAML flow so AD sign-in returns to this tenant.
+        entry_url = self.login_url
+        if is_ccsd_clever_entry(entry_url):
+            entry_url = f"https://{_CCSD_CANVAS_HOST}{_CCSD_STUDENT_LOGIN_PATH}"
+        _, entry_host = _normalized_https_origin(entry_url)
+        route = (_CcsdCanvasAuthRoute(entry_url) if entry_host == _CCSD_CANVAS_HOST
+                 else _CanvasAuthRoute(entry_url))
         self._install_canvas_route_guard(route)
         try:
-            await self._prepare_login(route)
-            await self._submit_microsoft_credentials_once(route)
+            if isinstance(route, _CcsdCanvasAuthRoute):
+                await self._prepare_ccsd_login(route)
+                await self._submit_ccsd_credentials_once(route)
+            else:
+                await self._prepare_login(route)
+                await self._submit_microsoft_credentials_once(route)
 
             login_ok = await self._run_canvas_auth_action(
                 self._wait_for_login_result(timeout_ms=14000)

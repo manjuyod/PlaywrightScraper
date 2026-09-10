@@ -20,8 +20,9 @@ _WORKSPACE_FRAME = "main-workspace"
 _COURSE_CARDS = "div.collapsible-card.grades__card:visible"
 _COURSE_LINK = "h4 a"
 _COURSE_GRADES_ROOT = "tl-grading-task-list"
+_LOADED_COURSE_GRADES = "tl-student-grades tl-grading-detail tl-grading-task-list"
 _COURSE_GRADES_ENTRY = (
-    'tl-grading-task-list:visible, a:visible:text-is("Grades"), '
+    f'{_LOADED_COURSE_GRADES}:visible, a:visible:text-is("Grades"), '
     'button:visible:text-is("Grades")'
 )
 _CATEGORY_TOGGLES = "button.divider__header[aria-controls]"
@@ -175,19 +176,17 @@ async def _open_course(frame: Frame, index: int, title: str) -> None:
 
 
 async def _wait_for_course_page(page: Page) -> Frame:
-    workspace = page.frame_locator('iframe[name="main-workspace"]')
-    await workspace.locator(_COURSE_CARDS).first.wait_for(
-        state="hidden",
-        timeout=_READINESS_TIMEOUT_MS,
+    # The wrapper changes route before the iframe. A disappearing card (or a
+    # grading-task-list still in the overview) does not mean the course loaded.
+    frame = _workspace(page)
+    await frame.wait_for_url(
+        re.compile(r"/portal/student/classroom/"), timeout=_READINESS_TIMEOUT_MS
     )
-    frame = page.frame(_WORKSPACE_FRAME)
-    if frame is None:
-        raise InfiniteCampusAgendaError()
     return frame
 
 
 async def _open_course_grades(frame: Frame) -> Frame:
-    root = frame.locator(f"{_COURSE_GRADES_ROOT}:visible")
+    root = frame.locator(f"{_LOADED_COURSE_GRADES}:visible")
     await frame.locator(_COURSE_GRADES_ENTRY).first.wait_for(
         state="visible",
         timeout=_READINESS_TIMEOUT_MS,

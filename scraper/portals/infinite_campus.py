@@ -1,9 +1,11 @@
 from __future__ import annotations
 from datetime import datetime
+import re
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from scraper.agenda_contract import AgendaRecord
-from playwright.async_api import Frame, Page, TimeoutError as PlaywrightTimeout, expect
+from playwright.async_api import Frame, Page, TimeoutError as PlaywrightTimeout
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -64,22 +66,21 @@ class InfiniteCampus(PortalEngine):
 
     # ---------------------- NAV TO GRADES -------
     async def nav_to_grades(self, *, force: bool = False) -> None:
-        grades_url_pattern = "**/grades*"
+        grades_url_pattern = re.compile(r"/portal/student/grades(?:[?#]|$)")
         menu_selector = "#menu-toggle-button"
         grades_button_label = "Grades"
-        on_grades_page = False
-        if not force:
-            try:  # are we already on the page?
-                await expect(self.page).to_have_url(grades_url_pattern)
-                on_grades_page = True
-            except AssertionError:
-                pass
+        on_grades_page = not force and grades_url_pattern.search(self.page.url)
         if not on_grades_page:
             _ = await self.page.wait_for_selector(menu_selector)
             await self.page.locator(menu_selector).click()
-            await self.page.get_by_role("link", name=grades_button_label).click()
+            await self.page.get_by_role("link", name=grades_button_label, exact=True).click()
             await self.page.wait_for_url(grades_url_pattern, timeout=20000)
-            await self.page.wait_for_load_state("networkidle")
+        frame = self.page.frame("main-workspace")
+        assert frame is not None, "Infinite Campus main workspace frame not found"
+        await frame.wait_for_url(grades_url_pattern, timeout=20000)
+        await frame.locator(self._GRADE_CARDS).first.wait_for(
+            state="visible", timeout=30000
+        )
 
     @staticmethod
     def term_semester_from_today() -> int:
@@ -206,6 +207,16 @@ class InfiniteCampus(PortalEngine):
             await timeframe.click()
             await frame.wait_for_timeout(cls._TIMEFRAME_SETTLE_MS)
             return name
+        # Coral exposes only its current term as a heading, without quarter
+        # buttons. Recognize that district's observed marker without treating
+        # missing controls on other districts as a valid selection.
+        if urlsplit(frame.url).hostname == "coralnv.infinitecampus.org":
+            for name in names:
+                heading = frame.locator("tl-app-term-picker .header-text").filter(
+                    has_text=re.compile(rf"^\s*Term\s+{re.escape(name)}\s*$")
+                )
+                if await heading.count() == 1 and await heading.is_visible():
+                    return name
         return None
 
     # ---------------------- LOGOUT ----------------------
@@ -216,9 +227,14 @@ class InfiniteCampus(PortalEngine):
     @override
     async def get_agenda(self) -> list[AgendaRecord]:
         await self.nav_to_grades()
+        selected_names: tuple[str, ...] = ()
 
         async def return_to_grades() -> None:
             await self.nav_to_grades(force=True)
+            current_frame = self.page.frame("main-workspace")
+            assert current_frame is not None
+            if await self.select_timeframe(current_frame, selected_names) is None:
+                raise AssertionError("Infinite Campus timeframe not restored")
 
         frame = self.page.frame("main-workspace")
         assert frame is not None, "Infinite Campus main workspace frame not found"
@@ -230,6 +246,7 @@ class InfiniteCampus(PortalEngine):
         for names in quarter_groups:
             if await self.select_timeframe(frame, names) is None:
                 continue
+            selected_names = names
             selected_quarter = True
             if await frame.locator(f"{self._GRADE_CARDS}:visible").count() > 0:
                 records.extend(
@@ -238,7 +255,7 @@ class InfiniteCampus(PortalEngine):
                         return_to_grades=return_to_grades,
                     )
                 )
-                await return_to_grades()
+                await self.nav_to_grades(force=True)
                 frame = self.page.frame("main-workspace")
                 assert frame is not None
 
@@ -247,6 +264,7 @@ class InfiniteCampus(PortalEngine):
 
         if await self.select_timeframe(frame, semester_group) is None:
             raise AssertionError("Infinite Campus timeframe not found")
+        selected_names = semester_group
         return await collect_infinite_campus_agenda(
             self.page,
             return_to_grades=return_to_grades,

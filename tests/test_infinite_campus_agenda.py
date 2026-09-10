@@ -385,3 +385,33 @@ def test_timeframes_and_grade_merge_keep_the_later_complete_snapshot() -> None:
         "Current only": 94.0,
         "Shared": 0.0,
     }
+
+
+def test_agenda_restores_selected_quarter_between_courses(monkeypatch):
+    page = FakePage(FakeFrame())
+    engine = InfiniteCampus(cast(Page, page), "student", "password", "https://ic.example")
+    selected = None
+    collected = []
+
+    async def navigate(*, force=False):
+        nonlocal selected
+        selected = "Q1"  # The portal resets the term when Grades is reopened.
+
+    async def select(frame, names):
+        nonlocal selected
+        selected = names[-1]
+        return selected
+
+    async def collect(page, *, return_to_grades):
+        term = selected
+        await return_to_grades()
+        assert selected == term
+        collected.append(term)
+        return []
+
+    monkeypatch.setattr(engine, "nav_to_grades", navigate)
+    monkeypatch.setattr(engine, "select_timeframe", select)
+    monkeypatch.setattr(engine, "term_semester_from_today", lambda: 1)
+    monkeypatch.setattr("scraper.portals.infinite_campus.collect_infinite_campus_agenda", collect)
+    assert asyncio.run(engine.get_agenda()) == []
+    assert collected == ["Q1", "Q2"]

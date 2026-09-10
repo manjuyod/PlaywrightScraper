@@ -5,6 +5,8 @@ import pkgutil
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from .canvas_entry import is_ccsd_clever_entry
+
 if TYPE_CHECKING:
     from .base import PortalEngine
 
@@ -66,6 +68,8 @@ def get_portal(key: object) -> type[PortalEngine]:
 def get_portal_key_from_url(url: str) -> str | None:
     if not url:
         return None
+    if "canvas" in managed_portals and is_ccsd_clever_entry(url):
+        return "canvas"
     normalized_url = url.casefold()
     matches = (
         (len(pattern), key)

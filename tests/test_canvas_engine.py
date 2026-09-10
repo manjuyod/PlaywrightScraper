@@ -825,6 +825,224 @@ def test_untrusted_navigation_during_post_login_precedes_cleanup_error() -> None
         asyncio.run(engine.login())
 
 
+CCSD_STUDENT_LOGIN = "https://ccsd.instructure.com/login/saml/1904"
+CCSD_CLEVER_BROKER = "https://samlidp.clever.com/saml-canvas/assert/51e5622080da6210550053a4"
+CCSD_CLEVER_LOGIN = "https://clever.com/oauth/ldap/login"
+
+
+def test_ccsd_clever_authentication_error_is_a_terminal_rejection():
+    """Clever's real rejection redirect must not be misreported as an untrusted route."""
+    route = _ccsd_route_at_credentials()
+    route.mark_password_submitted()
+    route.observe("https://clever.com/oauth/authn_error")
+    with pytest.raises(canvas.LoginError, match="^portal login rejected$"):
+        route.require_login_not_rejected()
+    with pytest.raises(canvas.CanvasTrustError):
+        route.require_clever_credentials()
+    with pytest.raises(canvas.CanvasTrustError):
+        route.verified_canvas_origin("https://ccsd.instructure.com/")
+
+
+def _ccsd_route_at_credentials():
+    route = canvas._CcsdCanvasAuthRoute(CCSD_STUDENT_LOGIN)
+    for url in (CCSD_STUDENT_LOGIN, CCSD_CLEVER_BROKER,
+                "https://clever.com/oauth/authorize", CCSD_CLEVER_LOGIN):
+        route.observe(url)
+    return route
+
+
+@pytest.mark.parametrize("entry", [
+    "https://ccsd.instructure.com/",
+    "https://ccsd.instructure.com/login/canvas",
+    CCSD_STUDENT_LOGIN,
+])
+def test_ccsd_route_accepts_observed_student_sso_and_exact_canvas_return(entry):
+    """Blocks the regression where CCSD students are sent through HUSD Microsoft SSO."""
+    route = canvas._CcsdCanvasAuthRoute(entry)
+    for url in (CCSD_STUDENT_LOGIN, CCSD_CLEVER_BROKER,
+                "https://clever.com/oauth/authorize", CCSD_CLEVER_LOGIN):
+        route.observe(url)
+    route.require_clever_credentials()
+    route.mark_password_submitted()
+    for url in (CCSD_CLEVER_LOGIN, "https://clever.com/oauth/authorize",
+                "https://samlidp.clever.com/saml-canvas/oauth",
+                "https://samlidp.clever.com/saml-canvas/assert",
+                "https://ccsd.instructure.com/login/saml",
+                "https://sso.canvaslms.com/delegated_auth_pass_through",
+                "https://ccsd.instructure.com/"):
+        route.observe(url)
+    assert route.verified_canvas_origin("https://ccsd.instructure.com/") == "https://ccsd.instructure.com"
+
+
+@pytest.mark.parametrize("untrusted", [
+    "https://husd.instructure.com/",
+    "https://iad.login.instructure.com/",
+    "https://login.microsoftonline.com/",
+    "https://clever.com.evil.example/oauth/ldap/login",
+    "http://clever.com/oauth/ldap/login",
+    "https://user@clever.com/oauth/ldap/login",
+    "https://clever.com:444/oauth/ldap/login",
+    "https://clever.com/oauth/google/login",
+    "https://samlidp.clever.com/saml-canvas/assert/another-district",
+])
+def test_ccsd_route_rejects_unobserved_tenants_origins_and_identity_providers(untrusted):
+    """A district-specific approval must not authorize arbitrary Clever or Canvas routes."""
+    route = _ccsd_route_at_credentials()
+    with pytest.raises(canvas.CanvasTrustError):
+        route.observe(untrusted)
+
+
+def test_ccsd_cannot_verify_return_or_repeat_credentials_before_valid_submission():
+    """An arbitrary Canvas page cannot establish an authenticated origin."""
+    route = _ccsd_route_at_credentials()
+    with pytest.raises(canvas.CanvasTrustError):
+        route.verified_canvas_origin("https://ccsd.instructure.com/")
+    route.mark_password_submitted()
+    with pytest.raises(canvas.CanvasTrustError):
+        route.require_clever_credentials()
+
+
+class CcsdLoginPage(RoutePage):
+    """Boundary double for the observed browser redirects and credential form."""
+
+    def __init__(self, *, redirect_after_username=None, form_action=CCSD_CLEVER_LOGIN,
+                 submit_timeout=False):
+        super().__init__()
+        self.redirect_after_username = redirect_after_username
+        self.form_action = form_action
+        self.submit_timeout = submit_timeout
+        self.filled = []
+        self.submissions = 0
+        self.entry_urls = []
+
+    async def goto(self, url, **kwargs):
+        self.entry_urls.append(url)
+        for hop in (url, CCSD_CLEVER_BROKER, "https://clever.com/oauth/authorize"):
+            self.navigate(hop)
+
+    async def wait_for_url(self, predicate, **kwargs):
+        assert predicate(self.url)
+
+    async def wait_for_load_state(self, *args, **kwargs):
+        pass
+
+    def get_by_role(self, role, *, name, exact=False):
+        page = self
+
+        class Button:
+            async def click(self):
+                if role == "link" and name == "Log in with Active Directory":
+                    page.navigate(CCSD_CLEVER_LOGIN)
+                else:
+                    assert role == "button" and name == "Log in" and exact
+                    page.submissions += 1
+                    for hop in ("https://samlidp.clever.com/saml-canvas/oauth",
+                                "https://samlidp.clever.com/saml-canvas/assert",
+                                "https://ccsd.instructure.com/login/saml",
+                                "https://sso.canvaslms.com/delegated_auth_pass_through",
+                                "https://ccsd.instructure.com/"):
+                        page.navigate(hop)
+                    if page.submit_timeout:
+                        raise PlaywrightTimeout("post-submit timeout")
+        return Button()
+
+    def locator(self, selector):
+        page = self
+
+        class Form:
+            async def evaluate(self, expression):
+                return {"action": page.form_action, "method": "post"}
+
+            def locator(self, field):
+                class Field:
+                    async def fill(self, value):
+                        page.filled.append((field, value))
+                        if field == 'input[name="username"]' and page.redirect_after_username:
+                            page.navigate(page.redirect_after_username)
+                return Field()
+
+            def get_by_role(self, role, **kwargs):
+                return page.get_by_role(role, **kwargs)
+        assert selector == 'form:has(input[name="username"]):has(input[name="password"])'
+        return Form()
+
+
+class CcsdLoginEngine(CanvasEngine):
+    async def _wait_for_login_result(self, timeout_ms=12000):
+        return self.page.url == "https://ccsd.instructure.com/"
+
+    async def _is_canvas_logged_in(self):
+        return self.page.url == "https://ccsd.instructure.com/"
+
+    async def post_login(self):
+        pass
+
+
+@pytest.mark.parametrize("entry", [
+    "https://ccsd.instructure.com/", "https://ccsd.instructure.com/login/canvas", CCSD_STUDENT_LOGIN,
+    "https://clever.com/oauth/authorize?channel=clever&client_id=4c63c1cf623dce82caac"
+    "&redirect_uri=https%3A%2F%2Fclever.com%2Fin%2Fauth_callback&response_type=code"
+    "&state=expired-session-state&district_id=51e5622080da6210550053a4",
+])
+def test_ccsd_login_uses_student_route_and_freezes_verified_origin(entry):
+    """The legacy Community URL must use the working district student authentication route."""
+    page = CcsdLoginPage()
+    engine = CcsdLoginEngine(page, "student-id", "password", entry)
+    asyncio.run(engine.login())
+    assert page.entry_urls == [CCSD_STUDENT_LOGIN]
+    assert page.filled == [('input[name="username"]', "student-id"), ('input[name="password"]', "password")]
+    assert page.submissions == 1
+    assert engine._canvas_origin == "https://ccsd.instructure.com"
+
+
+def test_ccsd_login_rejects_untrusted_username_redirect_before_password_fill():
+    """Never disclose the password after an unexpected navigation during username entry."""
+    page = CcsdLoginPage(redirect_after_username="https://unknown.example/login")
+    engine = CcsdLoginEngine(page, "student-id", "password", CCSD_STUDENT_LOGIN)
+    with pytest.raises(canvas.CanvasTrustError):
+        asyncio.run(engine.login())
+    assert page.filled == [('input[name="username"]', "student-id")]
+    assert page.submissions == 0
+    assert not hasattr(engine, "_canvas_origin")
+
+
+def test_ccsd_login_rejects_untrusted_form_target_before_filling_credentials():
+    """A trusted page cannot submit credentials to an untrusted form action."""
+    page = CcsdLoginPage(form_action="https://unknown.example/login")
+    engine = CcsdLoginEngine(page, "student-id", "password", CCSD_STUDENT_LOGIN)
+    with pytest.raises(canvas.CanvasTrustError):
+        asyncio.run(engine.login())
+    assert page.filled == []
+    assert page.submissions == 0
+
+
+def test_ccsd_login_does_not_resubmit_after_post_submit_timeout():
+    """Only preparation can retry; a completed credential submission must stay single-shot."""
+    page = CcsdLoginPage(submit_timeout=True)
+    engine = CcsdLoginEngine(page, "student-id", "password", CCSD_STUDENT_LOGIN)
+    with pytest.raises(PlaywrightTimeout):
+        asyncio.run(engine.login())
+    assert page.submissions == 1
+    assert len(page.entry_urls) == 1
+    assert not hasattr(engine, "_canvas_origin")
+
+
+@pytest.mark.parametrize(("configured_username", "ad_username"), [
+    ("student.12345@nv.ccsd.net", "student.12345"),
+    ("Student.12345@NV.CCSD.NET", "Student.12345"),
+    ("student.12345", "student.12345"),
+    ("parent@example.com", "parent@example.com"),
+    ("student@nv.ccsd.net.evil.example", "student@nv.ccsd.net.evil.example"),
+])
+def test_ccsd_uses_ad_username_from_only_the_exact_district_email_domain(configured_username, ad_username):
+    """The district's AD form requires the local username, unlike its Google login."""
+    page = CcsdLoginPage()
+    engine = CcsdLoginEngine(page, configured_username, "password", CCSD_STUDENT_LOGIN)
+    asyncio.run(engine.login())
+    assert page.filled == [('input[name="username"]', ad_username), ('input[name="password"]', "password")]
+    assert page.submissions == 1
+
+
 @pytest.mark.parametrize("probe_timeout", [False, True])
 def test_untrusted_navigation_during_final_auth_probe_preserves_trust_error(
     probe_timeout: bool,
