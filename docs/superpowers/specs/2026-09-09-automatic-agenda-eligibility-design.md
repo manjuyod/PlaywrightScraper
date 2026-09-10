@@ -90,6 +90,8 @@ For retained students, downstream `fetch_agenda` and per-slot result behavior re
 
 The boundary service initially creates the job from the broader candidate set, but runner heartbeats and completion use the retained total. Current Rust progress validation and persistence already allow replacement of the initial total with a smaller internally consistent total, including zero. Progress counts students, not slots, and a retained student advances attempted progress once after its existing collection/result workflow finishes.
 
+For a nonempty retained population, await an initial heartbeat containing the filtered progress before starting Playwright, then start the existing periodic heartbeat loop. This preserves the filtered total even if browser startup or collection fails before the first periodic heartbeat. If the initial heartbeat raises a database-boundary error, use the existing `lease_renewal_failed` job-failure path and do not start a browser.
+
 If no student is retained, Python completes the job successfully with all four progress counts set to zero, without starting Playwright or posting agenda results. This includes runs where preparation errors prevent selection; those errors must remain visible in the separate diagnostic counts rather than being described as ordinary unsupported portals. Job creation and completion still persist lifecycle records during an authorized live run.
 
 ### Stored agendas for skipped students
@@ -186,6 +188,7 @@ The retained `track_agenda` values allow rollback without rewriting configuratio
 - Preparation-error diagnostics expose the required aggregate counts without supplied secrets or raw exceptions, and cancellation is not swallowed.
 - `main` filters candidates before browser launch.
 - Progress and completion totals use the filtered population.
+- Immediate browser-startup or collection failures leave the filtered total persisted; an initial heartbeat failure prevents Playwright startup and follows the existing lease-failure path.
 - A zero-eligible job completes with zero progress without starting Playwright or posting agenda results, including when every candidate has a preparation error; diagnostics distinguish that case.
 - A previously supported student with no remaining qualifying slots receives no result posts, leaving stored snapshots, statuses, and timestamps unchanged; later restored capability makes the student selectable again.
 - A retained student with one unsupported slot keeps the existing per-slot empty-result behavior and independent success/failure handling.

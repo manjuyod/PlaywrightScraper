@@ -1240,6 +1240,10 @@ def test_browser_cleanup_after_collection_does_not_fail_agenda_job(monkeypatch) 
                 "students": [{"crmstudentid": 7}],
             }
 
+        def heartbeat(self, **kwargs):
+            assert kwargs["progress"] == {"total": 1, "attempted": 0, "success": 0, "errors": 0}
+            return {"ok": True}
+
         def complete_job(self, **kwargs):
             completed.append(kwargs)
             return {"ok": True}

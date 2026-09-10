@@ -10,6 +10,7 @@ import pytest
 
 from scraper import agenda
 from scraper.config.logging import ContextFilter, bind_log_context, reset_log_context
+from scraper.db_cli import GradeDbLeaseExpired, GradeDbProtocolError, GradeDbUnavailable
 
 
 def raw_student(number=1, **changes):
@@ -187,7 +188,6 @@ def job_harness(monkeypatch):
 
         def heartbeat(self, **kwargs):
             state.heartbeats.append(deepcopy(kwargs["progress"]))
-            state.loop.call_soon_threadsafe(state.heartbeat_seen.set)
             return {"ok": True}
 
         def complete_job(self, **kwargs):
@@ -213,9 +213,6 @@ def job_harness(monkeypatch):
 
     async def collect(client, session, browser, students, progress, lease_failed):
         state.collection_count += 1
-        state.loop = asyncio.get_running_loop()
-        state.heartbeat_seen = asyncio.Event()
-        await asyncio.wait_for(state.heartbeat_seen.wait(), timeout=2)
         for student in students:
             await asyncio.to_thread(client.post_result, crmstudentid=student["db_id"])
             agenda._advance_progress(progress, success=True)
@@ -224,8 +221,6 @@ def job_harness(monkeypatch):
     monkeypatch.setattr(agenda, "GradeDbClient", Client)
     monkeypatch.setattr(agenda, "async_playwright", PlaywrightContext)
     monkeypatch.setattr(agenda, "_collect_and_post_agendas", collect)
-    # Wait for an actual heartbeat; shorten only the interval in this test.
-    monkeypatch.setattr("scraper.runner.HEARTBEAT_INTERVAL_SECONDS", 0.001)
     return state
 
 
@@ -332,3 +327,90 @@ def test_cli_initializes_logging_before_preparing_candidates(monkeypatch):
     monkeypatch.setattr("sys.argv", ["agenda", "--franchise-id", "19"])
     runpy.run_path(agenda.__file__, run_name="__main__")
     assert events == ["logging", "start", "complete"]
+
+
+@pytest.mark.parametrize("failure_phase", ["launch", "collection"])
+def test_initial_filtered_progress_survives_fast_job_failure(
+    job_harness, monkeypatch, failure_phase
+):
+    job_harness.rows = [
+        raw_student(1),
+        raw_student(2, portal1="https://powerschool.example/login"),
+    ]
+    persisted = {"total": 2, "attempted": 0, "success": 0, "errors": 0}
+    events = []
+    failed = []
+
+    def heartbeat(self, **kwargs):
+        assert kwargs["job_id"] == "synthetic-job"
+        assert kwargs["lease_token"] == "synthetic-lease"
+        persisted.update(kwargs["progress"])
+        events.append("heartbeat")
+        return {"ok": True}
+
+    def fail_job(self, **kwargs):
+        failed.append(kwargs["code"])
+
+    class PlaywrightContext:
+        async def __aenter__(self):
+            events.append("playwright")
+
+            async def launch(**kwargs):
+                if failure_phase == "launch":
+                    raise RuntimeError("synthetic browser launch failure")
+                return SimpleNamespace(close=AsyncMock())
+
+            return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def fail_collection(*args, **kwargs):
+        return "result_post_failed"
+
+    monkeypatch.setattr(agenda.GradeDbClient, "heartbeat", heartbeat)
+    monkeypatch.setattr(agenda.GradeDbClient, "fail_job", fail_job)
+    monkeypatch.setattr(agenda, "async_playwright", PlaywrightContext)
+    monkeypatch.setattr(agenda, "_collect_and_post_agendas", fail_collection)
+    failure_code = "agenda_runner_failed" if failure_phase == "launch" else "result_post_failed"
+    with pytest.raises(RuntimeError, match=f"^agenda job failed: {failure_code}$"):
+        asyncio.run(agenda.main(19, None))
+
+    assert persisted == {"total": 1, "attempted": 0, "success": 0, "errors": 0}
+    assert events == ["heartbeat", "playwright"]
+    assert failed == [failure_code]
+    assert job_harness.completed == []
+    assert job_harness.posts == []
+
+
+@pytest.mark.parametrize("error_type", [GradeDbUnavailable, GradeDbLeaseExpired, GradeDbProtocolError])
+def test_initial_heartbeat_failure_prevents_browser_startup(job_harness, monkeypatch, error_type):
+    job_harness.rows = [raw_student()]
+    failed = []
+    browser_starts = []
+    heartbeats = []
+
+    def heartbeat(self, **kwargs):
+        heartbeats.append(kwargs["progress"])
+        raise error_type("synthetic boundary failure")
+
+    def fail_job(self, **kwargs):
+        failed.append(kwargs["code"])
+        if error_type is GradeDbLeaseExpired:
+            raise GradeDbLeaseExpired("synthetic expired lease")
+
+    def no_playwright():
+        browser_starts.append(True)
+        raise AssertionError("Initial heartbeat failure must prevent Playwright startup")
+
+    monkeypatch.setattr(agenda.GradeDbClient, "heartbeat", heartbeat)
+    monkeypatch.setattr(agenda.GradeDbClient, "fail_job", fail_job)
+    monkeypatch.setattr(agenda, "async_playwright", no_playwright)
+    with pytest.raises(RuntimeError, match="^agenda job failed: lease_renewal_failed$"):
+        asyncio.run(agenda.main(19, None))
+
+    assert heartbeats == [{"total": 1, "attempted": 0, "success": 0, "errors": 0}]
+    assert browser_starts == []
+    assert failed == ["lease_renewal_failed"]
+    assert job_harness.completed == []
+    assert job_harness.posts == []

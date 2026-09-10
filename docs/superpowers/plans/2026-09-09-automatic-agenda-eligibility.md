@@ -1018,3 +1018,11 @@ Before execution, read both this plan and the linked spec. After each code task,
 - Inline review checked the complete implementation against the spec: shared grade conversion, models, Neon persistence SQL, portal engines, concurrency, per-slot handling, and dashboard code are unchanged. SQL operation templates differ only in compatibility comments. No blocking code-review findings remain.
 - GitNexus graph/FTS was rebuilt successfully after an index file-rename error; change detection was repeated against the refreshed graph.
 - Remaining operator work: coordinated deployment, headed non-persisting portal validation with a selected student, and a separately authorized franchise pilot. Saved snapshots for skipped students intentionally retain their previous status/timestamps and can be stale.
+
+## Review Follow-Up: Persist Initial Filtered Progress
+
+- [x] Reproduced early browser-startup and collection failures retaining the broader candidate total. The original test fixture forced a periodic heartbeat and masked this case.
+- [x] Await an initial filtered-progress heartbeat before starting Playwright; start the unchanged periodic heartbeat loop only after that succeeds. Initial boundary errors use `lease_renewal_failed` and prevent browser startup. Cleanup handles the case where no periodic task was created.
+- [x] Remove the forced heartbeat wait and shortened interval from the eligibility test harness. Add fast-failure regressions and initial-heartbeat rejection coverage for unavailable dependencies, expired leases, and invalid responses. Update the existing browser-cleanup fake to accept the initial heartbeat.
+- [x] Confirm RED before the production fix: six assertions failed (five new cases plus the existing progress case exposed by the simpler fixture). Confirm GREEN afterward: 102 focused tests and the full Python suite (543 passed, 1 skipped, 1 integration test deselected).
+- [x] Review source scope: only `scraper.agenda.main` changed in production. Shared heartbeat logic, Rust, and SQL are unchanged; the previously built Rust artifact remains compatible. No live database writes or browser runs were performed for this fix.

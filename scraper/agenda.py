@@ -577,12 +577,24 @@ async def main(
 
     stop_heartbeat = asyncio.Event()
     lease_failed = asyncio.Event()
-    heartbeat = asyncio.create_task(
-        _heartbeat_loop(client, session, progress, stop_heartbeat, lease_failed)
-    )
+    heartbeat: asyncio.Task[None] | None = None
     failure_code: str | None = None
     collection_finished = False
     try:
+        # Persist the filtered total even if browser startup or collection fails immediately.
+        try:
+            await asyncio.to_thread(
+                client.heartbeat,
+                job_id=session["job_id"],
+                lease_token=session["lease_token"],
+                progress=progress.copy(),
+            )
+        except GradeDbError:
+            failure_code = "lease_renewal_failed"
+            raise
+        heartbeat = asyncio.create_task(
+            _heartbeat_loop(client, session, progress, stop_heartbeat, lease_failed)
+        )
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
                 headless=False,
@@ -608,7 +620,8 @@ async def main(
             failure_code = failure_code or "agenda_runner_failed"
     finally:
         stop_heartbeat.set()
-        await heartbeat
+        if heartbeat is not None:
+            await heartbeat
 
     if lease_failed.is_set():
         failure_code = failure_code or "lease_renewal_failed"
