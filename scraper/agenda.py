@@ -364,34 +364,33 @@ async def fetch_agenda(
         if on_slot_result is not None:
             await on_slot_result(slot.key, bundle[slot.key], failure_code)
 
-    for slot in slots:
-        configured_values = (slot.login_url, slot.username, slot.password)
-        if not any(configured_values):
-            attempted_slots.append(slot.key)
-            await report(slot, None)
-            continue
-        attempted_slots.append(slot.key)
-        if not all(configured_values):
-            failures[slot.key] = "configuration_missing"
-            await report(slot, failures[slot.key])
-            continue
-        if not slot.portal:
-            await report(slot, None)
-            continue
-        try:
-            engine = get_portal(slot.portal)
-        except ValueError:
-            await report(slot, None)
-            continue
-        if not engine.agenda_capable:
-            await report(slot, None)
-            continue
-        workers[asyncio.create_task(collect_slot(slot))] = slot
-
-    _log_agenda_fetch_prepared(len(workers))
-
-    pending = set(workers)
     try:
+        for slot in slots:
+            configured_values = (slot.login_url, slot.username, slot.password)
+            if not any(configured_values):
+                attempted_slots.append(slot.key)
+                await report(slot, None)
+                continue
+            attempted_slots.append(slot.key)
+            if not all(configured_values):
+                failures[slot.key] = "configuration_missing"
+                await report(slot, failures[slot.key])
+                continue
+            if not slot.portal:
+                await report(slot, None)
+                continue
+            try:
+                engine = get_portal(slot.portal)
+            except ValueError:
+                await report(slot, None)
+                continue
+            if not engine.agenda_capable:
+                await report(slot, None)
+                continue
+            workers[asyncio.create_task(collect_slot(slot))] = slot
+
+        _log_agenda_fetch_prepared(len(workers))
+        pending = set(workers)
         while pending:
             done, pending = await asyncio.wait(
                 pending, return_when=asyncio.FIRST_COMPLETED
@@ -409,7 +408,7 @@ async def fetch_agenda(
                     failures[slot.key] = failure_code
                 await report(slot, failure_code)
     finally:
-        await _cancel_tasks(pending)
+        await _cancel_tasks(set(workers))
 
     return (
         AgendaFetchResult(

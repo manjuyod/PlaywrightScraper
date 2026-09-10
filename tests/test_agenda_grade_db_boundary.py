@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
+import threading
 
 import pytest
 
@@ -9,7 +11,7 @@ from scraper import agenda
 from scraper.portals import get_portal
 from scraper.portals.infinite_campus import InfiniteCampus
 from scraper.config.logging import ContextFilter
-from scraper.db_cli import GradeDbUnavailable
+from scraper.db_cli import GradeDbError, GradeDbLeaseExpired, GradeDbUnavailable
 from scraper.runner import _new_progress
 
 
@@ -98,6 +100,109 @@ class FakeBrowser:
         if self._legacy_context is None:
             self._legacy_context = await self.new_context()
         return await self._legacy_context.new_page()
+
+
+async def _drain_cleanup_test_tasks(tasks) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class _AgendaCleanupProbe:
+    def __init__(self, expected: int = 1) -> None:
+        self.expected = expected
+        self.browser = FakeBrowser()
+        self.started = asyncio.Event()
+        self.started_thread = threading.Event()
+        self.tasks = set()
+        self.cancelled = set()
+        probe = self
+
+        class Engine:
+            agenda_capable = True
+
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            async def login(self, first_name=None):
+                pass
+
+            async def get_agenda(self):
+                task = asyncio.current_task()
+                assert task is not None
+                probe.tasks.add(task)
+                if len(probe.tasks) == probe.expected:
+                    probe.started.set()
+                    probe.started_thread.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    probe.cancelled.add(task)
+                    raise
+
+        self.engine = Engine
+
+    def assert_closed(self) -> None:
+        assert len(self.tasks) == self.expected
+        assert all(task.done() for task in self.tasks)
+        assert self.cancelled == self.tasks
+        assert len(self.browser.contexts) == self.expected
+        assert len(self.browser.pages) == self.expected
+        assert all(context.close_calls == 1 for context in self.browser.contexts)
+        assert all(page.close_calls == 1 for page in self.browser.pages)
+
+
+@pytest.mark.parametrize("error_type", [
+    GradeDbUnavailable, GradeDbLeaseExpired, GradeDbError,
+])
+@pytest.mark.parametrize("secondary", ["absent", "partial", "unknown", "unsupported"])
+def test_early_report_failure_closes_owned_slot_before_return(
+    monkeypatch, error_type, secondary,
+) -> None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe()
+        student = _student(7)
+        if secondary == "absent":
+            student.update(alt_login_url=None, alt_id=None, alt_password=None)
+        elif secondary == "partial":
+            student["alt_password"] = None
+        elif secondary == "unknown":
+            student["alt_login_url"] = "https://unknown.invalid/login"
+
+        class UnsupportedEngine:
+            agenda_capable = False
+
+        def get_engine(portal):
+            if secondary == "unsupported" and portal == "parentvue":
+                return UnsupportedEngine
+            return probe.engine
+
+        error = error_type("simulated boundary failure")
+        reports = []
+
+        async def report(slot_key, snapshot, failure_code):
+            reports.append((slot_key, failure_code))
+            await probe.started.wait()
+            raise error
+
+        monkeypatch.setattr(agenda, "get_portal", get_engine)
+        try:
+            with pytest.raises(error_type) as raised:
+                async with asyncio.timeout(2):
+                    await agenda.fetch_agenda(
+                        probe.browser, student, on_slot_result=report,
+                    )
+            assert raised.value is error
+            assert reports == [(
+                "agenda2", "configuration_missing" if secondary == "partial" else None,
+            )]
+            probe.assert_closed()
+        finally:
+            await _drain_cleanup_test_tasks(probe.tasks)
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("cleanup_target", ["page", "context"])
@@ -1015,115 +1120,81 @@ def test_completed_slot_is_posted_while_other_slot_is_still_running(monkeypatch)
     ]
 
 
-def test_neon_failure_closes_started_slot_contexts_and_pages_once(monkeypatch) -> None:
-    """Would fail if database cancellation leaks a started slot session."""
-    pending_started = asyncio.Event()
-    pending_cancelled = asyncio.Event()
+@pytest.mark.parametrize(("error_type", "failure_code"), [
+    (GradeDbUnavailable, "neon_unavailable"),
+    (GradeDbLeaseExpired, "lease_expired"),
+    (GradeDbError, "result_post_failed"),
+])
+def test_neon_failure_closes_started_slot_contexts_and_pages_once(
+    monkeypatch, error_type, failure_code,
+) -> None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe(expected=2)
+        students = [_student(7), _student(8)]
+        for student in students:
+            student.update(alt_login_url=None, alt_id=None, alt_password=None)
+        progress = _new_progress(2)
+        baseline = asyncio.all_tasks()
 
-    class Engine:
-        agenda_capable = True
+        class Client:
+            calls = 0
 
-        def __init__(self, _page, username, *_args, **_kwargs):
-            self.username = username
+            def post_result(self, **_kwargs):
+                assert probe.started_thread.wait(2), "collectors did not start"
+                self.calls += 1
+                if self.calls == 1:
+                    raise error_type("simulated boundary failure")
+                return {"applied": True, "duplicate": False}
 
-        async def login(self, first_name=None):
-            pass
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: probe.engine)
+        try:
+            async with asyncio.timeout(3):
+                failure = await agenda._collect_and_post_agendas(
+                    Client(), {"job_id": "job", "lease_token": "lease"},
+                    probe.browser, students, progress, asyncio.Event(),
+                )
+            assert failure == failure_code
+            assert progress == {"total": 2, "attempted": 0, "success": 0, "errors": 0}
+            probe.assert_closed()
+            assert not (asyncio.all_tasks() - baseline)
+        finally:
+            await _drain_cleanup_test_tasks(asyncio.all_tasks() - baseline)
 
-        async def get_agenda(self):
-            if self.username == "user-7":
-                await pending_started.wait()
-                return []
-            pending_started.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                pending_cancelled.set()
-                raise
-
-    class Client:
-        def post_result(self, **_kwargs):
-            raise GradeDbUnavailable("safe")
-
-    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
-    students = [_student(7), _student(8)]
-    for student in students:
-        student.update(alt_login_url=None, alt_id=None, alt_password=None)
-    browser = FakeBrowser()
-
-    failure = asyncio.run(
-        agenda._collect_and_post_agendas(
-            Client(),
-            {"job_id": "job", "lease_token": "lease"},
-            browser,
-            students,
-            _new_progress(2),
-            asyncio.Event(),
-        )
-    )
-
-    assert failure == "neon_unavailable"
-    assert pending_cancelled.is_set()
-    assert len(browser.contexts) == 2
-    assert all(context.close_calls == 1 for context in browser.contexts)
-    assert all(page.close_calls == 1 for page in browser.pages)
+    asyncio.run(scenario())
 
 
 def test_lease_failure_closes_started_slot_context_and_page_once(monkeypatch) -> None:
-    """Would fail if lease cancellation leaks a started slot session."""
-    started = asyncio.Event()
-    cancelled = asyncio.Event()
-
-    class Engine:
-        agenda_capable = True
-
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def login(self, first_name=None):
-            pass
-
-        async def get_agenda(self):
-            started.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.set()
-                raise
-
-    async def scenario(browser: FakeBrowser) -> str | None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe()
         lease_failed = asyncio.Event()
+        student = _student(7)
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+        baseline = asyncio.all_tasks()
 
-        async def fail_lease() -> None:
-            await started.wait()
+        class Client:
+            def post_result(self, **_kwargs):
+                return {"applied": True, "duplicate": False}
+
+        async def lose_lease():
+            await probe.started.wait()
             lease_failed.set()
 
-        lease_task = asyncio.create_task(fail_lease())
-        result = await agenda._collect_and_post_agendas(
-            object(),
-            {"job_id": "job", "lease_token": "lease"},
-            browser,
-            [
-                {
-                    **_student(7),
-                    "alt_login_url": None,
-                    "alt_id": None,
-                    "alt_password": None,
-                }
-            ],
-            _new_progress(1),
-            lease_failed,
-        )
-        await lease_task
-        return result
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: probe.engine)
+        lease_task = asyncio.create_task(lose_lease())
+        try:
+            async with asyncio.timeout(2):
+                failure = await agenda._collect_and_post_agendas(
+                    Client(), {"job_id": "job", "lease_token": "lease"},
+                    probe.browser, [student], _new_progress(1), lease_failed,
+                )
+                await lease_task
+            assert failure == "lease_renewal_failed"
+            probe.assert_closed()
+            assert not (asyncio.all_tasks() - baseline)
+        finally:
+            await _drain_cleanup_test_tasks(asyncio.all_tasks() - baseline)
 
-    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
-    browser = FakeBrowser()
-
-    assert asyncio.run(scenario(browser)) == "lease_renewal_failed"
-    assert cancelled.is_set()
-    assert len(browser.contexts) == 1
-    assert browser.contexts[0].close_calls == 1
-    assert browser.pages[0].close_calls == 1
+    asyncio.run(scenario())
 
 
 def test_agenda_neon_failure_cancels_pending_collection(monkeypatch) -> None:
@@ -1284,3 +1355,241 @@ def test_browser_cleanup_after_collection_does_not_fail_agenda_job(monkeypatch) 
     assert result == {"total": 1, "attempted": 1, "success": 0, "errors": 1}
     assert len(completed) == 1
     assert failed == []
+
+
+def test_parent_cancellation_during_early_report_closes_owned_slot(monkeypatch) -> None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe()
+        reporting = asyncio.Event()
+        student = _student(7)
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+        async def report(*_args):
+            await probe.started.wait()
+            reporting.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: probe.engine)
+        run = asyncio.create_task(agenda.fetch_agenda(
+            probe.browser, student, on_slot_result=report,
+        ))
+        try:
+            async with asyncio.timeout(2):
+                await reporting.wait()
+                run.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await run
+            probe.assert_closed()
+        finally:
+            await _drain_cleanup_test_tasks({run})
+            await _drain_cleanup_test_tasks(probe.tasks)
+
+    asyncio.run(scenario())
+
+
+def test_early_report_failure_cancels_slot_waiting_for_permit(monkeypatch) -> None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe()
+        queued = asyncio.Event()
+        waiting_tasks = set()
+
+        class ObservedSemaphore(asyncio.Semaphore):
+            async def acquire(self):
+                task = asyncio.current_task()
+                assert task is not None
+                waiting_tasks.add(task)
+                queued.set()
+                return await super().acquire()
+
+        semaphore = ObservedSemaphore(0)
+        student = _student(7)
+        student.update(alt_login_url=None, alt_id=None, alt_password=None)
+
+        async def report(*_args):
+            await queued.wait()
+            raise GradeDbUnavailable("simulated boundary failure")
+
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: probe.engine)
+        try:
+            with pytest.raises(GradeDbUnavailable):
+                async with asyncio.timeout(2):
+                    await agenda.fetch_agenda(
+                        probe.browser, student,
+                        worker_semaphore=semaphore, on_slot_result=report,
+                    )
+            assert len(waiting_tasks) == 1
+            assert all(task.done() and task.cancelled() for task in waiting_tasks)
+            assert not probe.browser.contexts
+        finally:
+            await _drain_cleanup_test_tasks(waiting_tasks)
+            semaphore.release()
+
+    asyncio.run(scenario())
+
+
+def test_setup_exception_cancels_already_created_slot(monkeypatch) -> None:
+    async def scenario() -> None:
+        probe = _AgendaCleanupProbe()
+        baseline = asyncio.all_tasks()
+
+        def get_engine(portal):
+            if portal == "parentvue":
+                raise RuntimeError("simulated setup failure")
+            return probe.engine
+
+        monkeypatch.setattr(agenda, "get_portal", get_engine)
+        try:
+            with pytest.raises(RuntimeError, match="simulated setup failure"):
+                async with asyncio.timeout(2):
+                    await agenda.fetch_agenda(probe.browser, _student(7))
+            assert not (asyncio.all_tasks() - baseline)
+            assert not probe.browser.contexts
+        finally:
+            await _drain_cleanup_test_tasks(asyncio.all_tasks() - baseline)
+
+    asyncio.run(scenario())
+
+
+def test_report_failure_retrieves_all_completed_slot_exceptions(monkeypatch) -> None:
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        previous_handler = loop.get_exception_handler()
+        messages = []
+        browser = FakeBrowser()
+        real_wait = asyncio.wait
+
+        class Engine:
+            agenda_capable = True
+
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            async def login(self, first_name=None):
+                pass
+
+            async def get_agenda(self):
+                raise RuntimeError("simulated slot failure")
+
+        async def wait_for_finished_batch(tasks, *, return_when):
+            return await real_wait(tasks, return_when=asyncio.ALL_COMPLETED)
+
+        async def report(*_args):
+            raise GradeDbUnavailable("simulated boundary failure")
+
+        async def invoke_without_retaining_exception():
+            try:
+                await agenda.fetch_agenda(browser, _student(7), on_slot_result=report)
+            except GradeDbUnavailable:
+                return
+            raise AssertionError("boundary failure did not propagate")
+
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+        # Force both slot outcomes into the same completed batch.
+        monkeypatch.setattr(agenda.asyncio, "wait", wait_for_finished_batch)
+        loop.set_exception_handler(
+            lambda _loop, context: messages.append(context.get("message", ""))
+        )
+        try:
+            async with asyncio.timeout(2):
+                await invoke_without_retaining_exception()
+            gc.collect()
+            drained = asyncio.Event()
+            loop.call_soon(drained.set)
+            await drained.wait()
+            assert not messages
+            assert len(browser.contexts) == 2
+            assert all(context.close_calls == 1 for context in browser.contexts)
+            assert all(page.close_calls == 1 for page in browser.pages)
+        finally:
+            loop.set_exception_handler(previous_handler)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("first_slot", ["agenda1", "agenda2"])
+@pytest.mark.parametrize("second_fails", [False, True])
+def test_each_slot_posts_independently_in_completion_order(
+    monkeypatch, first_slot, second_fails,
+) -> None:
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        first_posted = asyncio.Event()
+        release_second = asyncio.Event()
+        both_started = asyncio.Event()
+        started = set()
+        posts = []
+        applied = {}
+        browser = FakeBrowser()
+        progress = _new_progress(1)
+        first_channel = "primary_agenda" if first_slot == "agenda1" else "secondary_agenda"
+        second_channel = "secondary_agenda" if first_slot == "agenda1" else "primary_agenda"
+        first_username = "user-7" if first_slot == "agenda1" else "alt-user-7"
+        baseline = asyncio.all_tasks()
+
+        class Engine:
+            agenda_capable = True
+
+            def __init__(self, _page, username, *_args, **_kwargs):
+                self.username = username
+
+            async def login(self, first_name=None):
+                pass
+
+            async def get_agenda(self):
+                started.add(self.username)
+                if len(started) == 2:
+                    both_started.set()
+                await both_started.wait()
+                if self.username != first_username:
+                    await release_second.wait()
+                    if second_fails:
+                        raise RuntimeError("simulated later slot failure")
+                return []
+
+        class Client:
+            def post_result(self, **kwargs):
+                outcome = kwargs["outcome"]
+                posts.append(outcome)
+                if outcome["kind"] != "failure":
+                    channel = outcome["kind"].removesuffix("_success")
+                    applied[channel] = outcome["agenda"]
+                if outcome["kind"] == f"{first_channel}_success":
+                    loop.call_soon_threadsafe(first_posted.set)
+                return {"applied": True, "duplicate": False}
+
+        monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+        run = asyncio.create_task(agenda._collect_and_post_agendas(
+            Client(), {"job_id": "job", "lease_token": "lease"},
+            browser, [_student(7)], progress, asyncio.Event(),
+        ))
+        try:
+            async with asyncio.timeout(2):
+                await first_posted.wait()
+                assert not run.done()
+                assert [post["kind"] for post in posts] == [f"{first_channel}_success"]
+                saved_first = dict(applied[first_channel])
+                release_second.set()
+                assert await run is None
+            assert len(posts) == 2
+            if second_fails:
+                assert posts[1] == {
+                    "kind": "failure", "channel": second_channel, "code": "scrape_failed",
+                }
+                assert second_channel not in applied
+            else:
+                assert posts[1]["kind"] == f"{second_channel}_success"
+                assert second_channel in applied
+            assert applied[first_channel] == saved_first
+            assert progress == {
+                "total": 1, "attempted": 1,
+                "success": int(not second_fails), "errors": int(second_fails),
+            }
+            assert len(browser.contexts) == 2
+            assert all(context.close_calls == 1 for context in browser.contexts)
+            assert all(page.close_calls == 1 for page in browser.pages)
+            assert not (asyncio.all_tasks() - baseline)
+        finally:
+            release_second.set()
+            await _drain_cleanup_test_tasks(asyncio.all_tasks() - baseline)
+
+    asyncio.run(scenario())
