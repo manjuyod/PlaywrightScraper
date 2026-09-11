@@ -105,6 +105,7 @@ fn rejected_result_audit_never_contains_academic_payload() {
         job_id: Uuid::nil(),
         lease_token: Uuid::nil(),
         crmstudentid: 42,
+        portal: Some("canvas".into()),
         outcome: ResultOutcome::GradeSuccess {
             parsed_grades: json!({"Algebra": 94}),
         },
@@ -116,6 +117,30 @@ fn rejected_result_audit_never_contains_academic_payload() {
     assert_eq!(audit["rejection_code"], "crm_ineligible");
     assert!(audit.get("parsed_grades").is_none());
     assert!(!audit.to_string().contains("Algebra"));
+}
+
+#[test]
+fn grade_results_require_only_a_safe_opaque_portal_key() {
+    let request = |portal: Option<&str>| ResultPostRequest {
+        job_id: Uuid::nil(),
+        lease_token: Uuid::nil(),
+        crmstudentid: 42,
+        portal: portal.map(str::to_owned),
+        outcome: ResultOutcome::GradeSuccess {
+            parsed_grades: json!({"Algebra": 94}),
+        },
+    };
+
+    assert!(request(Some("unknown"))
+        .validate_for_job(JobKind::Grade)
+        .is_ok());
+    assert!(request(Some("canvas"))
+        .validate_for_job(JobKind::Grade)
+        .is_ok());
+    assert!(request(None).validate_for_job(JobKind::Grade).is_err());
+    assert!(request(Some("Aeries URL"))
+        .validate_for_job(JobKind::Grade)
+        .is_err());
 }
 
 #[test]

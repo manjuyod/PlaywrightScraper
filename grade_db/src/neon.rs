@@ -168,6 +168,10 @@ SET weeklydata = COALESCE(weeklydata, '{}'::jsonb)
             to_char(date_trunc('week', now())::date, 'YYYY-MM-DD'),
             $2::jsonb
         ),
+    portal = CASE
+        WHEN portal IS NULL OR btrim(portal) = '' OR lower(portal) = 'unknown' THEN $3
+        ELSE portal
+    END,
     passwordgood = true, grade_status = 'synced', grade_updated_at = now()
 WHERE crmstudentid = $1
 "#;
@@ -194,6 +198,10 @@ WHERE crmstudentid = $1
     pub const APPLY_GRADE_FAILURE: &str = r#"
 UPDATE students_grades_20262027
 SET grade_status = $3, passwordgood = COALESCE($2, passwordgood),
+    portal = CASE
+        WHEN portal IS NULL OR btrim(portal) = '' OR lower(portal) = 'unknown' THEN $4
+        ELSE portal
+    END,
     grade_updated_at = now()
 WHERE crmstudentid = $1
 "#;
@@ -485,7 +493,13 @@ impl NeonGateway for PostgresNeonGateway {
 
         if write.applied {
             ensure_state_tx(&mut tx, write.request.crmstudentid).await?;
-            apply_outcome(&mut tx, write.request.crmstudentid, &write.request.outcome).await?;
+            apply_outcome(
+                &mut tx,
+                write.request.crmstudentid,
+                write.request.portal.as_deref(),
+                &write.request.outcome,
+            )
+            .await?;
         } else {
             insert_event(
                 &mut tx,
@@ -518,6 +532,7 @@ async fn ensure_state_tx(
 async fn apply_outcome(
     tx: &mut Transaction<'_, Postgres>,
     crmstudentid: i64,
+    portal: Option<&str>,
     outcome: &ResultOutcome,
 ) -> Result<(), AppError> {
     let result = match outcome {
@@ -525,6 +540,7 @@ async fn apply_outcome(
             sqlx::query(sql::APPLY_GRADE)
                 .bind(crmstudentid)
                 .bind(parsed_grades)
+                .bind(portal)
                 .execute(&mut **tx)
                 .await
         }
@@ -552,6 +568,7 @@ async fn apply_outcome(
                     .bind(crmstudentid)
                     .bind(passwordgood)
                     .bind(code)
+                    .bind(portal)
                     .execute(&mut **tx)
                     .await
             }

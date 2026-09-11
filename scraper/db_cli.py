@@ -119,6 +119,7 @@ class GradeDbClient:
         lease_token: str,
         crmstudentid: int,
         outcome: Mapping[str, Any],
+        portal: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "job_id": job_id,
@@ -126,6 +127,8 @@ class GradeDbClient:
             "crmstudentid": crmstudentid,
             "outcome": dict(outcome),
         }
+        if portal is not None:
+            payload["portal"] = portal
         for attempt in range(3):
             try:
                 return self._invoke(("result", "post"), payload)

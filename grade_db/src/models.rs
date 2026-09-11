@@ -456,6 +456,8 @@ pub struct ResultPostRequest {
     pub job_id: Uuid,
     pub lease_token: Uuid,
     pub crmstudentid: i64,
+    #[serde(default)]
+    pub portal: Option<String>,
     pub outcome: ResultOutcome,
 }
 
@@ -468,6 +470,18 @@ pub struct ResultPostResponse {
 }
 
 impl ResultPostRequest {
+    pub fn validate_for_job(&self, job_kind: JobKind) -> Result<(), &'static str> {
+        self.outcome.validate_for_job(job_kind)?;
+        match self.outcome.channel() {
+            ResultChannel::Grade if self.portal.as_deref().is_some_and(is_safe_portal_key) => {
+                Ok(())
+            }
+            ResultChannel::Grade => Err("grade result requires a valid portal key"),
+            _ if self.portal.is_none() => Ok(()),
+            _ => Err("agenda result must not include a portal key"),
+        }
+    }
+
     pub fn audit_payload(&self, applied: bool, rejection_code: Option<&str>) -> Value {
         if !applied {
             return json!({
@@ -480,6 +494,7 @@ impl ResultPostRequest {
             ResultOutcome::GradeSuccess { parsed_grades } => json!({
                 "status": "synced",
                 "kind": "grade",
+                "portal": self.portal,
                 "parsed_grades": parsed_grades,
             }),
             ResultOutcome::PrimaryAgendaSuccess { agenda } => json!({
@@ -493,6 +508,17 @@ impl ResultPostRequest {
                 "agenda": agenda,
             }),
             ResultOutcome::Failure {
+                channel: ResultChannel::Grade,
+                code,
+                passwordgood,
+            } => json!({
+                "status": "error",
+                "kind": ResultChannel::Grade.as_str(),
+                "portal": self.portal,
+                "code": code,
+                "passwordgood": passwordgood,
+            }),
+            ResultOutcome::Failure {
                 channel,
                 code,
                 passwordgood,
@@ -504,4 +530,12 @@ impl ResultPostRequest {
             }),
         }
     }
+}
+
+fn is_safe_portal_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }

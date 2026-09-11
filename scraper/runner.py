@@ -67,9 +67,12 @@ def _debug_env() -> None:
 
 
 def student_from_context(context: RawStudentContext) -> StudentContext:
-    portal = str(context.get("portal") or "").strip().lower()
-    if not portal:
-        portal = get_portal_key_from_url(context.get("portal1") or "")
+    stored_portal = str(context.get("portal") or "").strip().lower()
+    portal = (
+        stored_portal
+        if stored_portal and stored_portal != "unknown"
+        else get_portal_key_from_url(context.get("portal1") or "") or "unknown"
+    )
     raw_known_course_titles = context.get("known_course_titles")
     known_course_titles = (
         raw_known_course_titles
@@ -348,6 +351,7 @@ async def _process_grade_students(
                         job_id=session["job_id"],
                         lease_token=session["lease_token"],
                         crmstudentid=student["db_id"],
+                        portal=student["portal"],
                         outcome=outcome,
                     )
                 except GradeDbLeaseExpired:

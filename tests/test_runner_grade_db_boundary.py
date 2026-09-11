@@ -41,7 +41,31 @@ def test_context_mapping_preserves_legacy_scraper_shape_without_logging(capsys) 
     assert student["alt_id"] == "ada-alt"
     assert student["auth_images"] == ["cat", "moon"]
     assert student["known_course_titles"] == ["MARKETING 1", "ENGLISH 11"]
+    assert student["portal"] == "gps"
     assert capsys.readouterr().out == ""
+
+
+def test_context_preserves_an_existing_neon_portal_override() -> None:
+    context = _context()
+    context["portal1"] = "https://district.instructure.com/login"
+    context["portal"] = "gps"
+
+    assert runner.student_from_context(context)["portal"] == "gps"
+
+
+def test_context_reclassifies_unknown_portal_from_the_current_crm_url() -> None:
+    context = _context()
+    context["portal1"] = "https://district.instructure.com/login"
+    context["portal"] = "unknown"
+
+    assert runner.student_from_context(context)["portal"] == "canvas"
+
+
+def test_context_defaults_to_unknown_when_no_url_pattern_matches() -> None:
+    context = _context()
+    context["portal"] = None
+
+    assert runner.student_from_context(context)["portal"] == "unknown"
 
 
 def test_diagnostic_failure_pauses_before_browser_state_is_closed(
@@ -133,6 +157,7 @@ def test_each_success_is_posted_immediately(monkeypatch) -> None:
     assert result is None
     assert posts[0]["outcome"]["kind"] == "grade_success"
     assert posts[0]["outcome"]["parsed_grades"]["Math"] == 95
+    assert posts[0]["portal"] == "gps"
     assert progress == {"total": 1, "attempted": 1, "success": 1, "errors": 0}
 
 
@@ -198,6 +223,7 @@ def test_login_errors_post_only_a_sanitized_failure_code(monkeypatch) -> None:
         "code": "bad_login",
         "passwordgood": False,
     }
+    assert posts[0]["portal"] == "gps"
     assert "primary-secret" not in str(posts)
 
 

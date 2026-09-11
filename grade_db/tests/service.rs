@@ -268,6 +268,7 @@ async fn result_rechecks_crm_and_redacts_payload_when_student_became_ineligible(
         job_id: Uuid::from_u128(19),
         lease_token: Uuid::from_u128(42),
         crmstudentid: 1,
+        portal: Some("canvas".into()),
         outcome: ResultOutcome::GradeSuccess {
             parsed_grades: json!({"Algebra": 94}),
         },
@@ -298,6 +299,7 @@ async fn result_is_rejected_when_crm_no_longer_returns_the_student() {
         job_id: Uuid::from_u128(19),
         lease_token: Uuid::from_u128(42),
         crmstudentid: 1,
+        portal: Some("canvas".into()),
         outcome: ResultOutcome::GradeSuccess {
             parsed_grades: json!({"Algebra": 94}),
         },
@@ -331,6 +333,7 @@ async fn rejected_failure_uses_its_channel_for_idempotency_identity() {
             job_id: Uuid::from_u128(19),
             lease_token: Uuid::from_u128(42),
             crmstudentid: 1,
+            portal: Some("canvas".into()),
             outcome: ResultOutcome::Failure {
                 channel: ResultChannel::Grade,
                 code: "bad_login".into(),
