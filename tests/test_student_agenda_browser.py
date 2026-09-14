@@ -151,3 +151,58 @@ def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(
     expect(page.get_by_role("heading", name="Grade Heatmap")).to_be_visible()
     page.get_by_role("link", name="Report").click()
     expect(page.get_by_role("heading", name="Agenda · ParentVUE")).to_be_visible()
+
+
+@pytest.mark.parametrize("width", [360, 768, 1440])
+def test_assignment_metadata_is_visible_inline_in_both_placements(browser_page, preview_url, width):
+    page = browser_page
+    page.set_viewport_size({"width": width, "height": 1100})
+    page.goto(preview_url, wait_until="networkidle")
+    embedded = page.locator(".tc-grade-agenda").first
+    embedded.locator("summary").click()
+    row = embedded.locator(".tc-agenda-assignment").first
+    expect(row.get_by_label("Score: 7/10", exact=True)).to_be_visible()
+    expect(row.get_by_text("Formative", exact=True)).to_be_visible()
+    expect(row.get_by_label("Low-grade assignment")).to_be_visible()
+    expect(row.locator("time")).to_have_text("Aug 25")
+    unscored = embedded.locator(".tc-agenda-assignment").filter(has_text="Graph transformations")
+    expect(unscored.get_by_label("Score unavailable")).to_have_text("—")
+    zero = embedded.locator(".tc-agenda-assignment").filter(has_text="Function comparison")
+    expect(zero.get_by_label("Score: 0/10", exact=True)).to_be_visible()
+    standalone = page.locator(".tc-agenda-card .tc-agenda-class").first
+    standalone.locator("summary").click()
+    standalone_row = standalone.locator(".tc-agenda-assignment").first
+    expect(standalone_row.get_by_label("Score: 79.5%", exact=True)).to_be_visible()
+    expect(standalone_row.get_by_text("Summative", exact=True)).to_be_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    for assignment in (row, unscored, standalone_row):
+        box = assignment.bounding_box()
+        cells = [assignment.locator(selector).bounding_box() for selector in (
+            ".tc-agenda-score", ".tc-agenda-category", "time",
+        )]
+        assert box and all(cells)
+        for cell in cells:
+            assert cell["x"] >= box["x"]
+            assert cell["x"] + cell["width"] <= box["x"] + box["width"] + 1
+            assert abs((cell["y"] + cell["height"] / 2) - (box["y"] + box["height"] / 2)) < 2
+        assert cells[0]["x"] + cells[0]["width"] <= cells[1]["x"]
+        assert cells[1]["x"] + cells[1]["width"] <= cells[2]["x"]
+    output = ROOT / "output" / "assignment-metadata"
+    output.mkdir(parents=True, exist_ok=True)
+    page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
+    page.screenshot(path=str(output / f"student-{width}.png"), full_page=True)
+
+
+def test_long_assignment_metadata_keeps_full_accessible_values_without_overflow(browser_page, preview_url):
+    page = browser_page
+    page.set_viewport_size({"width": 360, "height": 1100})
+    page.goto(preview_url, wait_until="networkidle")
+    course = page.locator(".tc-agenda-card .tc-agenda-class").filter(has_text="Design Thinking Seminar With")
+    course.locator("summary").click()
+    title = "A deliberately long fictional prototype evaluation assignment title for overflow inspection"
+    row = course.locator(".tc-agenda-assignment").filter(has_text=title)
+    expect(row.locator(".tc-agenda-title")).to_have_attribute("title", title)
+    expect(row.get_by_label("Score: 0.1234567890123456789/10", exact=True)).to_be_visible()
+    expect(row.get_by_text("Summative", exact=True)).to_be_visible()
+    expect(row.locator("time")).to_have_text("Aug 23 · 18:00")
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

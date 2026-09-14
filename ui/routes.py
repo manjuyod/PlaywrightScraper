@@ -7,6 +7,8 @@ from typing import Any, Iterable
 
 from flask import abort, jsonify, redirect, render_template, request, url_for
 
+from scraper.assignment_metadata import normalize_assignment_category, normalize_assignment_score
+
 from ui import dashboard_data as dashboard
 from ui.app import app
 from ui.auth.guards import current_claims, require_franchise, require_permission
@@ -220,21 +222,28 @@ def _agenda_slots(
                         due_display = f"{due_date.strftime('%b')} {due_date.day}"
                         if due_time is not None:
                             due_display = f"{due_display} · {due_time}"
+                        assignment = {
+                            "status": status,
+                            "title": title,
+                            "dueDate": due_date.isoformat(),
+                            "dueTime": due_time,
+                            "dueDisplay": due_display,
+                        }
+                        score = normalize_assignment_score(raw_row.get("score"))
+                        category = normalize_assignment_category(raw_row.get("category"))
+                        if score is not None:
+                            assignment["score"] = score
+                        if category is not None:
+                            assignment["category"] = category
                         valid_rows.append(
                             (
                                 due_date,
                                 due_time or "",
                                 title.casefold(),
-                                {
-                                    "status": status,
-                                    "title": title,
-                                    "dueDate": due_date.isoformat(),
-                                    "dueTime": due_time,
-                                    "dueDisplay": due_display,
-                                },
+                                assignment,
                             )
                         )
-                    assignments.extend(row[3] for row in sorted(valid_rows))
+                    assignments.extend(row[3] for row in sorted(valid_rows, key=lambda row: row[:3]))
                 classes.append(
                     {"name": name, "count": len(assignments), "assignments": assignments}
                 )

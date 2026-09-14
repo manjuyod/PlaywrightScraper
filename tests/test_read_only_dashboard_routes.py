@@ -14,6 +14,50 @@ from ui.auth.models import GrantIntrospection
 from ui.auth.session import GradeSession, SESSION_COOKIE_NAME, sign_session
 
 
+def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(monkeypatch):
+    _client, routes = _create_client(monkeypatch)
+    base = _student(101)
+    raw_rows = [
+        {"title": "A fraction", "dueDate": "2026-09-14", "dueTime": None,
+         "score": "Score 7.50/10 (75%)", "category": "Formative", "private": "discard"},
+        {"title": "B percentage", "dueDate": "2026-09-14", "dueTime": None,
+         "score": "79.50%", "category": "SUMMATIVE"},
+        {"title": "C invalid", "dueDate": "2026-09-14", "dueTime": None,
+         "score": {"unsafe": True}, "category": "Practice"},
+        {"title": "D legacy", "dueDate": "2026-09-14", "dueTime": None},
+    ]
+    slot = {"portal": "infinite_campus", "weeks": {"2026-09-14": {"Chemistry": {
+        "missing": [], "low_score": raw_rows, "due": [],
+    }}}}
+    student = base.__class__(**{**base.__dict__, "agenda": {"agenda1": slot, "agenda2": slot}})
+    slots = routes._agenda_slots(student)
+    for shaped in slots:
+        rows = shaped["weeks"][0]["classes"][0]["assignments"]
+        assert rows[0] == {
+            "status": "low_score", "title": "A fraction", "dueDate": "2026-09-14",
+            "dueTime": None, "dueDisplay": "Sep 14", "score": "7.5/10", "category": "formative",
+        }
+        assert rows[1]["score"] == "79.5%"
+        assert rows[1]["category"] == "summative"
+        assert [row["title"] for row in rows[2:]] == ["C invalid", "D legacy"]
+        assert all("score" not in row and "category" not in row for row in rows[2:])
+
+
+def test_metadata_on_equal_title_and_date_rows_does_not_break_page_sorting(monkeypatch):
+    _client, routes = _create_client(monkeypatch)
+    base = _student(101)
+    rows = [{"title": "Same title", "dueDate": "2026-09-14", "dueTime": None,
+             "score": score, "category": "formative"} for score in ("7/10", "6/10")]
+    slot = {"portal": "infinite_campus", "weeks": {"2026-09-14": {"Chemistry": {
+        "missing": [], "low_score": rows, "due": [],
+    }}}}
+    student = base.__class__(**{**base.__dict__, "agenda": {
+        "agenda1": slot, "agenda2": {"portal": None, "weeks": {}},
+    }})
+    shaped = routes._agenda_slots(student)[0]["weeks"][0]["classes"][0]["assignments"]
+    assert [row["score"] for row in shaped] == ["7/10", "6/10"]
+
+
 def _student(
     student_id: int,
     *,

@@ -43,8 +43,8 @@
             "label": "Week of Aug 10",
             "classes": [
               {"name": "Algebraic Modeling", "count": 2, "assignments": [
-                {"status": "missing", "title": "Function comparison", "dueDate": "2026-08-11", "dueTime": null, "dueDisplay": "Aug 11"},
-                {"status": "due", "title": "Graph transformations", "dueDate": "2026-08-15", "dueTime": "15:30", "dueDisplay": "Aug 15 · 15:30"}
+                {"status": "missing", "title": "Function comparison", "dueDate": "2026-08-11", "dueTime": null, "dueDisplay": "Aug 11", "score": "0/10", "category": "summative"},
+                {"status": "due", "title": "Graph transformations", "dueDate": "2026-08-15", "dueTime": "15:30", "dueDisplay": "Aug 15 · 15:30", "category": "summative"}
               ]},
               {"name": "American Literature", "count": 2, "assignments": [
                 {"status": "missing", "title": "Theme journal", "dueDate": "2026-08-10", "dueTime": null, "dueDisplay": "Aug 10"},
@@ -81,7 +81,7 @@
             "label": "Week of Aug 24",
             "classes": [
               {"name": "Algebraic Modeling", "count": 1, "assignments": [
-                {"status": "due", "title": "Systems practice", "dueDate": "2026-08-25", "dueTime": null, "dueDisplay": "Aug 25"}
+                {"status": "low_score", "title": "Systems practice", "dueDate": "2026-08-25", "dueTime": null, "dueDisplay": "Aug 25", "score": "7/10", "category": "formative"}
               ]},
               {"name": "American Literature", "count": 1, "assignments": [
                 {"status": "due", "title": "Poetry annotation", "dueDate": "2026-08-26", "dueTime": "23:59", "dueDisplay": "Aug 26 · 23:59"}
@@ -108,7 +108,7 @@
             "label": "Week of Aug 10",
             "classes": [
               {"name": "Algebraic Modeling", "count": 2, "assignments": [
-                {"status": "missing", "title": "Equation warm-up", "dueDate": "2026-08-10", "dueTime": null, "dueDisplay": "Aug 10"},
+                {"status": "missing", "title": "Equation warm-up", "dueDate": "2026-08-10", "dueTime": null, "dueDisplay": "Aug 10", "score": "79.5%", "category": "summative"},
                 {"status": "due", "title": "Modeling checkpoint", "dueDate": "2026-08-16", "dueTime": "09:00", "dueDisplay": "Aug 16 · 09:00"}
               ]},
               {"name": "American Literature", "count": 2, "assignments": [
@@ -142,7 +142,7 @@
               ]},
               {"name": "Design Thinking Seminar With An Intentionally Long Fictional Course Name", "count": 2, "assignments": [
                 {"status": "missing", "title": "Research notes", "dueDate": "2026-08-19", "dueTime": null, "dueDisplay": "Aug 19"},
-                {"status": "due", "title": "A deliberately long fictional prototype evaluation assignment title for overflow inspection", "dueDate": "2026-08-23", "dueTime": "18:00", "dueDisplay": "Aug 23 · 18:00"}
+                {"status": "low_score", "title": "A deliberately long fictional prototype evaluation assignment title for overflow inspection", "dueDate": "2026-08-23", "dueTime": "18:00", "dueDisplay": "Aug 23 · 18:00", "score": "0.1234567890123456789/10", "category": "summative"}
               ]}
             ]
           },

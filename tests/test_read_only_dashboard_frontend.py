@@ -9,6 +9,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_shared_assignment_row_shows_score_and_only_recognized_category_labels():
+    fixture = json.loads((ROOT / "tests/fixtures/student_agenda_page_data.json").read_text(encoding="utf-8"))
+    fixture["student"]["agendaSlots"][0]["weeks"][0]["classes"][0]["assignments"][0]["category"] = "<img src=x>"
+    result = _run_student_page_scenario("const data = " + json.dumps(fixture) + ";" + """
+function collect(node, className) {
+    if (Array.isArray(node)) return node.flatMap(child => collect(child, className));
+    if (!node || typeof node !== "object") return [];
+    const matches = String(node.props.className || "").split(" ").includes(className);
+    return (matches ? [node] : []).concat(collect(node.children || [], className));
+}
+const page = hooks.StudentPage({ data });
+console.log(JSON.stringify({
+    labels: collect(page, "tc-agenda-score").map(node => node.props["aria-label"]),
+    categories: collect(page, "tc-agenda-category").flatMap(node => node.children),
+}));
+""")
+    assert "Score: 7/10" in result["labels"]
+    assert "Score: 0/10" in result["labels"]
+    assert "Score: 79.5%" in result["labels"]
+    assert "Score unavailable" in result["labels"]
+    assert set(result["categories"]) == {"Formative", "Summative"}
+
+
 def _run_franchise_sorting_scenario(scenario: str) -> object:
     javascript = (ROOT / "ui" / "static" / "react-dashboard.js").read_text(
         encoding="utf-8"
