@@ -15,6 +15,55 @@ from scraper.db_cli import GradeDbError, GradeDbLeaseExpired, GradeDbUnavailable
 from scraper.runner import _new_progress
 
 
+@pytest.mark.parametrize("failed_slot", [None, "agenda1", "agenda2"])
+def test_enriched_metadata_reaches_mocked_writer_and_survives_other_slot_failure(monkeypatch, failed_slot):
+    posts = []
+
+    class Engine:
+        agenda_capable = True
+
+        def __init__(self, _page, username, *_args, **_kwargs):
+            self.slot = "agenda2" if username.startswith("alt-") else "agenda1"
+
+        async def login(self, first_name=None):
+            pass
+
+        async def get_agenda(self):
+            if self.slot == failed_slot:
+                raise RuntimeError("synthetic portal failure")
+            return [{
+                "course": "Chemistry", "title": "Synthetic quiz", "dueDate": "2026-09-14",
+                "dueTime": None, "status": "low_score", "score": "Score 7.50/10 (75%)",
+                "category": "Formative" if self.slot == "agenda1" else "Summative",
+            }]
+
+    class Client:
+        def post_result(self, **kwargs):
+            posts.append(kwargs)
+            return {"applied": True, "duplicate": False}
+
+    monkeypatch.setattr(agenda, "get_portal", lambda _portal: Engine)
+    asyncio.run(agenda._collect_and_post_agendas(
+        Client(), {"job_id": "synthetic-job", "lease_token": "synthetic-lease"},
+        FakeBrowser(), [_student(7)], _new_progress(1), asyncio.Event(),
+    ))
+    assert len(posts) == 2
+    for slot, channel, category in [
+        ("agenda1", "primary_agenda", "formative"), ("agenda2", "secondary_agenda", "summative"),
+    ]:
+        post = next(post for post in posts if post["outcome"].get("channel") == channel
+                    or post["outcome"]["kind"] == channel + "_success")
+        assert post["crmstudentid"] == 7
+        if slot == failed_slot:
+            assert post["outcome"] == {"kind": "failure", "channel": channel, "code": "scrape_failed"}
+        else:
+            rows = post["outcome"]["agenda"]["weeks"]["2026-09-14"]["Chemistry"]["low_score"]
+            assert rows == [{
+                "title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": None,
+                "score": "7.5/10", "category": category,
+            }]
+
+
 def _json_value_nodes(value: object) -> int:
     if isinstance(value, dict):
         return 1 + sum(_json_value_nodes(item) for item in value.values())

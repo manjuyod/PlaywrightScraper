@@ -1204,13 +1204,29 @@
                     ),
                     "aria-label": status.label,
                 },
-                status.marker,
+                h("span", { className: "tc-agenda-marker-full" }, status.marker),
+                assignment.status === "low_score"
+                    ? h("span", { className: "tc-agenda-marker-short", "aria-hidden": true }, "LOW")
+                    : null,
             ),
             h(
                 "span",
-                { className: "min-w-0 flex-1 truncate", title: assignment.title },
+                { className: "tc-agenda-title min-w-0 flex-1 truncate", title: assignment.title },
                 assignment.title,
             ),
+            h(
+                "span",
+                {
+                    className: "tc-agenda-score",
+                    "aria-label": assignment.score ? `Score: ${assignment.score}` : "Score unavailable",
+                    title: assignment.score || "Score unavailable",
+                },
+                assignment.score || "—",
+            ),
+            assignment.category === "formative" || assignment.category === "summative"
+                ? h("span", { className: "tc-agenda-category" },
+                    assignment.category === "formative" ? "Formative" : "Summative")
+                : null,
             h(
                 "time",
                 {

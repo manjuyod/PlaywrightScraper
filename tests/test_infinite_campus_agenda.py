@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import date, datetime
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -18,6 +19,60 @@ from scraper.portals.infinite_campus_agenda import (
 
 
 REFERENCE = datetime(2026, 8, 25, 12, 0)
+
+
+def test_category_containment_and_row_scores_do_not_use_category_totals():
+    html = (Path(__file__).parent / "fixtures/infinite_campus_score_categories.html").read_text()
+    rows = parse_infinite_campus_course_grades(html, course="Chemistry", reference=date(2026, 9, 10))
+    assert [(row["title"], row["status"], row.get("score"), row.get("category")) for row in rows] == [
+        ("Synthetic practice", "low_score", "7/10", "formative"),
+        ("Synthetic upcoming work", "due", None, "formative"),
+        ("Synthetic project", "due", None, "summative"),
+        ("Synthetic flagged work", "missing", "9/10", "summative"),
+    ]
+    later = parse_infinite_campus_course_grades(html, course="Chemistry", reference=date(2026, 9, 13))
+    assert "Synthetic project" not in [row["title"] for row in later]
+    assert all(row.get("score") != "78/80" for row in rows)
+
+
+@pytest.mark.parametrize("label", ["Practice", "", "Formative Weight: 20", "Formative Summative"])
+def test_unrecognized_category_does_not_discard_assignment_or_inherit_previous_section(label):
+    row = assignment_row("Synthetic work", due="08/28/2026", score="7/10")
+    html = ('<tl-grading-task-list></tl-grading-task-list>'
+            '<button class="divider__header" aria-controls="outer"><h5>Formative</h5></button>'
+            '<div id="outer"><button class="divider__header" aria-controls="inner">'
+            f'<h5>{label}</h5></button><div id="inner">{row}</div></div>')
+    records = parse_infinite_campus_course_grades(html, course="Chemistry", reference=REFERENCE)
+    assert len(records) == 1
+    assert records[0]["score"] == "7/10"
+    assert "category" not in records[0]
+
+
+@pytest.mark.parametrize("controls", [
+    '<button class="divider__header" aria-controls="work">Formative</button>',
+    '<button class="divider__header" aria-controls="absent"><h5>Formative</h5></button>',
+    '<button class="divider__header" aria-controls="work"><h5>Formative</h5><h5>Summative</h5></button>',
+    '<button class="divider__header" aria-controls="work"><h5>Formative</h5></button>'
+    '<button class="divider__header" aria-controls="work"><h5>Summative</h5></button>',
+    '<div id="work"></div><button class="divider__header" aria-controls="work"><h5>Formative</h5></button>',
+])
+def test_ambiguous_or_missing_category_controls_leave_metadata_unknown(controls):
+    html = ('<tl-grading-task-list></tl-grading-task-list>' + controls + '<div id="work">'
+            + assignment_row("Synthetic work", due="08/28/2026") + '</div>')
+    records = parse_infinite_campus_course_grades(html, course="Chemistry", reference=REFERENCE)
+    assert len(records) == 1
+    assert "category" not in records[0]
+
+
+def test_nearest_controlled_ancestor_wins_without_leaking_category_between_sections():
+    row = assignment_row("Synthetic work", due="08/28/2026")
+    html = ('<tl-grading-task-list></tl-grading-task-list>'
+            '<button class="divider__header" aria-controls="outer"><h5>Formative</h5></button>'
+            '<div id="outer"><button class="divider__header" aria-controls="inner"><h5>Summative</h5></button>'
+            f'<div id="inner">{row}</div></div>{row}')
+    records = parse_infinite_campus_course_grades(html, course="Chemistry", reference=REFERENCE)
+    assert records[0]["category"] == "summative"
+    assert "category" not in records[1]
 
 
 def assignment_row(
@@ -86,6 +141,7 @@ def test_bulk_course_parser_classifies_rows_without_assignment_navigation() -> N
             "dueDate": "2026-08-20",
             "dueTime": None,
             "status": "missing",
+            "score": "9/10",
         },
         {
             "course": "Synthetic Chemistry",
@@ -93,6 +149,7 @@ def test_bulk_course_parser_classifies_rows_without_assignment_navigation() -> N
             "dueDate": "2026-08-21",
             "dueTime": None,
             "status": "low_score",
+            "score": "14/35",
         },
         {
             "course": "Synthetic Chemistry",
@@ -190,6 +247,7 @@ def test_bulk_records_keep_the_shared_week_course_status_contract() -> None:
                         "title": "Low work",
                         "dueDate": "2026-08-21",
                         "dueTime": None,
+                        "score": "70%",
                     }
                 ],
                 "due": [],

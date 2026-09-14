@@ -7,6 +7,12 @@ from datetime import date, timedelta
 from difflib import SequenceMatcher
 from typing import Literal, NotRequired, TypedDict
 
+from scraper.assignment_metadata import (
+    AssignmentCategory,
+    normalize_assignment_category,
+    normalize_assignment_score,
+)
+
 
 AgendaStatus = Literal["missing", "low_score", "due"]
 AGENDA_STATUSES: tuple[AgendaStatus, ...] = ("missing", "low_score", "due")
@@ -24,12 +30,16 @@ class AgendaRecord(TypedDict):
     dueTime: str | None
     status: AgendaStatus
     sourceId: NotRequired[str]
+    score: NotRequired[str]
+    category: NotRequired[AssignmentCategory]
 
 
 class StoredAgendaItem(TypedDict):
     title: str
     dueDate: str
     dueTime: str | None
+    score: NotRequired[str]
+    category: NotRequired[AssignmentCategory]
 
 
 class AgendaBuckets(TypedDict):
@@ -292,6 +302,10 @@ def normalize_agenda(
         tuple[object, ...],
         tuple[str, str, str, str | None, AgendaStatus],
     ] = {}
+    metadata: dict[
+        tuple[object, ...],
+        list[tuple[AgendaStatus, str | None, AssignmentCategory | None]],
+    ] = {}
     for raw in records:
         course = _display_text(raw.get("course"))
         course = _canonical_course_title(course, known_course_titles)
@@ -331,6 +345,11 @@ def normalize_agenda(
             due_time,
             status,
         )
+        metadata.setdefault(identity, []).append((
+            status,
+            normalize_assignment_score(raw.get("score")),
+            normalize_assignment_category(raw.get("category")),
+        ))
         existing = deduplicated.get(identity)
         if (
             existing is None
@@ -344,15 +363,24 @@ def normalize_agenda(
             deduplicated[identity] = candidate
 
     grouped: AgendaWeeks = {}
-    for course, title, due_date, due_time, status in deduplicated.values():
+    for identity, (course, title, due_date, due_time, status) in deduplicated.items():
         week = monday_for(date.fromisoformat(due_date))
         buckets = grouped.setdefault(week, {}).setdefault(
             course,
             {"missing": [], "low_score": [], "due": []},
         )
-        buckets[status].append(
-            {"title": title, "dueDate": due_date, "dueTime": due_time}
-        )
+        item: StoredAgendaItem = {"title": title, "dueDate": due_date, "dueTime": due_time}
+        observations = metadata[identity]
+        scores = {
+            score for observed_status, score, _ in observations
+            if observed_status == status and score is not None
+        }
+        categories = {category for _, _, category in observations if category is not None}
+        if len(scores) == 1:
+            item["score"] = next(iter(scores))
+        if len(categories) == 1:
+            item["category"] = next(iter(categories))
+        buckets[status].append(item)
 
     ordered: AgendaWeeks = {}
     for week in sorted(grouped):

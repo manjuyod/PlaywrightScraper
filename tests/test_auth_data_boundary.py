@@ -5,6 +5,7 @@ import importlib
 import sys
 import time
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -148,6 +149,22 @@ def test_anonymous_root_returns_public_sign_in_before_private_data_loaders(
     assert boundary_harness.data_calls == []
 
 
+@pytest.mark.parametrize("path", ["/franchise/57", "/franchise/57/student/101"])
+@pytest.mark.parametrize("cookie_state", ["expired", "tampered"])
+def test_session_restart_keeps_canonical_page_without_query_input(boundary_harness, path, cookie_state):
+    if cookie_state == "expired":
+        boundary_harness.set_session(replace(boundary_harness.session, expires_at=int(time.time()) - 1))
+    else:
+        boundary_harness.client.set_cookie(SESSION_COOKIE_NAME, "invalid-cookie")
+    response = boundary_harness.client.get(path + "?next=//evil.example&grade_filter=all")
+    assert response.status_code == 302
+    location = urlsplit(response.headers["Location"])
+    assert location.path == "/auth/start"
+    assert parse_qs(location.query) == {"next": [path]}
+    assert boundary_harness.rust.calls == []
+    assert boundary_harness.data_calls == []
+
+
 @pytest.mark.parametrize(
     "path",
     (
@@ -164,7 +181,9 @@ def test_anonymous_requests_fail_before_private_data_loaders(
     response = boundary_harness.client.get(path)
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/auth/start")
+    location = urlsplit(response.headers["Location"])
+    assert location.path == "/auth/start"
+    assert parse_qs(location.query) == ({} if path.startswith("/api/") else {"next": [path]})
     assert boundary_harness.rust.calls == []
     assert boundary_harness.data_calls == []
 
@@ -207,7 +226,9 @@ def test_inactive_grant_fails_before_private_data_loaders(
     response = boundary_harness.client.get(path)
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/auth/start")
+    location = urlsplit(response.headers["Location"])
+    assert location.path == "/auth/start"
+    assert parse_qs(location.query) == ({} if path == "/" or path.startswith("/api/") else {"next": [path]})
     assert boundary_harness.data_calls == []
 
 
