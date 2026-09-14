@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from collections import Counter
 from datetime import date, datetime
 import re
 
@@ -8,6 +9,11 @@ from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Frame, Page
 
 from scraper.agenda_contract import AgendaRecord
+from scraper.assignment_metadata import (
+    AssignmentCategory,
+    normalize_assignment_category,
+    normalize_assignment_score,
+)
 
 
 class InfiniteCampusAgendaError(RuntimeError):
@@ -87,6 +93,32 @@ def _assignment_flags(row: Tag) -> frozenset[str]:
     )
 
 
+def _category_targets(soup: BeautifulSoup) -> dict[str, AssignmentCategory | None]:
+    """Use explicit container ownership; ambiguous controls remain unknown."""
+    id_counts = Counter(element.get("id") for element in soup.find_all(id=True))
+    targets: dict[str, AssignmentCategory | None] = {}
+    for control in soup.select(_CATEGORY_TOGGLES):
+        target = control.get("aria-controls")
+        if not isinstance(target, str) or not target:
+            continue
+        labels = control.select("h5")
+        if target in targets or id_counts[target] != 1 or len(labels) != 1:
+            targets[target] = None
+        else:
+            targets[target] = normalize_assignment_category(_text(labels[0]))
+    return targets
+
+
+def _assignment_category(
+    row: Tag, categories_by_target: dict[str, AssignmentCategory | None]
+) -> AssignmentCategory | None:
+    for ancestor in row.parents:
+        target = ancestor.get("id")
+        if isinstance(target, str) and target in categories_by_target:
+            return categories_by_target[target]
+    return None
+
+
 def parse_infinite_campus_course_grades(
     html: str,
     *,
@@ -103,6 +135,7 @@ def parse_infinite_campus_course_grades(
     if root is None:
         raise InfiniteCampusAgendaError()
     rows = soup.select(_ASSIGNMENT_ROWS)
+    categories_by_target = _category_targets(soup)
     reference_date = (
         reference.date()
         if isinstance(reference, datetime)
@@ -136,15 +169,20 @@ def parse_infinite_campus_course_grades(
         if status == "due" and due_date < reference_date:
             continue
 
-        records.append(
-            {
-                "course": normalized_course,
-                "title": title,
-                "dueDate": due_date.isoformat(),
-                "dueTime": None,
-                "status": status,
-            }
-        )
+        record: AgendaRecord = {
+            "course": normalized_course,
+            "title": title,
+            "dueDate": due_date.isoformat(),
+            "dueTime": None,
+            "status": status,
+        }
+        score = normalize_assignment_score(score_text)
+        category = _assignment_category(row, categories_by_target)
+        if score is not None:
+            record["score"] = score
+        if category is not None:
+            record["category"] = category
+        records.append(record)
     return records
 
 
