@@ -20,6 +20,12 @@ keys and proof operations on the CRM origin:
 
 PlaywrightScraper collects student grades and agenda data from supported school portals. CRM owns student identity, franchise, grade level, activity status, and primary and secondary portal credentials. The local Windows `grade-db.exe` boundary reads runnable CRM students whose `IsTrail` value is `Active` and whose primary portal credentials are complete, applies job leases and idempotency, and writes the canonical `students_grades_20262027` state in Neon. Python contains the Playwright collection logic and no SQL.
 
+For grade runs, Python preserves a nonempty Neon portal override. When the stored
+value is empty or `unknown`, Python classifies the current CRM primary portal URL
+through the portal registry and defaults unmatched URLs to `unknown`. Rust treats
+that value as an opaque key and persists it with the grade result only while the
+stored value remains empty or `unknown`.
+
 The Flask dashboard is an authenticated, read-only operations view. It uses the same runnable-student definition (`IsTrail = 'Active'` plus complete primary portal credentials), reads canonical grade/agenda state from Neon, and merges only on `crmstudentid`.
 
 ## Dashboard

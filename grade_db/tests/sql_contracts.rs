@@ -70,6 +70,15 @@ fn result_writes_are_idempotent_and_state_updates_are_separate() {
     assert!(sql::APPLY_GRADE.contains("weeklydata"));
     assert!(sql::APPLY_GRADE.contains("jsonb_build_object"));
     assert!(sql::APPLY_GRADE.contains("date_trunc('week', now())"));
+    for (query, parameter) in [(sql::APPLY_GRADE, "$3"), (sql::APPLY_GRADE_FAILURE, "$4")] {
+        let query = compact(query);
+        assert!(query.contains("portal = CASE"));
+        assert!(query.contains("portal IS NULL"));
+        assert!(query.contains("btrim(portal) = ''"));
+        assert!(query.contains("lower(portal) = 'unknown'"));
+        assert!(query.contains(&format!("THEN {parameter}")));
+        assert!(query.contains("ELSE portal END"));
+    }
     assert!(sql::APPLY_PRIMARY_AGENDA.contains("primary_agenda"));
     assert!(sql::APPLY_SECONDARY_AGENDA.contains("secondary_agenda"));
     assert!(sql::APPLY_PRIMARY_AGENDA.contains("not_configured"));

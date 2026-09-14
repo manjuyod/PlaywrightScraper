@@ -112,6 +112,7 @@ def test_result_post_retries_three_times_with_identical_json(tmp_path) -> None:
         job_id="00000000-0000-0000-0000-000000000019",
         lease_token="00000000-0000-0000-0000-000000000042",
         crmstudentid=7,
+        portal="unknown",
         outcome={"kind": "grade_success", "parsed_grades": {"2026-07-13": {}}},
     )
 
@@ -119,6 +120,7 @@ def test_result_post_retries_three_times_with_identical_json(tmp_path) -> None:
     assert len(calls) == 3
     assert calls[0] == calls[1] == calls[2]
     assert json.loads(calls[0])["crmstudentid"] == 7
+    assert json.loads(calls[0])["portal"] == "unknown"
 
 
 def test_start_job_uses_json_stdin_and_never_places_scope_on_command_line(tmp_path) -> None:

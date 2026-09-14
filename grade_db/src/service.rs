@@ -137,7 +137,6 @@ impl BoundaryService {
             return self.record_rejected(request, "job_scope_mismatch").await;
         }
         request
-            .outcome
             .validate_for_job(job.kind)
             .map_err(|message| AppError::Validation(message.into()))?;
 
