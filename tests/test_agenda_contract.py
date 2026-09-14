@@ -7,6 +7,69 @@ import pytest
 from scraper.agenda_contract import empty_agenda_bundle, normalize_agenda
 
 
+def _metadata_record(**changes):
+    return {
+        "course": "Chemistry", "title": "Synthetic quiz", "dueDate": "2026-09-14",
+        "dueTime": None, "status": "low_score", **changes,
+    }
+
+
+def test_normalize_preserves_valid_metadata_and_ignores_invalid_optional_values():
+    weeks = normalize_agenda([
+        _metadata_record(score="Score 7.50 / 10 (75%)", category="Formative"),
+        _metadata_record(title="Synthetic project", score={"unsafe": True}, category="Practice"),
+    ])
+    assert weeks["2026-09-14"]["Chemistry"]["low_score"] == [
+        {"title": "Synthetic project", "dueDate": "2026-09-14", "dueTime": None},
+        {"title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": None,
+         "score": "7.5/10", "category": "formative"},
+    ]
+
+
+@pytest.mark.parametrize("source", [False, True])
+@pytest.mark.parametrize("conflict", [False, True])
+def test_duplicate_metadata_merges_without_order_dependence_or_cross_status_scores(source, conflict):
+    rows = [
+        _metadata_record(status="missing"),
+        _metadata_record(status="missing", score="0/10", category="Formative"),
+        _metadata_record(score="7/10"),
+    ]
+    if source:
+        rows = [dict(row, sourceId="same-assignment") for row in rows]
+    if conflict:
+        rows.append(dict(rows[1], score="1/10", category="Summative"))
+    expected = {"title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": None}
+    if not conflict:
+        expected.update(score="0/10", category="formative")
+    for ordered in (rows, list(reversed(rows)), rows[1:] + rows[:1]):
+        buckets = normalize_agenda(ordered)["2026-09-14"]["Chemistry"]
+        assert buckets == {"missing": [expected], "low_score": [], "due": []}
+
+
+def test_duplicate_losing_status_cannot_supply_the_winning_score():
+    weeks = normalize_agenda([
+        _metadata_record(status="missing"),
+        _metadata_record(score="7/10", category="Summative"),
+    ])
+    assert weeks["2026-09-14"]["Chemistry"]["missing"] == [{
+        "title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": None,
+        "category": "summative",
+    }]
+
+
+def test_enriched_dual_slot_payload_counts_metadata_before_truncation():
+    rows = [_metadata_record(title=f"Quiz {i:03}", score="7/10", category="Formative") for i in range(200)]
+    weeks = normalize_agenda(rows)
+    assert weeks == normalize_agenda(reversed(rows))
+    items = weeks["2026-09-14"]["Chemistry"]["low_score"]
+    assert len(items) == 81
+    assert items[-1]["title"] == "Quiz 080"
+    assert all(item["score"] == "7/10" and item["category"] == "formative" for item in items)
+    assert _json_value_nodes(weeks) == 492
+    bundle = {key: {"portal": "infinite_campus", "weeks": weeks} for key in ("agenda1", "agenda2")}
+    assert _json_value_nodes(bundle) == 989
+
+
 def _json_value_nodes(value: object) -> int:
     if isinstance(value, dict):
         return 1 + sum(_json_value_nodes(item) for item in value.values())

@@ -5,6 +5,27 @@ use grade_db::models::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+#[test]
+fn enriched_assignment_metadata_survives_both_agenda_result_contracts() {
+    let agenda = json!({
+        "portal": "infinite_campus",
+        "weeks": {"2026-09-14": {"Synthetic Chemistry": {
+            "missing": [], "due": [], "low_score": [{
+                "title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": null,
+                "score": "7.5/10", "category": "formative"
+            }]
+        }}}
+    });
+    for outcome in [
+        ResultOutcome::PrimaryAgendaSuccess { agenda: agenda.clone() },
+        ResultOutcome::SecondaryAgendaSuccess { agenda: agenda.clone() },
+    ] {
+        assert_eq!(outcome.validate_for_job(JobKind::Agenda), Ok(()));
+        let serialized = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(serialized["agenda"], agenda);
+    }
+}
+
 fn crm_student() -> CrmStudent {
     CrmStudent {
         crmstudentid: 42,
