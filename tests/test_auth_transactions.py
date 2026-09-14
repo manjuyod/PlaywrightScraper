@@ -8,6 +8,24 @@ from flask import Flask, make_response
 from ui.auth import transaction
 
 
+@pytest.mark.parametrize("path", ["/franchise/6", "/franchise/6/student/32855"])
+def test_signed_transaction_preserves_supported_deep_destinations(path):
+    auth_tx = transaction.build_transaction(path, now=1_700_000_000)
+    signed = transaction.sign_transaction(auth_tx, "cookie-secret")
+    loaded = transaction.load_transaction(signed, "cookie-secret", now=1_700_000_001)
+    assert loaded.return_path == path
+
+
+@pytest.mark.parametrize("path", ["//evil.example", "/franchise/06", "/franchise/6#report"])
+def test_loading_signed_transaction_revalidates_destination(path):
+    signed = transaction.sign_transaction(
+        transaction.AuthTransaction("state", "verifier", path, 1_700_000_600),
+        "cookie-secret",
+    )
+    with pytest.raises(ValueError, match="transaction"):
+        transaction.load_transaction(signed, "cookie-secret", now=1_700_000_001)
+
+
 def test_build_transaction_uses_32_random_bytes_and_ten_minute_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

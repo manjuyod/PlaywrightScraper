@@ -195,7 +195,7 @@ def test_start_ignores_user_supplied_destinations(
     monkeypatch.setattr(transaction.secrets, "token_urlsafe", lambda _size: next(values))
 
     response = client.get(
-        "/auth/start?return=https://attacker.example/&next=//attacker.example/",
+        "/auth/start?return=https://attacker.example/",
         base_url="https://grades.tutoringclub.com",
     )
     signed = _cookie_from_headers(response, transaction.TRANSACTION_COOKIE_NAME)
@@ -495,3 +495,96 @@ def test_grade_origin_has_no_private_key_challenge_routes(app: Flask) -> None:
     client = app.test_client()
     assert client.post("/auth/challenge", json={"franchise_id": 16}).status_code == 404
     assert client.post("/auth/verify", json={"signature": "secret"}).status_code == 404
+
+
+@pytest.mark.parametrize("role", ["2", "3"])
+@pytest.mark.parametrize("path", ["/franchise/16", "/franchise/16/student/101"])
+@pytest.mark.parametrize("environment", ["production", "qa"])
+def test_first_authorization_returns_to_explicit_destination(app, monkeypatch, claims, role, path, environment):
+    host = "grades.tutoringclub.com"
+    if environment == "qa":
+        host = "qa-grades.tutoringclub.com"
+        for name, value in {
+            "GRADE_CHECKER_ENV": "qa",
+            "CRM_AUTH_BASE_URL": "https://qa-crm-auth.tutoringclub.com",
+            "CRM_AUTH_ISSUER": "https://qa-crm-auth.tutoringclub.com",
+            "CRM_AUTH_JWKS_URL": "https://qa-crm-auth.tutoringclub.com/.well-known/jwks.json",
+            "CRM_DEVICE_AUTHORIZE_URL": "https://qa.tutoraid.net/GradeCheckerDeviceAuthorize.aspx",
+            "GRADE_CHECKER_CALLBACK_URL": f"https://{host}/auth/callback",
+        }.items():
+            monkeypatch.setenv(name, value)
+    app.config["SERVER_NAME"] = host
+    scoped = replace(claims, crm_role=role)
+    events = []
+    _install_fake(monkeypatch, scoped, _grant(scoped), events)
+    monkeypatch.setattr(routes, "_now", lambda: 1_900_000_001)
+    client = app.test_client()
+    start = client.get("/auth/start", query_string={"next": path}, base_url=f"https://{host}")
+    auth_tx = transaction.load_transaction(
+        _cookie_from_headers(start, transaction.TRANSACTION_COOKIE_NAME), "test-cookie-secret",
+    )
+    assert auth_tx.return_path == path
+    assert set(parse_qs(urlsplit(start.headers["Location"]).query)) == {
+        "state", "code_challenge", "code_challenge_method",
+    }
+    response = client.get(
+        "/auth/callback", query_string={"state": auth_tx.state, "code": "opaque-code"},
+        base_url=f"https://{host}",
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == path
+    assert [event[0] for event in events] == ["redeem", "introspect"]
+    assert _cookie_from_headers(response, SESSION_COOKIE_NAME)
+    _assert_cookie_cleared(response, transaction.TRANSACTION_COOKIE_NAME)
+
+
+@pytest.mark.parametrize("query", [
+    "next=", "next=/franchise/16&next=/franchise/17", "next=//evil.example/",
+    "next=https://evil.example/", "next=%252Ffranchise%252F16",
+    "next=%2Ffranchise%2F16%3Fgrade_filter%3Dall", "next=%2Ffranchise%2F16%23report",
+])
+def test_start_rejects_invalid_destinations_without_issuing_transaction(app, query, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid destinations must not generate state or call Rust")
+    monkeypatch.setattr(transaction.secrets, "token_urlsafe", forbidden)
+    monkeypatch.setattr(routes, "RustAuthClient", forbidden)
+    response = app.test_client().get(f"/auth/start?{query}", base_url="https://grades.tutoringclub.com")
+    assert response.status_code == 400
+    assert "Location" not in response.headers
+    _assert_cookie_cleared(response, transaction.TRANSACTION_COOKIE_NAME)
+
+
+@pytest.mark.parametrize("path,permissions", [
+    ("/franchise/99/student/101", ("students.read",)),
+    ("/franchise/16/student/101", ("dashboard.read",)),
+])
+def test_callback_rejects_unauthorized_destination_without_session(app, monkeypatch, claims, path, permissions):
+    scoped = replace(claims, permissions=permissions)
+    events = []
+    _install_fake(monkeypatch, scoped, _grant(scoped), events)
+    monkeypatch.setattr(routes, "_now", lambda: 1_900_000_001)
+    auth_tx = transaction.build_transaction(path)
+    client = app.test_client()
+    client.set_cookie(transaction.TRANSACTION_COOKIE_NAME,
+                      transaction.sign_transaction(auth_tx, "test-cookie-secret"),
+                      domain="grades.tutoringclub.com", secure=True)
+    response = client.get("/auth/callback", query_string={"state": auth_tx.state, "code": "opaque-code"},
+                          base_url="https://grades.tutoringclub.com")
+    assert response.status_code == 403
+    assert [event[0] for event in events] == ["redeem", "introspect"]
+    assert not any(h.startswith(f"{SESSION_COOKIE_NAME}=") for h in response.headers.getlist("Set-Cookie"))
+    _assert_cookie_cleared(response, transaction.TRANSACTION_COOKIE_NAME)
+
+
+def test_new_authorization_supersedes_previous_tab(app, monkeypatch, claims):
+    client = app.test_client()
+    events = []
+    _install_fake(monkeypatch, claims, _grant(claims), events)
+    first = client.get("/auth/start?next=/franchise/16/student/101", base_url="https://grades.tutoringclub.com")
+    first_tx = transaction.load_transaction(_cookie_from_headers(first, transaction.TRANSACTION_COOKIE_NAME), "test-cookie-secret")
+    client.get("/auth/start?next=/franchise/16/student/102", base_url="https://grades.tutoringclub.com")
+    response = client.get("/auth/callback", query_string={"state": first_tx.state, "code": "opaque-code"},
+                          base_url="https://grades.tutoringclub.com")
+    assert response.status_code == 400
+    assert events == []
+    assert "Location" not in response.headers

@@ -10,10 +10,11 @@ from typing import Any
 from flask import Response
 from itsdangerous import BadData, URLSafeSerializer
 
+from .destinations import validate_return_path
+
 
 TRANSACTION_COOKIE_NAME = "__Host-grade_checker_auth_tx"
 _TRANSACTION_SIGNING_SALT = "grade-checker-auth-transaction-v1"
-_ALLOWED_RETURN_PATHS = frozenset({"/"})
 
 
 @dataclass(frozen=True)
@@ -27,8 +28,7 @@ class AuthTransaction:
 def build_transaction(
     return_path: str, ttl_seconds: int = 600, *, now: int | None = None
 ) -> AuthTransaction:
-    if return_path not in _ALLOWED_RETURN_PATHS:
-        raise ValueError("invalid return path")
+    validate_return_path(return_path)
     issued_at = int(time.time()) if now is None else now
     return AuthTransaction(
         state=secrets.token_urlsafe(32),
@@ -104,8 +104,7 @@ def _transaction_from_payload(payload: Any) -> AuthTransaction:
         raise ValueError
     if type(payload["expires_at"]) is not int:
         raise ValueError
-    if payload["return_path"] not in _ALLOWED_RETURN_PATHS:
-        raise ValueError
+    validate_return_path(payload["return_path"])
     return AuthTransaction(
         state=payload["state"],
         code_verifier=payload["code_verifier"],

@@ -135,7 +135,10 @@ def _trusted_claims(
 
 def _failure_response(error: _AuthFlowError, *, api: bool) -> Response:
     if error.restart:
-        response = redirect(url_for("auth.start_auth"))
+        start_args = {}
+        if not api and request.endpoint in {"franchise_view", "student_view"}:
+            start_args["next"] = url_for(request.endpoint, **(request.view_args or {}))
+        response = redirect(url_for("auth.start_auth", **start_args))
     elif error.status == 403:
         response = _forbidden(api=api)
     else:

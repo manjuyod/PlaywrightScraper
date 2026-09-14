@@ -8,6 +8,7 @@ from flask import Blueprint, Response, make_response, redirect, render_template,
 
 from .client import ClientError, RustAuthClient
 from .config import load_auth_config
+from .destinations import resolve_landing_path, validate_return_path
 from .session import (
     clear_session_cookie,
     create_session,
@@ -31,7 +32,14 @@ bp = Blueprint("auth", __name__, template_folder="../templates")
 @bp.get("/auth/start")
 def start_auth() -> Response:
     config = load_auth_config()
-    auth_tx = build_transaction("/", config.auth_transaction_ttl_seconds)
+    destinations = request.args.getlist("next")
+    if len(destinations) > 1:
+        return _auth_error(400)
+    try:
+        return_path = validate_return_path(destinations[0] if destinations else "/")
+    except ValueError:
+        return _auth_error(400)
+    auth_tx = build_transaction(return_path, config.auth_transaction_ttl_seconds)
     query = urlencode(
         {
             "state": auth_tx.state,
@@ -82,12 +90,15 @@ def callback() -> Response:
     now = _now()
     try:
         grade_session = create_session(claims, grant, now=now)
+        landing_path = resolve_landing_path(
+            auth_tx.return_path,
+            franchise_id=grade_session.franchise_id,
+            crm_role=grade_session.crm_role,
+            permissions=grade_session.permissions,
+        )
     except ValueError:
         return _auth_error(403)
 
-    landing_path = auth_tx.return_path
-    if grade_session.crm_role == "3":
-        landing_path = f"/franchise/{grade_session.franchise_id}"
     response = redirect(landing_path)
     set_session_cookie(
         response,
