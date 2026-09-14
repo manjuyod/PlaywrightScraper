@@ -1,18 +1,36 @@
 from __future__ import annotations
 
 from time import monotonic
+from typing import ClassVar
 
 from bs4 import Tag
+from playwright.async_api import TimeoutError as PlaywrightTimeout
+from typing_extensions import override
 
+from scraper.agenda_contract import AgendaRecord
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from .aeries_agenda import collect_aeries_agenda
 from .base import GradeMap, PortalEngine, UniversalLoginConfig
-from .utils import exists, wait_after_nav, universal_login_flow, grades_table_to_dict, canonicalize_course_title, canonicalize_grade, PlaywrightTimeout
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from .utils import (
+    canonicalize_course_title,
+    canonicalize_grade,
+    exists,
+    grades_table_to_dict,
+    universal_login_flow,
+    wait_after_nav,
+)
 
 
 class Aeries(PortalEngine):
-    portal_key = "aeries"
-    url_patterns = ("aeries", "LoginParent.aspx", "Dashboard.aspx")
-    login_config = UniversalLoginConfig(
+    portal_key: ClassVar[str] = "aeries"
+    url_patterns: ClassVar[tuple[str, ...]] = (
+        "aeries",
+        "LoginParent.aspx",
+        "Dashboard.aspx",
+    )
+    agenda_capable: ClassVar[bool] = True
+    login_config: ClassVar[UniversalLoginConfig | None] = UniversalLoginConfig(
         username_selector="input#portalAccountUsername",
         password_selector="input#portalAccountPassword",
         sso_entry_selector="#LoginButton",
@@ -77,10 +95,12 @@ class Aeries(PortalEngine):
 
         raise PlaywrightTimeout(f"Timed out waiting for Aeries login result (url={self.page.url})")
 
+    @override
     async def validate_login(self) -> None:
         if not await self._wait_for_login_result(timeout_ms=14000):
             raise self.LoginError("portal login rejected")
 
+    @override
     async def after_login(self, first_name: str | None) -> None:
         _ = first_name
         try:
@@ -91,6 +111,7 @@ class Aeries(PortalEngine):
             if not await self._is_logged_in():
                 raise
 
+    @override
     async def alternate_sso_login(self) -> None:
         username_selector = "#input28"
         pw_selector = "#input62"
@@ -114,6 +135,7 @@ class Aeries(PortalEngine):
             return True
         return False
 
+    @override
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -152,8 +174,8 @@ class Aeries(PortalEngine):
                 return courses_dict
             else:
                 self.logger.info("portal.fetch.dashboard_fallback")
-                await self.page.reload()
-                courses_dict = {}
+                _ = await self.page.reload()
+                courses_dict: GradeMap = {}
 
                 if isinstance(class_table, Tag) and len(class_table.select("div.Card")) > 0:
                     class_cards = class_table.select("div.Card")
@@ -163,9 +185,9 @@ class Aeries(PortalEngine):
                     )
                     for card in class_cards:
                         class_link = card.find("a", class_="TextHeading")
-                        if class_link is None: 
+                        if class_link is None:
                             continue
-                        course_name: str = class_link.text.strip()
+                        course_name = class_link.get_text(" ", strip=True)
 
                         grade_div = card.find("div", class_="Grade")
                         if not isinstance(grade_div, Tag):
@@ -173,7 +195,7 @@ class Aeries(PortalEngine):
                         grade_span = grade_div.find("span")
                         if grade_span is None:
                             continue
-                        grade_str: str | None = grade_span.text.strip() if grade_span is not None else None
+                        grade_str = grade_span.get_text(" ", strip=True)
                         if not grade_str:
                             continue
                         title = canonicalize_course_title(course_name)
@@ -191,3 +213,7 @@ class Aeries(PortalEngine):
 
     async def logout(self) -> None:
         await self.page.wait_for_timeout(500)
+
+    @override
+    async def get_agenda(self) -> list[AgendaRecord]:
+        return await collect_aeries_agenda(self.page, login_url=self.login_url)
