@@ -588,3 +588,63 @@ def test_new_authorization_supersedes_previous_tab(app, monkeypatch, claims):
     assert response.status_code == 400
     assert events == []
     assert "Location" not in response.headers
+
+
+@pytest.mark.parametrize("role,path", [("2", "/franchise/16"), ("3", "/franchise/16/student/101")])
+def test_first_click_journey_returns_through_real_guards_and_target_page(monkeypatch, config_environment, claims, role, path):
+    import sys
+    import time
+    from ui.auth import guards, session
+
+    for name in ("ui.routes", "ui.app"):
+        sys.modules.pop(name, None)
+    app_module = importlib.import_module("ui.app")
+    pages = importlib.import_module("ui.routes")
+    app_module.app.config.update(TESTING=True, SERVER_NAME="grades.tutoringclub.com")
+    now = int(time.time())
+    scoped = replace(claims, crm_role=role, iat=now-1, nbf=now-1, exp=now+1500)
+    grant = replace(_grant(scoped), expires_at=now+3600)
+    events = []
+    fake = FakeRustClient(scoped, grant, events)
+    monkeypatch.setattr(routes, "RustAuthClient", lambda _config: fake)
+    monkeypatch.setattr(guards, "RustAuthClient", lambda _config: fake)
+    student = pages.dashboard.merge_student_rows([{
+        "crmstudentid": 101, "franchiseid": 16, "firstname": "Synthetic",
+        "lastname": "Student", "grade": 10, "portal_url": "https://portal.example/login",
+    }], [])[0]
+    data_calls = []
+
+    def students(*, franchise_id):
+        data_calls.append(("students", franchise_id))
+        return [student]
+
+    def one_student(franchise_id, crmstudentid):
+        data_calls.append(("student", franchise_id, crmstudentid))
+        return student if (franchise_id, crmstudentid) == (16, 101) else None
+
+    monkeypatch.setattr(pages.dashboard, "load_students", students)
+    monkeypatch.setattr(pages.dashboard, "load_student", one_student)
+    monkeypatch.setattr(pages.dashboard, "load_franchise_name", lambda _fid: "Synthetic Center")
+    client = app_module.app.test_client()
+    base_url = "https://grades.tutoringclub.com"
+    initial = client.get(path, base_url=base_url)
+    assert initial.status_code == 302
+    assert parse_qs(urlsplit(initial.location).query) == {"next": [path]}
+    start = client.get(initial.location, base_url=base_url)
+    auth_tx = transaction.load_transaction(_cookie_from_headers(start, transaction.TRANSACTION_COOKIE_NAME), "test-cookie-secret")
+    assert data_calls == []
+    callback = client.get("/auth/callback", query_string={"state": auth_tx.state, "code": "opaque-code"}, base_url=base_url)
+    assert callback.location == path
+    assert [event[0] for event in events] == ["redeem", "introspect"]
+    assert data_calls == []
+    landing = client.get(callback.location, base_url=base_url)
+    assert landing.status_code == 200
+    assert b"Synthetic" in landing.data
+    assert data_calls == ([("students", 16)] if role == "2" else [("student", 16, 101)])
+    assert client.get(path, base_url=base_url).status_code == 200
+    signed = client.get_cookie(SESSION_COOKIE_NAME, domain="grades.tutoringclub.com").value
+    expired = replace(session.load_session(signed, "test-cookie-secret"), expires_at=now-1)
+    client.set_cookie(SESSION_COOKIE_NAME, session.sign_session(expired, "test-cookie-secret"), domain="grades.tutoringclub.com")
+    restart = client.get(path, base_url=base_url)
+    assert restart.status_code == 302
+    assert parse_qs(urlsplit(restart.location).query) == {"next": [path]}
