@@ -218,7 +218,7 @@ async def _wait_for_course_page(page: Page) -> Frame:
     # grading-task-list still in the overview) does not mean the course loaded.
     frame = _workspace(page)
     await frame.wait_for_url(
-        re.compile(r"/portal/student/classroom/"), timeout=_READINESS_TIMEOUT_MS
+        re.compile(r"/portal/(?:student|parent)/classroom/"), timeout=_READINESS_TIMEOUT_MS
     )
     return frame
 

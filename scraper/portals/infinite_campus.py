@@ -66,7 +66,7 @@ class InfiniteCampus(PortalEngine):
 
     # ---------------------- NAV TO GRADES -------
     async def nav_to_grades(self, *, force: bool = False) -> None:
-        grades_url_pattern = re.compile(r"/portal/student/grades(?:[?#]|$)")
+        grades_url_pattern = re.compile(r"/portal/(?:student|parent)/grades(?:[?#]|$)")
         menu_selector = "#menu-toggle-button"
         grades_button_label = "Grades"
         on_grades_page = not force and grades_url_pattern.search(self.page.url)

@@ -15,32 +15,35 @@ CLASSROOM = "/campus/apps/portal/student/classroom/grades/student-grades"
 
 
 @pytest.mark.parametrize("already_on_overview", [True, False])
-def test_overview_navigation_waits_for_embedded_overview(already_on_overview):
+@pytest.mark.parametrize("portal_view", ["student", "parent"])
+def test_overview_navigation_waits_for_embedded_overview(already_on_overview, portal_view):
     async def run():
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch()
             page = await browser.new_page()
-            outer_overview = "/campus/nav-wrapper/student/portal/student/grades"
-            initial_frame = OVERVIEW if already_on_overview else CLASSROOM
-            initial_outer = outer_overview if already_on_overview else "/campus/nav-wrapper/student/portal/student/classroom/grades/student-grades"
+            overview = OVERVIEW.replace("/student/", f"/{portal_view}/")
+            classroom = CLASSROOM.replace("/student/", f"/{portal_view}/")
+            outer_overview = f"/campus/nav-wrapper/{portal_view}/portal/{portal_view}/grades"
+            initial_frame = overview if already_on_overview else classroom
+            initial_outer = outer_overview if already_on_overview else f"/campus/nav-wrapper/{portal_view}/portal/{portal_view}/classroom/grades/student-grades"
             async def serve(route):
                 path = route.request.url.removeprefix("https://ic.example")
-                if path == OVERVIEW:
+                if path == overview:
                     body = '<div class="collapsible-card grades__card">Loaded overview</div>'
-                elif path == CLASSROOM:
+                elif path == classroom:
                     body = '<tl-student-grades>Old course</tl-student-grades>'
                 else:
                     body = f'<iframe name="main-workspace" src="{initial_frame}"></iframe>'
                     if not already_on_overview:
-                        body += f'''<button id="menu-toggle-button">Menu</button><a href="#" onclick="event.preventDefault(); history.replaceState(null, '', '{outer_overview}'); setTimeout(() => document.querySelector('iframe').src = '{OVERVIEW}', 300)">Grades</a>'''
+                        body += f'''<button id="menu-toggle-button">Menu</button><a href="#" onclick="event.preventDefault(); history.replaceState(null, '', '{outer_overview}'); setTimeout(() => document.querySelector('iframe').src = '{overview}', 300)">Grades</a>'''
                 await route.fulfill(content_type="text/html", body=body)
             await page.route("https://ic.example/**", serve)
             await page.goto(f"https://ic.example{initial_outer}")
             try:
                 engine = InfiniteCampus(page, "student", "password", "https://ic.example")
-                await engine.nav_to_grades()
+                await asyncio.wait_for(engine.nav_to_grades(), timeout=5)
                 frame = page.frame("main-workspace")
-                assert frame.url.endswith(OVERVIEW)
+                assert frame.url.endswith(overview)
                 assert await frame.locator(".grades__card").count() == 1
             finally:
                 await browser.close()
@@ -48,29 +51,32 @@ def test_overview_navigation_waits_for_embedded_overview(already_on_overview):
 
 
 @pytest.mark.parametrize("has_assignments", [True, False])
-def test_course_readiness_waits_for_embedded_route_and_loaded_course(has_assignments):
+@pytest.mark.parametrize("portal_view", ["student", "parent"])
+def test_course_readiness_waits_for_embedded_route_and_loaded_course(has_assignments, portal_view):
     async def run():
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch()
             page = await browser.new_page()
+            overview = OVERVIEW.replace("/student/", f"/{portal_view}/")
+            classroom = CLASSROOM.replace("/student/", f"/{portal_view}/")
             # The old overview remains during iframe navigation, then the new
             # route renders a shell before its asynchronous course data arrives.
             row = '<div class="selcat-assignment-row">Loaded work</div>' if has_assignments else ""
             loaded = f'<tl-grading-detail><tl-grading-task-list><div>Loaded course{row}</div></tl-grading-task-list></tl-grading-detail>'
             async def serve(route):
-                if route.request.url.endswith(OVERVIEW):
+                if route.request.url.endswith(overview):
                     body = '<tl-grading-task-list>Old overview</tl-grading-task-list>'
-                elif route.request.url.endswith(CLASSROOM):
+                elif route.request.url.endswith(classroom):
                     body = '<tl-student-grades id="course"></tl-student-grades>' + f'<script>setTimeout(() => document.querySelector("#course").innerHTML = {json.dumps(loaded)}, 350)</script>'
                 else:
-                    body = f'<iframe name="main-workspace" src="{OVERVIEW}"></iframe>'
+                    body = f'<iframe name="main-workspace" src="{overview}"></iframe>'
                 await route.fulfill(content_type="text/html", body=body)
             await page.route("https://ic.example/**", serve)
             await page.goto("https://ic.example/")
-            await page.evaluate("path => setTimeout(() => document.querySelector('iframe').src = path, 300)", CLASSROOM)
+            await page.evaluate("path => setTimeout(() => document.querySelector('iframe').src = path, 300)", classroom)
             try:
-                frame = await agenda._open_course_grades(await agenda._wait_for_course_page(page))
-                assert frame.url.endswith(CLASSROOM)
+                frame = await agenda._open_course_grades(await asyncio.wait_for(agenda._wait_for_course_page(page), timeout=5))
+                assert frame.url.endswith(classroom)
                 assert await frame.locator("tl-grading-detail").count() == 1
                 assert await frame.locator(".selcat-assignment-row").count() == int(has_assignments)
             finally:
