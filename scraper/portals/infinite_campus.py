@@ -14,7 +14,10 @@ from tenacity import (
 )
 from typing_extensions import override
 
-from .infinite_campus_agenda import collect_infinite_campus_agenda
+from .infinite_campus_agenda import (
+    INFINITE_CAMPUS_GRADES_ROUTE,
+    collect_infinite_campus_agenda,
+)
 from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import exists, grades_table_to_dict
 
@@ -66,18 +69,19 @@ class InfiniteCampus(PortalEngine):
 
     # ---------------------- NAV TO GRADES -------
     async def nav_to_grades(self, *, force: bool = False) -> None:
-        grades_url_pattern = re.compile(r"/portal/student/grades(?:[?#]|$)")
         menu_selector = "#menu-toggle-button"
         grades_button_label = "Grades"
-        on_grades_page = not force and grades_url_pattern.search(self.page.url)
+        on_grades_page = (
+            not force and INFINITE_CAMPUS_GRADES_ROUTE.search(self.page.url)
+        )
         if not on_grades_page:
             _ = await self.page.wait_for_selector(menu_selector)
             await self.page.locator(menu_selector).click()
             await self.page.get_by_role("link", name=grades_button_label, exact=True).click()
-            await self.page.wait_for_url(grades_url_pattern, timeout=20000)
+            await self.page.wait_for_url(INFINITE_CAMPUS_GRADES_ROUTE, timeout=20000)
         frame = self.page.frame("main-workspace")
         assert frame is not None, "Infinite Campus main workspace frame not found"
-        await frame.wait_for_url(grades_url_pattern, timeout=20000)
+        await frame.wait_for_url(INFINITE_CAMPUS_GRADES_ROUTE, timeout=20000)
         await frame.locator(self._GRADE_CARDS).first.wait_for(
             state="visible", timeout=30000
         )
