@@ -24,6 +24,7 @@ EXPECTED_PORTALS = {
     "blackbaud",
     "canvas",
     "classlink",
+    "clever",
     "google_classroom",
     "gps",
     "homeaccess",

@@ -45,23 +45,25 @@ def test_other_origins_and_entry_routes_are_not_ccsd_canvas(entry):
         asyncio.run(CanvasEngine(None, "student", "password", url).login())
 
 
-@pytest.mark.parametrize("key, value", [
-    ("district_id", "another-district"),
-    ("client_id", "another-app"),
-    ("redirect_uri", "https://attacker.example/callback"),
-    ("response_type", "token"),
-    ("channel", "google"),
-    ("district_id", None),
-    ("district_id", ["51e5622080da6210550053a4", "another-district"]),
-    ("redirect_uri", ["https://clever.com/in/auth_callback", "https://attacker.example"]),
+@pytest.mark.parametrize("key, value, detected_portal", [
+    ("district_id", "another-district", "clever"),
+    ("client_id", "another-app", "clever"),
+    ("redirect_uri", "https://attacker.example/callback", None),
+    ("response_type", "token", None),
+    ("channel", "google", None),
+    ("district_id", None, None),
+    ("district_id", ["51e5622080da6210550053a4", "another-district"], None),
+    ("redirect_uri", ["https://clever.com/in/auth_callback", "https://attacker.example"], None),
 ])
-def test_other_districts_apps_and_ambiguous_queries_remain_unsupported(key, value):
+def test_other_valid_clever_entries_are_generic_and_ambiguous_queries_are_unsupported(
+    key, value, detected_portal
+):
     parameters = dict(PARAMETERS)
     if value is None:
         parameters.pop(key)
     else:
         parameters[key] = value
     url = f"{ENTRY}?{urlencode(parameters, doseq=True)}"
-    assert get_portal_key_from_url(url) is None
+    assert get_portal_key_from_url(url) == detected_portal
     with pytest.raises(CanvasTrustError):
         asyncio.run(CanvasEngine(None, "student", "password", url).login())
