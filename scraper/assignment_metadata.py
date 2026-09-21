@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 import re
-from typing import Literal
 
 
-AssignmentCategory = Literal["formative", "summative"]
+AssignmentCategory = str
 _NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 _SCORE_LABEL = re.compile(r"^score\b\s*:?\s*", re.IGNORECASE)
 _FRACTION = re.compile(
@@ -15,6 +14,7 @@ _FRACTION = re.compile(
     rf"(?:\s*\(\s*{_NUMBER}\s*%\s*\))?"
 )
 _PERCENTAGE = re.compile(rf"(?P<percent>{_NUMBER})\s*%")
+_CATEGORY_WEIGHT = re.compile(r"\bweight\s*:", re.IGNORECASE)
 
 
 def _decimal_display(raw: str) -> str:
@@ -42,9 +42,15 @@ def normalize_assignment_score(value: object) -> str | None:
 def normalize_assignment_category(value: object) -> AssignmentCategory | None:
     if not isinstance(value, str) or len(value) > 128:
         return None
-    text = " ".join(value.split()).casefold()
-    if text == "formative":
-        return "formative"
-    if text == "summative":
-        return "summative"
-    return None
+    text = " ".join(value.split())
+    if (
+        not text
+        or len(text) > 64
+        or "<" in text
+        or ">" in text
+        or _CATEGORY_WEIGHT.search(text)
+        or any(ord(character) < 32 or ord(character) == 127 for character in text)
+    ):
+        return None
+    normalized = text.casefold()
+    return normalized if normalized in {"formative", "summative"} else text

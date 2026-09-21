@@ -23,8 +23,11 @@ def test_score_normalization_preserves_only_unambiguous_numeric_display(raw, exp
 
 @pytest.mark.parametrize("raw,expected", [
     (" Formative ", "formative"), ("SUMMATIVE", "summative"),
-    ("Practice", None), ("Formative Weight: 20", None), (None, None),
-    (True, None), ({"category": "formative"}, None), ("formative summative", None),
+    ("Practice", "Practice"), (" Homework   & Quizzes ", "Homework & Quizzes"),
+    ("formative summative", "formative summative"),
+    ("Formative Weight: 20", None), ("<b>Homework</b>", None),
+    ("Category\x00Name", None), ("x" * 65, None), (None, None),
+    (True, None), ({"category": "formative"}, None),
 ])
-def test_category_requires_an_explicit_recognized_label(raw, expected):
+def test_category_preserves_safe_bounded_labels_without_embedded_weights(raw, expected):
     assert normalize_assignment_category(raw) == expected

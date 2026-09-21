@@ -22,7 +22,7 @@ def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(mo
          "score": "Score 7.50/10 (75%)", "category": "Formative", "private": "discard"},
         {"title": "B percentage", "dueDate": "2026-09-14", "dueTime": None,
          "score": "79.50%", "category": "SUMMATIVE"},
-        {"title": "C invalid", "dueDate": "2026-09-14", "dueTime": None,
+        {"title": "C custom", "dueDate": "2026-09-14", "dueTime": None,
          "score": {"unsafe": True}, "category": "Practice"},
         {"title": "D legacy", "dueDate": "2026-09-14", "dueTime": None},
     ]
@@ -39,8 +39,11 @@ def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(mo
         }
         assert rows[1]["score"] == "79.5%"
         assert rows[1]["category"] == "summative"
-        assert [row["title"] for row in rows[2:]] == ["C invalid", "D legacy"]
-        assert all("score" not in row and "category" not in row for row in rows[2:])
+        assert rows[2]["title"] == "C custom"
+        assert rows[2]["category"] == "Practice"
+        assert "score" not in rows[2]
+        assert rows[3]["title"] == "D legacy"
+        assert "score" not in rows[3] and "category" not in rows[3]
 
 
 def test_metadata_on_equal_title_and_date_rows_does_not_break_page_sorting(monkeypatch):

@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Page
 
 from scraper.agenda_contract import AgendaRecord, AgendaStatus
+from scraper.assignment_metadata import normalize_assignment_category
 
 
 class AeriesAgendaError(RuntimeError):
@@ -23,6 +24,7 @@ _ASSIGNMENT_ROOT = "[id$='assignmentsView']"
 _ASSIGNMENT_CARD = ".Card"
 _TITLE = ".TextHeading"
 _COMPLETE_SCORE = "[id$='completeData']"
+_CATEGORY = ".TextSubSectionCategory"
 _DATE = re.compile(r"\bDue Date:\s*(\d{1,2}/\d{1,2}/\d{4})\b", re.IGNORECASE)
 _TIME = re.compile(r"\bDue Time:\s*(\d{1,2}:\d{2}\s*[AP]M)\b", re.IGNORECASE)
 _GRADING_COMPLETE = re.compile(
@@ -162,15 +164,17 @@ def parse_aeries_gradebook(
         )
         if status is None:
             continue
-        records.append(
-            {
-                "course": normalized_course,
-                "title": title,
-                "dueDate": due_date.isoformat(),
-                "dueTime": due_time,
-                "status": status,
-            }
-        )
+        record: AgendaRecord = {
+            "course": normalized_course,
+            "title": title,
+            "dueDate": due_date.isoformat(),
+            "dueTime": due_time,
+            "status": status,
+        }
+        category = normalize_assignment_category(_text(card.select_one(_CATEGORY)))
+        if category is not None:
+            record["category"] = category
+        records.append(record)
     return records
 
 
