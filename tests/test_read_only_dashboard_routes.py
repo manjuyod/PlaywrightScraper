@@ -158,7 +158,7 @@ def _create_client(
         _student(103, grade="college"),
     ]
     monkeypatch.setattr(routes.dashboard, "load_students", lambda **_kwargs: students)
-    monkeypatch.setattr(routes.dashboard, "load_jobs", lambda limit=20: [_job()])
+    monkeypatch.setattr(routes.dashboard, "load_jobs", lambda franchise_id=None, limit=20: [_job()])
     monkeypatch.setattr(
         routes.dashboard,
         "load_franchise_name",
@@ -200,7 +200,9 @@ def _page_data(response) -> dict[str, Any]:
 def test_anonymous_home_renders_public_sign_in_without_dashboard_data(
     monkeypatch,
 ) -> None:
-    client, routes = _create_client(monkeypatch, authenticated=False)
+    client, routes = _create_client(
+        monkeypatch, environment="production", authenticated=False
+    )
     data_calls: list[str] = []
 
     def load_students(**_kwargs):
@@ -239,6 +241,36 @@ def test_authenticated_dev_home_renders_read_only_overview(monkeypatch) -> None:
     assert page_data["franchises"][0]["name"] == "Tutoring Club of Gilbert"
     assert page_data["jobs"] == [_job()]
     assert "Set-Cookie" not in response.headers
+
+
+def test_dev_overview_shows_all_franchises_and_jobs_without_a_session(monkeypatch) -> None:
+    client, routes = _create_client(monkeypatch, authenticated=False)
+    students = [_student(101, franchise_id=57), _student(201, franchise_id=99)]
+    other_job = {**_job(), "id": "other-job", "franchiseId": 99}
+    calls: list[tuple[str, int | None]] = []
+
+    def load_students(*, franchise_id=None):
+        calls.append(("students", franchise_id))
+        return students
+
+    def load_jobs(franchise_id=None, limit=20):
+        calls.append(("jobs", franchise_id))
+        return [_job(), other_job]
+
+    monkeypatch.setattr(routes.dashboard, "load_students", load_students)
+    monkeypatch.setattr(routes.dashboard, "load_jobs", load_jobs)
+
+    response = client.get("/")
+    data = _page_data(response)
+
+    assert response.status_code == 200
+    assert data["countAll"] == 2
+    assert [franchise["id"] for franchise in data["franchises"]] == [57, 99]
+    assert [franchise["url"] for franchise in data["franchises"]] == [
+        "/franchise/57", "/franchise/99"
+    ]
+    assert [job["franchiseId"] for job in data["jobs"]] == [57, 99]
+    assert calls == [("students", None), ("jobs", None)]
 
 
 def test_non_dev_anonymous_home_is_public_without_loading_dashboard_data(

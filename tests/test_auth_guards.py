@@ -67,6 +67,7 @@ class GuardHarness:
 
 @pytest.fixture
 def guard_harness(monkeypatch: pytest.MonkeyPatch) -> GuardHarness:
+    monkeypatch.setenv("PYTHON_ENV", "production")
     from ui.auth import guards
 
     now = int(time.time())

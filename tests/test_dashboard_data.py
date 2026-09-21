@@ -522,38 +522,29 @@ def test_job_reader_returns_active_plus_twenty_recent_without_private_columns() 
     job_sql = dashboard_data.NEON_JOBS_SQL.lower()
     assert "status = 'running'" in job_sql
     assert "status <> 'running'" in job_sql
-    assert job_sql.count("grade_scrape_jobs.franchise_id = :franchise_id") == 2
-    assert "franchise_id is null" not in job_sql
+    assert job_sql.count("(cast(:franchise_id as integer) is null or grade_scrape_jobs.franchise_id = :franchise_id)") == 2
     for forbidden in ("runner_id", "lease_token", "payload", "summary"):
         assert forbidden not in job_sql
 
 
-def test_job_reader_requires_franchise_scope() -> None:
+def test_job_reader_can_load_all_franchises() -> None:
     engine = _FakeEngine([])
-
-    with pytest.raises(TypeError):
-        dashboard_data.read_jobs(limit=20, engine=engine)
-
-    assert engine.connection.calls == []
+    assert dashboard_data.read_jobs(limit=20, engine=engine) == []
+    assert engine.connection.calls[1][1] == {"recent_limit": 20, "franchise_id": None}
 
 
-def test_job_loader_requires_franchise_scope(monkeypatch) -> None:
+def test_job_loader_can_load_all_franchises(monkeypatch) -> None:
     monkeypatch.setattr(dashboard_data, "read_jobs", lambda **_kwargs: [])
-
-    with pytest.raises(TypeError):
-        dashboard_data.load_jobs(limit=20)
+    assert dashboard_data.load_jobs(limit=20) == []
 
 
-def test_job_reader_rejects_explicit_none_before_query() -> None:
+def test_job_reader_accepts_explicit_none() -> None:
     engine = _FakeEngine([])
-
-    with pytest.raises(ValueError):
-        dashboard_data.read_jobs(None, limit=20, engine=engine)
-
-    assert engine.connection.calls == []
+    assert dashboard_data.read_jobs(None, limit=20, engine=engine) == []
+    assert engine.connection.calls[1][1] == {"recent_limit": 20, "franchise_id": None}
 
 
-def test_job_loader_rejects_explicit_none_before_reader(monkeypatch) -> None:
+def test_job_loader_passes_explicit_none_to_reader(monkeypatch) -> None:
     calls: list[dict[str, Any]] = []
 
     def read_jobs(**kwargs: Any) -> list[dict[str, Any]]:
@@ -562,10 +553,8 @@ def test_job_loader_rejects_explicit_none_before_reader(monkeypatch) -> None:
 
     monkeypatch.setattr(dashboard_data, "read_jobs", read_jobs)
 
-    with pytest.raises(ValueError):
-        dashboard_data.load_jobs(None, limit=20)
-
-    assert calls == []
+    assert dashboard_data.load_jobs(None, limit=20) == []
+    assert calls == [{"franchise_id": None, "limit": 20}]
 
 
 def test_load_students_reads_neon_in_one_batch(monkeypatch) -> None:
