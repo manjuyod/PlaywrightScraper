@@ -440,13 +440,26 @@
             "span",
             {
                 className: cn(
-                    "ml-1 font-extrabold",
+                    "ml-1 inline-flex h-4 w-3 shrink-0 items-center justify-center align-middle",
                     increased ? "text-emerald-600" : "text-red-600",
                 ),
                 title: increased ? "Grade increased" : "Grade decreased",
                 "aria-label": increased ? "Grade increased" : "Grade decreased",
             },
-            change,
+            h(
+                "svg",
+                {
+                    viewBox: "0 0 10 6",
+                    fill: "none",
+                    stroke: "currentColor",
+                    strokeWidth: 2,
+                    strokeLinecap: "round",
+                    strokeLinejoin: "round",
+                    style: { display: "block", width: "0.7rem", height: "0.45rem" },
+                    "aria-hidden": "true",
+                },
+                h("path", { d: increased ? "M1 5 5 1l4 4" : "M1 1l4 4 4-4" }),
+            ),
         );
     }
 
@@ -710,6 +723,34 @@
             .toLowerCase();
     }
 
+    function gradeValueStyle(value) {
+        if (value === null || value === undefined || String(value).trim() === "") {
+            return undefined;
+        }
+        const numericGrade = Number(value);
+        if (!Number.isFinite(numericGrade)) {
+            return undefined;
+        }
+        const clampedGrade = Math.max(60, Math.min(100, numericGrade));
+        const stops = [
+            { grade: 60, color: [239, 68, 68] },
+            { grade: 70, color: [250, 204, 21] },
+            { grade: 80, color: [74, 190, 84] },
+            { grade: 100, color: [16, 220, 90] },
+        ];
+        const upperIndex = stops.findIndex((stop) => clampedGrade <= stop.grade);
+        const upper = stops[Math.max(upperIndex, 1)];
+        const lower = stops[Math.max(upperIndex - 1, 0)];
+        const progress = (clampedGrade - lower.grade) / (upper.grade - lower.grade);
+        const channels = lower.color.map((channel, index) =>
+            Math.round(channel + (upper.color[index] - channel) * progress),
+        );
+        return {
+            backgroundColor: `rgba(${channels.join(", ")}, 0.22)`,
+            borderColor: `rgba(${channels.join(", ")}, 0.42)`,
+        };
+    }
+
     function GradeRow({ grade, agenda }) {
         const course = grade.course;
         const rowContent = [
@@ -733,7 +774,8 @@
                 "span",
                 {
                     key: "grade",
-                    className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900",
+                    className: "tc-grade-value shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900",
+                    style: gradeValueStyle(grade.grade),
                 },
                 Number(grade.grade).toFixed(1),
                 h(GradeMovement, { change: grade.change }),
@@ -1101,7 +1143,14 @@
                                 "div",
                                 { key: course, className: "flex justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm" },
                                 h("span", { className: "font-semibold text-slate-700" }, course),
-                                h("span", { className: "font-mono font-bold text-slate-900" }, Number(grade).toFixed(1)),
+                                h(
+                                    "span",
+                                    {
+                                        className: "tc-grade-value font-mono font-bold text-slate-900",
+                                        style: gradeValueStyle(grade),
+                                    },
+                                    Number(grade).toFixed(1),
+                                ),
                             ),
                         ),
                     ),
@@ -1119,12 +1168,6 @@
         ).sort();
         if (!weeks.length || !courses.length) {
             return h("p", { className: "text-sm text-slate-500" }, "No heatmap data yet.");
-        }
-        function cellColor(value) {
-            if (value >= 90) return "#bbf7d0";
-            if (value >= 80) return "#bfdbfe";
-            if (value >= 70) return "#fde68a";
-            return "#fecaca";
         }
         return h(
             "div",
@@ -1167,7 +1210,10 @@
                                         className: "tc-heatmap-cell",
                                         style:
                                             typeof value === "number"
-                                                ? { backgroundColor: cellColor(value) }
+                                                ? {
+                                                      backgroundColor:
+                                                          gradeValueStyle(value).backgroundColor,
+                                                  }
                                                 : undefined,
                                         title:
                                             typeof value === "number"
@@ -1190,8 +1236,42 @@
         due: { marker: "DUE", label: "Upcoming assignment" },
     };
 
+    function assignmentScoreDisplay(score) {
+        const normalized = String(score || "").trim();
+        const fraction = normalized.match(/^(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+        if (!fraction) {
+            return normalized;
+        }
+        const earned = Number(fraction[1]);
+        const possible = Number(fraction[2]);
+        if (!Number.isFinite(earned) || !Number.isFinite(possible) || possible <= 0) {
+            return normalized;
+        }
+        const percentage = Math.round((earned / possible) * 1000) / 10;
+        return `${normalized} · ${percentage}%`;
+    }
+
+    function assignmentCategoryDisplay(category) {
+        const normalized = String(category || "").trim().replace(/\s+/g, " ");
+        if (
+            !normalized ||
+            normalized.length > 64 ||
+            /[<>\u0000-\u001f\u007f]/.test(normalized) ||
+            /\bweight\s*:/i.test(normalized)
+        ) {
+            return "";
+        }
+        const known = normalized.toLowerCase();
+        if (known === "formative" || known === "summative") {
+            return `${known.charAt(0).toUpperCase()}${known.slice(1)}`;
+        }
+        return normalized;
+    }
+
     function AgendaAssignment({ assignment }) {
         const status = AGENDA_STATUSES[assignment.status] || AGENDA_STATUSES.due;
+        const score = assignmentScoreDisplay(assignment.score);
+        const category = assignmentCategoryDisplay(assignment.category);
         return h(
             "article",
             { className: "tc-agenda-assignment" },
@@ -1218,14 +1298,13 @@
                 "span",
                 {
                     className: "tc-agenda-score",
-                    "aria-label": assignment.score ? `Score: ${assignment.score}` : "Score unavailable",
-                    title: assignment.score || "Score unavailable",
+                    "aria-label": score ? `Score: ${score}` : "Score unavailable",
+                    title: score || "Score unavailable",
                 },
-                assignment.score || "—",
+                score || "—",
             ),
-            assignment.category === "formative" || assignment.category === "summative"
-                ? h("span", { className: "tc-agenda-category" },
-                    assignment.category === "formative" ? "Formative" : "Summative")
+            category
+                ? h("span", { className: "tc-agenda-category", title: category }, category)
                 : null,
             h(
                 "time",
