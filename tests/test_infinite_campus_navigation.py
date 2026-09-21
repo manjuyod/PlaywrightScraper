@@ -45,7 +45,7 @@ def test_overview_navigation_waits_for_embedded_overview(already_on_overview, ro
             await page.goto(f"https://ic.example{initial_outer}")
             try:
                 engine = InfiniteCampus(page, "student", "password", "https://ic.example")
-                await engine.nav_to_grades()
+                await asyncio.wait_for(engine.nav_to_grades(), timeout=5)
                 frame = page.frame("main-workspace")
                 assert frame.url.endswith(overview_path)
                 assert await frame.locator(".grades__card").count() == 1
@@ -79,7 +79,7 @@ def test_course_readiness_waits_for_embedded_route_and_loaded_course(has_assignm
             await page.goto("https://ic.example/")
             await page.evaluate("path => setTimeout(() => document.querySelector('iframe').src = path, 300)", classroom_path)
             try:
-                frame = await agenda._open_course_grades(await agenda._wait_for_course_page(page))
+                frame = await agenda._open_course_grades(await asyncio.wait_for(agenda._wait_for_course_page(page), timeout=5))
                 assert frame.url.endswith(classroom_path)
                 assert await frame.locator("tl-grading-detail").count() == 1
                 assert await frame.locator(".selcat-assignment-row").count() == int(has_assignments)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from bs4.element import Tag
 from scraper.portals.base import (
     GradeMap,
@@ -12,7 +13,12 @@ from scraper.portals.utils import (
     canonicalize_course_title,
     canonicalize_grade,
     truncate_title,
-    wait_after_nav,
+)
+
+
+_DASHBOARD_URL = re.compile(
+    r"^https://(?:[a-z0-9-]+\.)?howsschoolgoing\.com/dashboard(?:/|[?#]|$)",
+    re.IGNORECASE,
 )
 
 
@@ -26,13 +32,33 @@ class HowsSchoolGoing(PortalEngine):
         google_sso=True,
     )
 
+    async def login(self, first_name: str | None = None) -> None:
+        try:
+            await super().login(first_name)
+        except self.LoginError:
+            # A retry can arrive at the authenticated dashboard via existing
+            # cookies, where the shared flow cannot find a Google login form.
+            if not _DASHBOARD_URL.search(self.page.url):
+                raise
+            self.logger.info("portal.login.authenticated_dashboard_recovered")
+            await self.after_login(first_name)
+            self.logger.info("portal.login.succeeded")
+
     async def after_login(self, first_name: str | None) -> None:
         _ = first_name
-        await wait_after_nav(self.page, wait_after_load=4000)
+        await self.page.wait_for_url(_DASHBOARD_URL, timeout=30_000)
         await self.page.locator("#data-tab").get_by_role(
-            "button", name="Grades"
+            "button", name="Grades", exact=True
         ).click()
-        await self.page.wait_for_timeout(3000)
+        grade_table = self.page.locator(
+            "div.dataSource_Common_StudentProfile_Grades_GradesTable"
+        )
+        await grade_table.wait_for(state="visible", timeout=30_000)
+        # DataTables displays its shell before the asynchronous rows arrive.
+        await grade_table.locator(
+            'tbody tr td:nth-child(2):visible, '
+            'td[colspan]:text-is("No data available in table"):visible'
+        ).first.wait_for(state="visible", timeout=30_000)
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -58,13 +84,15 @@ class HowsSchoolGoing(PortalEngine):
                 columns = course.find_all('td')
                 if len(columns) >= 2:
                     title = columns[0].get_text(strip=True)
-                    grade_text = columns[1].get_text(strip=True)
+                    grade_text = columns[1].get_text(" ", strip=True).rstrip("* ")
 
                     # format title like [title - Mr./Ms. teacher]
                     title = truncate_title(title, '-Ms', False)
                     title = truncate_title(title, '-Mr', False)
                     # format grade like [letter percent] or [letter]
-                    grades = grade_text.split(' ')
+                    grades = grade_text.split()
+                    if not grades:
+                        continue
                     if len(grades) == 2:
                         grade = canonicalize_grade(grades[1])
                     else:
