@@ -19,6 +19,7 @@ SESSION_COOKIE_NAME = "__Host-grade_checker_session"
 
 @pytest.fixture
 def config_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PYTHON_ENV", "production")
     values = {
         "CRM_AUTH_BASE_URL": "https://crm-auth.tutoringclub.com",
         "CRM_AUTH_CLIENT_ID": "grade-checker",

@@ -38,6 +38,12 @@ _ASSIGNMENT_DUE = ".assignment__largeScreen--cell-courseDueDate"
 _ASSIGNMENT_SCORE = ".assignment-score__scores--largeScreen"
 _ASSIGNMENT_FLAGS = "tl-curriculum-flags .label"
 _READINESS_TIMEOUT_MS = 30_000
+INFINITE_CAMPUS_GRADES_ROUTE = re.compile(
+    r"/portal/(?:student|parent)/grades(?:[?#]|$)"
+)
+INFINITE_CAMPUS_CLASSROOM_ROUTE = re.compile(
+    r"/portal/(?:student|parent)/classroom/"
+)
 
 _DUE_DATE = re.compile(r"\bdue\s*:\s*(\d{1,2}/\d{1,2}/\d{4})\b", re.IGNORECASE)
 _PERCENT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*%")
@@ -218,7 +224,7 @@ async def _wait_for_course_page(page: Page) -> Frame:
     # grading-task-list still in the overview) does not mean the course loaded.
     frame = _workspace(page)
     await frame.wait_for_url(
-        re.compile(r"/portal/(?:student|parent)/classroom/"), timeout=_READINESS_TIMEOUT_MS
+        INFINITE_CAMPUS_CLASSROOM_ROUTE, timeout=_READINESS_TIMEOUT_MS
     )
     return frame
 

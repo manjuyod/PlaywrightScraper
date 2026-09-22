@@ -35,18 +35,26 @@ The UI lives in `ui/` and is served by `ui.wsgi:app`.
 Routes:
 
 - `/` shows a public, data-free CRM sign-in page without a Grade session and
-  shows runnable-student summaries and canonical jobs only for a validated
-  session with `dashboard.read`.
+  shows franchise-scoped runnable-student summaries and canonical jobs only for
+  a validated session with `dashboard.read` in production. With
+  `PYTHON_ENV=dev`, it shows all franchises and recent jobs without CRM
+  authorization.
 - `/health` and `/login` redirect to `/` and therefore reach the same
   session-aware public entry point.
 - `/franchise/<franchise_id>` shows runnable CRM students, grade-level filters, current grade snapshots, standing, status, and CRM primary-portal links.
 - `/franchise/<franchise_id>/student/<crmstudentid>` shows current grades, agenda items, grade history, and heatmap views.
 - `/api/jobs` returns shaped, read-only job progress for the validated session
-  franchise and is polled by the overview every 15 seconds.
+  franchise in production, or all franchises in `dev`, and is polled by the
+  overview every 15 seconds.
 
-Franchise and student pages never provide navigation to the overview. A direct
-URL still requires `students.read`, and its franchise ID must exactly match the
-validated session before any private loader executes.
+In `dev`, any franchise or student page can be opened directly without a Grade
+session. Use this mode only on a trusted development deployment: its read-only
+dashboard data is available without authentication. Production continues to
+require the CRM grant and exact session franchise for protected pages.
+
+Franchise and student pages never provide navigation to the overview. In
+production, a direct URL still requires `students.read`, and its franchise ID
+must exactly match the validated session before any private loader executes.
 
 ## Local Dashboard Run
 

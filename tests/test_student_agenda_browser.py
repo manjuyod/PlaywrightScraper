@@ -127,6 +127,47 @@ def test_grade_card_exposes_sync_issue_details_to_pointer_and_keyboard_users(
     expect(trigger.locator("xpath=..").get_by_role("note")).to_contain_text(message)
 
 
+def test_grade_values_use_continuous_translucent_backgrounds(
+    browser_page: Page,
+    preview_url: str,
+) -> None:
+    page = browser_page
+    page.goto(preview_url, wait_until="networkidle")
+
+    grade_values = page.locator(".tc-grade-card .tc-grade-value")
+    expect(grade_values).to_have_count(15)
+    styles = grade_values.evaluate_all(
+        """elements => elements.map(element => ({
+            background: getComputedStyle(element).backgroundColor,
+            color: getComputedStyle(element).color,
+            text: element.textContent.trim(),
+        }))"""
+    )
+    graded = [style for style in styles if style["text"] != "No grade"]
+    ungraded = [style for style in styles if style["text"] == "No grade"]
+    assert len(graded) == 14
+    assert len(ungraded) == 1
+    assert ungraded[0]["background"] == "rgba(0, 0, 0, 0)"
+    assert all(style["background"].endswith(", 0.22)") for style in graded)
+    assert all(style["color"] == "rgb(15, 23, 42)" for style in styles)
+    assert len({style["background"] for style in styles}) > 4
+    assert all(style["text"] for style in styles)
+    movement_offsets = page.locator(
+        '.tc-grade-value [aria-label="Grade increased"], '
+        '.tc-grade-value [aria-label="Grade decreased"]'
+    ).evaluate_all(
+        """elements => elements.map(element => {
+            const marker = element.getBoundingClientRect();
+            const grade = element.parentElement.getBoundingClientRect();
+            return Math.abs(
+                (marker.top + marker.height / 2) - (grade.top + grade.height / 2)
+            );
+        })"""
+    )
+    assert movement_offsets
+    assert max(movement_offsets) <= 0.5
+
+
 def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(
     browser_page: Page,
     preview_url: str,
@@ -165,32 +206,41 @@ def test_assignment_metadata_is_visible_inline_in_both_placements(browser_page, 
     embedded = page.locator(".tc-grade-agenda").first
     embedded.locator("summary").click()
     row = embedded.locator(".tc-agenda-assignment").first
-    expect(row.get_by_label("Score: 7/10", exact=True)).to_be_visible()
-    expect(row.get_by_text("Formative", exact=True)).to_be_visible()
+    expect(row.get_by_label("Score: 7/10 · 70%", exact=True)).to_be_visible()
+    category = row.get_by_text("Formative", exact=True)
+    if width == 360:
+        expect(category).to_be_hidden()
+    else:
+        expect(category).to_be_visible()
     expect(row.get_by_label("Low-grade assignment")).to_be_visible()
     expect(row.locator("time")).to_have_text("Aug 25")
     unscored = embedded.locator(".tc-agenda-assignment").filter(has_text="Graph transformations")
     expect(unscored.get_by_label("Score unavailable")).to_have_text("—")
     zero = embedded.locator(".tc-agenda-assignment").filter(has_text="Function comparison")
-    expect(zero.get_by_label("Score: 0/10", exact=True)).to_be_visible()
+    expect(zero.get_by_label("Score: 0/10 · 0%", exact=True)).to_be_visible()
     standalone = page.locator(".tc-agenda-card .tc-agenda-class").first
     standalone.locator("summary").click()
     standalone_row = standalone.locator(".tc-agenda-assignment").first
     expect(standalone_row.get_by_label("Score: 79.5%", exact=True)).to_be_visible()
-    expect(standalone_row.get_by_text("Summative", exact=True)).to_be_visible()
+    standalone_category = standalone_row.get_by_text("Summative", exact=True)
+    if width == 360:
+        expect(standalone_category).to_be_hidden()
+    else:
+        expect(standalone_category).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
     for assignment in (row, unscored, standalone_row):
         box = assignment.bounding_box()
-        cells = [assignment.locator(selector).bounding_box() for selector in (
-            ".tc-agenda-score", ".tc-agenda-category", "time",
-        )]
+        selectors = [".tc-agenda-score", "time"]
+        if width != 360:
+            selectors.insert(1, ".tc-agenda-category")
+        cells = [assignment.locator(selector).bounding_box() for selector in selectors]
         assert box and all(cells)
         for cell in cells:
             assert cell["x"] >= box["x"]
             assert cell["x"] + cell["width"] <= box["x"] + box["width"] + 1
             assert abs((cell["y"] + cell["height"] / 2) - (box["y"] + box["height"] / 2)) < 2
-        assert cells[0]["x"] + cells[0]["width"] <= cells[1]["x"]
-        assert cells[1]["x"] + cells[1]["width"] <= cells[2]["x"]
+        for left, right in zip(cells, cells[1:]):
+            assert left["x"] + left["width"] <= right["x"]
     output = ROOT / "output" / "assignment-metadata"
     output.mkdir(parents=True, exist_ok=True)
     page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
@@ -224,7 +274,7 @@ def test_long_assignment_metadata_keeps_full_accessible_values_without_overflow(
     title = "A deliberately long fictional prototype evaluation assignment title for overflow inspection"
     row = course.locator(".tc-agenda-assignment").filter(has_text=title)
     expect(row.locator(".tc-agenda-title")).to_have_attribute("title", title)
-    expect(row.get_by_label("Score: 0.1234567890123456789/10", exact=True)).to_be_visible()
-    expect(row.get_by_text("Summative", exact=True)).to_be_visible()
+    expect(row.get_by_label("Score: 0.1234567890123456789/10 · 1.2%", exact=True)).to_be_visible()
+    expect(row.get_by_text("Summative", exact=True)).to_be_hidden()
     expect(row.locator("time")).to_have_text("Aug 23 · 18:00")
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")

@@ -21,11 +21,13 @@ def card(
     grading_complete: bool,
     score: str = "",
     due_time: str = "",
+    category: str = "",
 ) -> str:
     return f"""
     <div class="Card">
       <div id="assignment-{number}-scoreData"><span>{score}</span></div>
       <div id="assignment-{number}-completeData"><span>{score}</span></div>
+      <div class="TextSubSectionCategory"><span>{category}</span></div>
       <div class="TextHeading">{number} - {title}</div>
       <div><span class="TextSubSection">Due Date:</span> {due}</div>
       <div><span class="TextSubSection">Due Time:</span> {due_time}</div>
@@ -45,7 +47,8 @@ def gradebook(*cards: str) -> str:
 
 def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
     html = gradebook(
-        card(1, "Overdue work", due="09/08/2026", grading_complete=True, score="0 / 10"),
+        card(1, "Overdue work", due="09/08/2026", grading_complete=True, score="0 / 10",
+             category="Homework"),
         card(
             2,
             "Needs revision",
@@ -53,8 +56,10 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             due_time="3:05 PM",
             grading_complete=True,
             score="7 / 10 70%",
+            category="Summative",
         ),
-        card(3, "Upcoming work", due="09/14/2026", grading_complete=False),
+        card(3, "Upcoming work", due="09/14/2026", grading_complete=False,
+             category="Formative"),
         card(
             4,
             "Completed work",
@@ -76,6 +81,7 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             "dueTime": None,
             "status": "missing",
             "score": "0/10",
+            "category": "Homework",
         },
         {
             "course": "Science 8",
@@ -84,6 +90,7 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             "dueTime": "15:05",
             "status": "low_score",
             "score": "7/10",
+            "category": "summative",
         },
         {
             "course": "Science 8",
@@ -91,6 +98,7 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             "dueDate": "2026-09-14",
             "dueTime": None,
             "status": "due",
+            "category": "formative",
         },
     ]
 

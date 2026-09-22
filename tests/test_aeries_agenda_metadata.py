@@ -62,7 +62,7 @@ def test_legacy_layout_can_emit_complete_score_when_actual_field_is_absent():
 @pytest.mark.parametrize('category,expected', [
     ('Formative', 'formative'),
     ('<i title="Summative"></i> Assessment', 'summative'),
-    ('Writing', None),
+    ('Writing', 'Writing'),
     ('<i title="Formative"></i><i title="Summative"></i> Mixed', None),
     ('<i title="Formative"></i> Summative', None),
 ])

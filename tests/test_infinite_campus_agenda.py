@@ -35,8 +35,15 @@ def test_category_containment_and_row_scores_do_not_use_category_totals():
     assert all(row.get("score") != "78/80" for row in rows)
 
 
-@pytest.mark.parametrize("label", ["Practice", "", "Formative Weight: 20", "Formative Summative"])
-def test_unrecognized_category_does_not_discard_assignment_or_inherit_previous_section(label):
+@pytest.mark.parametrize("label,expected", [
+    ("Practice", "Practice"),
+    ("", None),
+    ("Formative Weight: 20", None),
+    ("Formative Summative", "Formative Summative"),
+])
+def test_custom_or_invalid_category_does_not_discard_assignment_or_inherit_previous_section(
+    label, expected,
+):
     row = assignment_row("Synthetic work", due="08/28/2026", score="7/10")
     html = ('<tl-grading-task-list></tl-grading-task-list>'
             '<button class="divider__header" aria-controls="outer"><h5>Formative</h5></button>'
@@ -45,7 +52,7 @@ def test_unrecognized_category_does_not_discard_assignment_or_inherit_previous_s
     records = parse_infinite_campus_course_grades(html, course="Chemistry", reference=REFERENCE)
     assert len(records) == 1
     assert records[0]["score"] == "7/10"
-    assert "category" not in records[0]
+    assert records[0].get("category") == expected
 
 
 @pytest.mark.parametrize("controls", [

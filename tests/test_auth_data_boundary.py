@@ -59,6 +59,7 @@ class BoundaryHarness:
 
 @pytest.fixture
 def boundary_harness(monkeypatch: pytest.MonkeyPatch) -> BoundaryHarness:
+    monkeypatch.setenv("PYTHON_ENV", "production")
     for module_name in ("ui.routes", "ui.app"):
         sys.modules.pop(module_name, None)
 
@@ -147,6 +148,48 @@ def test_anonymous_root_returns_public_sign_in_before_private_data_loaders(
     assert response.headers["Cache-Control"] == "no-store"
     assert boundary_harness.rust.calls == []
     assert boundary_harness.data_calls == []
+
+
+def test_dev_overview_and_jobs_load_all_franchises_without_crm_authorization(
+    boundary_harness: BoundaryHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHON_ENV", "dev")
+    boundary_harness.client.delete_cookie(SESSION_COOKIE_NAME)
+    boundary_harness.rust.unavailable = True
+
+    home = boundary_harness.client.get("/")
+    jobs = boundary_harness.client.get("/api/jobs")
+
+    assert home.status_code == 200
+    assert 'id="tc-page-data"' in home.get_data(as_text=True)
+    assert jobs.status_code == 200
+    assert jobs.get_json() == {"jobs": []}
+    assert boundary_harness.data_calls == [
+        ("students", None),
+        ("jobs", None, 20),
+        ("jobs", None, 20),
+    ]
+    assert boundary_harness.rust.calls == []
+
+
+def test_dev_can_open_any_franchise_and_student_without_crm_authorization(
+    boundary_harness: BoundaryHarness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTHON_ENV", "dev")
+    boundary_harness.client.delete_cookie(SESSION_COOKIE_NAME)
+    boundary_harness.rust.unavailable = True
+
+    franchise = boundary_harness.client.get("/franchise/99")
+    student = boundary_harness.client.get("/franchise/99/student/101")
+
+    assert franchise.status_code == 200
+    assert student.status_code == 404
+    assert boundary_harness.data_calls == [
+        ("franchise_name", 99),
+        ("students", 99),
+        ("student", 99, 101),
+    ]
+    assert boundary_harness.rust.calls == []
 
 
 @pytest.mark.parametrize("path", ["/franchise/57", "/franchise/57/student/101"])

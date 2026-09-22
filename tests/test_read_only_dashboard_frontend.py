@@ -45,15 +45,16 @@ console.log(JSON.stringify(reports));
         assert report['rendered'] == 2
         assert report['embedded'] == 2
         assert report['standalone'] == 0
-        assert 'Score: 7/10' in report['scores']
+        assert 'Score: 7/10 · 70%' in report['scores']
         assert 'No grade' in report['text']
         assert 'NaN' not in report['text']
         assert 'No valid agenda portal' not in report['text']
 
 
-def test_shared_assignment_row_shows_score_and_only_recognized_category_labels():
+def test_shared_assignment_row_shows_score_and_only_safe_category_labels():
     fixture = json.loads((ROOT / "tests/fixtures/student_agenda_page_data.json").read_text(encoding="utf-8"))
     fixture["student"]["agendaSlots"][0]["weeks"][0]["classes"][0]["assignments"][0]["category"] = "<img src=x>"
+    fixture["student"]["agendaSlots"][0]["weeks"][0]["classes"][0]["assignments"][1]["category"] = "Homework & Quizzes"
     result = _run_student_page_scenario("const data = " + json.dumps(fixture) + ";" + """
 function collect(node, className) {
     if (Array.isArray(node)) return node.flatMap(child => collect(child, className));
@@ -67,11 +68,62 @@ console.log(JSON.stringify({
     categories: collect(page, "tc-agenda-category").flatMap(node => node.children),
 }));
 """)
-    assert "Score: 7/10" in result["labels"]
-    assert "Score: 0/10" in result["labels"]
+    assert "Score: 7/10 · 70%" in result["labels"]
+    assert "Score: 0/10 · 0%" in result["labels"]
     assert "Score: 79.5%" in result["labels"]
     assert "Score unavailable" in result["labels"]
-    assert set(result["categories"]) == {"Formative", "Summative"}
+    assert set(result["categories"]) == {"Formative", "Summative", "Homework & Quizzes"}
+
+
+def test_grade_colors_interpolate_and_assignment_percentages_are_derived() -> None:
+    result = _run_student_page_scenario(
+        """
+console.log(JSON.stringify({
+    red: hooks.gradeValueStyle(60),
+    yellow: hooks.gradeValueStyle(70),
+    green81: hooks.gradeValueStyle(81),
+    green: hooks.gradeValueStyle(100),
+    belowRange: hooks.gradeValueStyle(12),
+    aboveRange: hooks.gradeValueStyle(110),
+    invalid: hooks.gradeValueStyle("not a grade"),
+    empty: hooks.gradeValueStyle(null),
+    fraction: hooks.assignmentScoreDisplay("7/10"),
+    decimalFraction: hooks.assignmentScoreDisplay("7.25/8"),
+    percentage: hooks.assignmentScoreDisplay("79.5%"),
+    unavailable: hooks.assignmentScoreDisplay(null),
+}));
+"""
+    )
+    assert result == {
+        "red": {
+            "backgroundColor": "rgba(239, 68, 68, 0.22)",
+            "borderColor": "rgba(239, 68, 68, 0.42)",
+        },
+        "yellow": {
+            "backgroundColor": "rgba(250, 204, 21, 0.22)",
+            "borderColor": "rgba(250, 204, 21, 0.42)",
+        },
+        "green81": {
+            "backgroundColor": "rgba(71, 192, 84, 0.22)",
+            "borderColor": "rgba(71, 192, 84, 0.42)",
+        },
+        "green": {
+            "backgroundColor": "rgba(16, 220, 90, 0.22)",
+            "borderColor": "rgba(16, 220, 90, 0.42)",
+        },
+        "belowRange": {
+            "backgroundColor": "rgba(239, 68, 68, 0.22)",
+            "borderColor": "rgba(239, 68, 68, 0.42)",
+        },
+        "aboveRange": {
+            "backgroundColor": "rgba(16, 220, 90, 0.22)",
+            "borderColor": "rgba(16, 220, 90, 0.42)",
+        },
+        "fraction": "7/10 · 70%",
+        "decimalFraction": "7.25/8 · 90.6%",
+        "percentage": "79.5%",
+        "unavailable": "",
+    }
 
 
 def _run_franchise_sorting_scenario(scenario: str) -> object:
@@ -155,6 +207,9 @@ def _run_student_page_scenario(scenario: str, *, hash_value: str = "#report") ->
         JobCard: typeof JobCard === "function" ? JobCard : null,
         StudentCard: typeof StudentCard === "function" ? StudentCard : null,
         StudentTable: typeof StudentTable === "function" ? StudentTable : null,
+        gradeValueStyle: typeof gradeValueStyle === "function" ? gradeValueStyle : null,
+        assignmentScoreDisplay:
+            typeof assignmentScoreDisplay === "function" ? assignmentScoreDisplay : null,
     };
     return;
 
@@ -814,7 +869,7 @@ function collect(node, type, found = []) {
 const movements = collect(gradeList, "span")
     .filter((span) => span.props["aria-label"])
     .map((span) => ({
-        marker: span.children[0],
+        markerPath: span.children[0].children[0].props.d,
         className: span.props.className,
         label: span.props["aria-label"],
     }));
@@ -831,13 +886,19 @@ console.log(JSON.stringify({
         "standingTones": ["success", "warning", "danger", "slate", "slate"],
         "movements": [
             {
-                "marker": "+",
-                "className": "ml-1 font-extrabold text-emerald-600",
+                "markerPath": "M1 5 5 1l4 4",
+                "className": (
+                    "ml-1 inline-flex h-4 w-3 shrink-0 items-center justify-center "
+                    "align-middle text-emerald-600"
+                ),
                 "label": "Grade increased",
             },
             {
-                "marker": "-",
-                "className": "ml-1 font-extrabold text-red-600",
+                "markerPath": "M1 1l4 4 4-4",
+                "className": (
+                    "ml-1 inline-flex h-4 w-3 shrink-0 items-center justify-center "
+                    "align-middle text-red-600"
+                ),
                 "label": "Grade decreased",
             },
         ],

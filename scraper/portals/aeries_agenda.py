@@ -31,6 +31,7 @@ _TITLE = ".TextHeading"
 _COMPLETE_SCORE = "[id$='completeData']"
 _ACTUAL_SCORE = "[id$='scoreData']"
 _EXEMPT_SCORE = re.compile(r"^(?:NA|N/A|EX|Excused|Exempt)(?:\b|\s*/)", re.IGNORECASE)
+_CATEGORY = ".TextSubSectionCategory"
 _DATE = re.compile(r"\bDue Date:\s*(\d{1,2}/\d{1,2}/\d{4})\b", re.IGNORECASE)
 _TIME = re.compile(r"\bDue Time:\s*(\d{1,2}:\d{2}\s*[AP]M)\b", re.IGNORECASE)
 _GRADING_COMPLETE = re.compile(
@@ -145,19 +146,23 @@ def _display_score(card: Tag) -> str | None:
 
 
 def _assignment_category(card: Tag) -> AssignmentCategory | None:
-    category = card.select_one(".TextSubSectionCategory")
+    category = card.select_one(_CATEGORY)
     if category is None:
         return None
     # Tustin's category text can be "Writing" while its icon explicitly
-    # identifies the assessment as Formative or Summative. Do not infer a
-    # category from arbitrary teacher labels or conflicting portal markers.
+    # identifies the assessment as Formative or Summative. Prefer explicit
+    # assessment markers, falling back to the safe teacher-provided label.
     labels = [_text(category), category.get("title")]
     labels.extend(node.get("title") for node in category.select("[title]"))
     categories = {
         value for label in labels
-        if (value := normalize_assignment_category(label)) is not None
+        if (value := normalize_assignment_category(label)) in {"formative", "summative"}
     }
-    return next(iter(categories)) if len(categories) == 1 else None
+    if len(categories) > 1:
+        return None
+    if categories:
+        return next(iter(categories))
+    return normalize_assignment_category(_text(category))
 
 
 def parse_aeries_gradebook(

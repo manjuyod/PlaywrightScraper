@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from .canvas_entry import is_ccsd_clever_entry
+from .clever_entry import is_clever_entry
 
 if TYPE_CHECKING:
     from .base import PortalEngine
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
 
 _REGISTRY: dict[str, type[PortalEngine]] = {}
 managed_portals: dict[str, list[str]] = {}
-_INFRASTRUCTURE_MODULES = {"base", "registry", "utils"}
+_INFRASTRUCTURE_MODULES = {"base", "clever_entry", "registry", "utils"}
 
 
 def register_portal_class(cls: type[PortalEngine]) -> None:
@@ -70,10 +71,13 @@ def get_portal_key_from_url(url: str) -> str | None:
         return None
     if "canvas" in managed_portals and is_ccsd_clever_entry(url):
         return "canvas"
+    if "clever" in managed_portals and is_clever_entry(url):
+        return "clever"
     normalized_url = url.casefold()
     matches = (
         (len(pattern), key)
         for key, patterns in managed_portals.items()
+        if key != "clever"
         for pattern in patterns
         if pattern.casefold() in normalized_url
     )

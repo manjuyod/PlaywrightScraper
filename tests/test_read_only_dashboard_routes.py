@@ -41,7 +41,7 @@ def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(mo
          "score": "Score 7.50/10 (75%)", "category": "Formative", "private": "discard"},
         {"title": "B percentage", "dueDate": "2026-09-14", "dueTime": None,
          "score": "79.50%", "category": "SUMMATIVE"},
-        {"title": "C invalid", "dueDate": "2026-09-14", "dueTime": None,
+        {"title": "C custom", "dueDate": "2026-09-14", "dueTime": None,
          "score": {"unsafe": True}, "category": "Practice"},
         {"title": "D legacy", "dueDate": "2026-09-14", "dueTime": None},
     ]
@@ -58,8 +58,11 @@ def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(mo
         }
         assert rows[1]["score"] == "79.5%"
         assert rows[1]["category"] == "summative"
-        assert [row["title"] for row in rows[2:]] == ["C invalid", "D legacy"]
-        assert all("score" not in row and "category" not in row for row in rows[2:])
+        assert rows[2]["title"] == "C custom"
+        assert rows[2]["category"] == "Practice"
+        assert "score" not in rows[2]
+        assert rows[3]["title"] == "D legacy"
+        assert "score" not in rows[3] and "category" not in rows[3]
 
 
 def test_metadata_on_equal_title_and_date_rows_does_not_break_page_sorting(monkeypatch):
@@ -177,7 +180,7 @@ def _create_client(
         _student(103, grade="college"),
     ]
     monkeypatch.setattr(routes.dashboard, "load_students", lambda **_kwargs: students)
-    monkeypatch.setattr(routes.dashboard, "load_jobs", lambda limit=20: [_job()])
+    monkeypatch.setattr(routes.dashboard, "load_jobs", lambda franchise_id=None, limit=20: [_job()])
     monkeypatch.setattr(
         routes.dashboard,
         "load_franchise_name",
@@ -219,7 +222,9 @@ def _page_data(response) -> dict[str, Any]:
 def test_anonymous_home_renders_public_sign_in_without_dashboard_data(
     monkeypatch,
 ) -> None:
-    client, routes = _create_client(monkeypatch, authenticated=False)
+    client, routes = _create_client(
+        monkeypatch, environment="production", authenticated=False
+    )
     data_calls: list[str] = []
 
     def load_students(**_kwargs):
@@ -258,6 +263,36 @@ def test_authenticated_dev_home_renders_read_only_overview(monkeypatch) -> None:
     assert page_data["franchises"][0]["name"] == "Tutoring Club of Gilbert"
     assert page_data["jobs"] == [_job()]
     assert "Set-Cookie" not in response.headers
+
+
+def test_dev_overview_shows_all_franchises_and_jobs_without_a_session(monkeypatch) -> None:
+    client, routes = _create_client(monkeypatch, authenticated=False)
+    students = [_student(101, franchise_id=57), _student(201, franchise_id=99)]
+    other_job = {**_job(), "id": "other-job", "franchiseId": 99}
+    calls: list[tuple[str, int | None]] = []
+
+    def load_students(*, franchise_id=None):
+        calls.append(("students", franchise_id))
+        return students
+
+    def load_jobs(franchise_id=None, limit=20):
+        calls.append(("jobs", franchise_id))
+        return [_job(), other_job]
+
+    monkeypatch.setattr(routes.dashboard, "load_students", load_students)
+    monkeypatch.setattr(routes.dashboard, "load_jobs", load_jobs)
+
+    response = client.get("/")
+    data = _page_data(response)
+
+    assert response.status_code == 200
+    assert data["countAll"] == 2
+    assert [franchise["id"] for franchise in data["franchises"]] == [57, 99]
+    assert [franchise["url"] for franchise in data["franchises"]] == [
+        "/franchise/57", "/franchise/99"
+    ]
+    assert [job["franchiseId"] for job in data["jobs"]] == [57, 99]
+    assert calls == [("students", None), ("jobs", None)]
 
 
 def test_non_dev_anonymous_home_is_public_without_loading_dashboard_data(

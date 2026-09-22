@@ -20,7 +20,8 @@ def test_normalize_preserves_valid_metadata_and_ignores_invalid_optional_values(
         _metadata_record(title="Synthetic project", score={"unsafe": True}, category="Practice"),
     ])
     assert weeks["2026-09-14"]["Chemistry"]["low_score"] == [
-        {"title": "Synthetic project", "dueDate": "2026-09-14", "dueTime": None},
+        {"title": "Synthetic project", "dueDate": "2026-09-14", "dueTime": None,
+         "category": "Practice"},
         {"title": "Synthetic quiz", "dueDate": "2026-09-14", "dueTime": None,
          "score": "7.5/10", "category": "formative"},
     ]

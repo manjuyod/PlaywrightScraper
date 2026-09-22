@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from datetime import date, timedelta
 from typing import Any, Iterable
@@ -11,7 +10,7 @@ from scraper.assignment_metadata import normalize_assignment_category, normalize
 
 from ui import dashboard_data as dashboard
 from ui.app import app
-from ui.auth.guards import current_claims, require_franchise, require_permission
+from ui.auth.guards import current_claims, is_dev_mode, require_franchise, require_permission
 from ui.auth.session import SESSION_COOKIE_NAME
 
 
@@ -321,16 +320,14 @@ def _render_dashboard(page_data: dict[str, Any]):
     )
 
 
-def _is_dev_mode() -> bool:
-    return os.getenv("PYTHON_ENV", "").strip().lower() == "dev"
-
-
 def _unauthorized():
     return render_template("unauthorized.html"), 200
 
 
 @app.get("/")
 def index():
+    if is_dev_mode():
+        return _dashboard_index()
     if not request.cookies.get(SESSION_COOKIE_NAME):
         return render_template("sign_in.html")
     return _dashboard_index()
@@ -338,9 +335,9 @@ def index():
 
 @require_permission("dashboard.read")
 def _dashboard_index():
-    claims = current_claims()
-    students = dashboard.load_students(franchise_id=claims.franchise_id)
-    jobs = dashboard.load_jobs(claims.franchise_id)
+    franchise_id = None if is_dev_mode() else current_claims().franchise_id
+    students = dashboard.load_students(franchise_id=franchise_id)
+    jobs = dashboard.load_jobs(franchise_id)
     franchises = dashboard.summarize_franchises(students)
     for franchise in franchises:
         franchise["url"] = url_for("franchise_view", franchise_id=franchise["id"])
@@ -374,7 +371,7 @@ def login():
 @app.get("/franchise/<int:franchise_id>")
 @require_franchise("students.read")
 def franchise_view(franchise_id: int):
-    trusted_franchise_id = current_claims().franchise_id
+    trusted_franchise_id = franchise_id if is_dev_mode() else current_claims().franchise_id
     grade_filter = _normalize_grade_filter(request.args.get("grade_filter"))
     franchise_name = dashboard.load_franchise_name(trusted_franchise_id)
     students = dashboard.load_students(franchise_id=trusted_franchise_id)
@@ -411,7 +408,7 @@ def franchise_view(franchise_id: int):
 @app.get("/franchise/<int:franchise_id>/student/<int:crmstudentid>")
 @require_franchise("students.read")
 def student_view(franchise_id: int, crmstudentid: int):
-    trusted_franchise_id = current_claims().franchise_id
+    trusted_franchise_id = franchise_id if is_dev_mode() else current_claims().franchise_id
     student = dashboard.load_student(trusted_franchise_id, crmstudentid)
     if student is None:
         abort(404)
@@ -428,9 +425,9 @@ def student_view(franchise_id: int, crmstudentid: int):
 @app.get("/api/jobs")
 @require_permission("dashboard.read", api=True)
 def jobs_api():
-    claims = current_claims()
+    franchise_id = None if is_dev_mode() else current_claims().franchise_id
     return jsonify(
         {
-            "jobs": dashboard.load_jobs(claims.franchise_id)
+            "jobs": dashboard.load_jobs(franchise_id)
         }
     )
