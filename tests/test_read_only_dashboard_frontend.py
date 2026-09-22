@@ -9,6 +9,48 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_aeries_assignments_render_with_and_without_numeric_course_grades():
+    result = _run_student_page_scenario('''
+function collect(node, className) {
+    if (Array.isArray(node)) return node.flatMap(child => collect(child, className));
+    if (!node || typeof node !== "object") return [];
+    const matches = String(node.props.className || "").split(" ").includes(className);
+    return (matches ? [node] : []).concat(collect(node.children || [], className));
+}
+function text(node) {
+    if (Array.isArray(node)) return node.map(text).join(" ");
+    if (!node || typeof node !== "object") return String(node ?? "");
+    return text(node.children || []);
+}
+const slot = {number:1, portal:"aeries", portalLabel:"Aeries", status:"synced", weeks:[{
+    weekStart:"2026-09-21", label:"Week of Sep 21", classes:[
+        {name:"Math", assignments:[{title:"Quiz", status:"low_score", dueDate:"2026-09-21", score:"7/10", category:"summative"}]},
+        {name:"Science", assignments:[{title:"Project", status:"due", dueDate:"2026-09-22"}]},
+    ],
+}]};
+const reports = [[{course:"MATH",grade:90}], []].map(gradesSnapshot => {
+    const student = {gradesSnapshot, agendaSlots:[slot, {number:2,portal:null,weeks:[]}], grades:{}};
+    const page = hooks.StudentPage({data:{student}});
+    return {
+        rendered:collect(page,"tc-agenda-assignment").length,
+        embedded:collect(page,"tc-grade-agenda").length,
+        standalone:collect(page,"tc-agenda-card").length,
+        scores:collect(page,"tc-agenda-score").map(node => node.props["aria-label"]),
+        text:text(page),
+    };
+});
+console.log(JSON.stringify(reports));
+''')
+    for report in result:
+        assert report['rendered'] == 2
+        assert report['embedded'] == 2
+        assert report['standalone'] == 0
+        assert 'Score: 7/10' in report['scores']
+        assert 'No grade' in report['text']
+        assert 'NaN' not in report['text']
+        assert 'No valid agenda portal' not in report['text']
+
+
 def test_shared_assignment_row_shows_score_and_only_recognized_category_labels():
     fixture = json.loads((ROOT / "tests/fixtures/student_agenda_page_data.json").read_text(encoding="utf-8"))
     fixture["student"]["agendaSlots"][0]["weeks"][0]["classes"][0]["assignments"][0]["category"] = "<img src=x>"

@@ -14,6 +14,25 @@ from ui.auth.models import GrantIntrospection
 from ui.auth.session import GradeSession, SESSION_COOKIE_NAME, sign_session
 
 
+def test_aeries_agenda_is_supported_in_both_slots(monkeypatch):
+    _client, routes = _create_client(monkeypatch)
+    base = _student(101)
+    slot = {'portal':'aeries', 'weeks':{'2026-09-21':{'SCIENCE':{
+        'missing':[], 'due':[], 'low_score':[{
+            'title':'Practice', 'dueDate':'2026-09-21', 'dueTime':None,
+            'score':'7/10', 'category':'summative',
+        }],
+    }}}}
+    student = base.__class__(**{**base.__dict__, 'agenda':{'agenda1':slot, 'agenda2':slot}})
+    projected = routes._agenda_slots(student)
+    for shaped in projected:
+        assert shaped.get('available', True) is True
+        assert shaped['portalLabel'] == 'Aeries'
+        item = shaped['weeks'][0]['classes'][0]['assignments'][0]
+        assert item['score'] == '7/10'
+        assert item['category'] == 'summative'
+
+
 def test_agenda_slots_preserve_only_validated_optional_metadata_in_both_slots(monkeypatch):
     _client, routes = _create_client(monkeypatch)
     base = _student(101)

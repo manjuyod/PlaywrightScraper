@@ -42,7 +42,7 @@ _PORTAL_LABELS = {
     "student_connection": "Student Connection",
 }
 _AGENDA_PORTALS = frozenset(
-    {"canvas", "google_classroom", "infinite_campus", "parentvue"}
+    {"aeries", "canvas", "google_classroom", "infinite_campus", "parentvue"}
 )
 
 

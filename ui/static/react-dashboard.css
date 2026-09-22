@@ -930,6 +930,10 @@ summary:focus-visible {
     min-width: 0;
 }
 
+.tc-grade-agenda {
+    min-width: 0;
+}
+
 .tc-grade-agenda[open] {
     border-color: rgba(68, 114, 196, 0.42);
     background: #ffffff;

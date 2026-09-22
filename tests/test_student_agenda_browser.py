@@ -134,7 +134,11 @@ def test_student_report_embeds_primary_agenda_and_keeps_secondary_card(
     page = browser_page
     page.goto(preview_url, wait_until="networkidle")
 
-    expect(page.locator(".tc-grade-agenda")).to_have_count(7)
+    expect(page.locator(".tc-grade-agenda")).to_have_count(8)
+    ungraded = page.locator(".tc-grade-agenda").filter(has_text="Design Thinking Seminar")
+    expect(ungraded.locator("summary")).to_contain_text("No grade")
+    ungraded.locator("summary").click()
+    expect(ungraded.locator(".tc-agenda-assignment").first).to_be_visible()
     expect(page.locator(".tc-agenda-card")).to_have_count(1)
     expect(page.get_by_role("heading", name="Agenda · ParentVUE")).to_be_visible()
     expect(page.get_by_role("heading", name="Agenda · Canvas")).to_have_count(0)
@@ -191,6 +195,24 @@ def test_assignment_metadata_is_visible_inline_in_both_placements(browser_page, 
     output.mkdir(parents=True, exist_ok=True)
     page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
     page.screenshot(path=str(output / f"student-{width}.png"), full_page=True)
+
+
+def test_embedded_agenda_rows_fit_the_mobile_card_without_horizontal_scrolling(browser_page, preview_url):
+    page = browser_page
+    page.set_viewport_size({"width": 360, "height": 1000})
+    page.goto(preview_url, wait_until="networkidle")
+    page.locator(".tc-grade-agenda").evaluate_all("els => els.forEach(el => el.open = true)")
+    bounds = page.locator('[aria-label="Current grades and assignments"]').evaluate("""el => {
+        const right = el.getBoundingClientRect().right;
+        return {
+            client: el.clientWidth,
+            scroll: el.scrollWidth,
+            clipped: Array.from(el.querySelectorAll('.tc-grade-agenda, .tc-agenda-assignment'))
+                .filter(row => row.getBoundingClientRect().right > right + 1).length
+        };
+    }""")
+    assert bounds['scroll'] <= bounds['client']
+    assert bounds['clipped'] == 0
 
 
 def test_long_assignment_metadata_keeps_full_accessible_values_without_overflow(browser_page, preview_url):

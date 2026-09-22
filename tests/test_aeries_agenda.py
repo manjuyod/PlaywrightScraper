@@ -45,7 +45,7 @@ def gradebook(*cards: str) -> str:
 
 def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
     html = gradebook(
-        card(1, "Overdue work", due="09/08/2026", grading_complete=False),
+        card(1, "Overdue work", due="09/08/2026", grading_complete=True, score="0 / 10"),
         card(
             2,
             "Needs revision",
@@ -75,6 +75,7 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             "dueDate": "2026-09-08",
             "dueTime": None,
             "status": "missing",
+            "score": "0/10",
         },
         {
             "course": "Science 8",
@@ -82,6 +83,7 @@ def test_parses_one_gradebook_into_missing_low_score_and_due_records() -> None:
             "dueDate": "2026-09-08",
             "dueTime": "15:05",
             "status": "low_score",
+            "score": "7/10",
         },
         {
             "course": "Science 8",

@@ -735,8 +735,8 @@
                     key: "grade",
                     className: "shrink-0 whitespace-nowrap font-mono text-sm font-bold text-slate-900",
                 },
-                Number(grade.grade).toFixed(1),
-                h(GradeMovement, { change: grade.change }),
+                grade.grade == null ? "No grade" : Number(grade.grade).toFixed(1),
+                grade.grade == null ? null : h(GradeMovement, { change: grade.change }),
             ),
         ];
         if (!agenda) {
@@ -768,7 +768,16 @@
     }
 
     function GradeList({ grades, empty = "No grade data yet.", agendaByCourse }) {
-        const gradeItems = grades || [];
+        const gradeItems = [...(grades || [])];
+        // Assignments can exist before a course has a numeric grade, or with
+        // a portal label that does not match the grade snapshot. Keep them
+        // accessible without inventing a numeric grade or merging courses.
+        const courseKeys = new Set(gradeItems.map(grade => gradeCourseKey(grade.course)));
+        for (const [key, agenda] of agendaByCourse || []) {
+            if (!courseKeys.has(key)) {
+                gradeItems.push({ course: agenda.course, grade: null, change: null });
+            }
+        }
         if (!gradeItems.length) {
             return h("p", { className: "text-sm text-slate-500" }, empty);
         }
@@ -1275,7 +1284,7 @@
         );
     }
 
-    const GRADE_AGENDA_PORTALS = new Set(["infinite_campus", "parentvue", "canvas"]);
+    const GRADE_AGENDA_PORTALS = new Set(["aeries", "infinite_campus", "parentvue", "canvas"]);
 
     function isConfiguredAgendaSlot(slot) {
         return Boolean(
@@ -1318,7 +1327,7 @@
                     continue;
                 }
                 if (!courses.has(key)) {
-                    courses.set(key, { assignments: [] });
+                    courses.set(key, { course: classGroup.name, assignments: [] });
                 }
                 const course = courses.get(key);
                 course.assignments.push(...assignments);

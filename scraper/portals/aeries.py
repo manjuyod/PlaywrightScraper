@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from time import monotonic
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from bs4 import Tag
 from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -11,6 +12,8 @@ from scraper.agenda_contract import AgendaRecord
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .aeries_agenda import collect_aeries_agenda
+from .aeries_gradebook import collect_tustin_grades, is_tustin_url
+from .aeries_okta import IusdOktaError, complete_iusd_okta_login, is_iusd_portal
 from .base import GradeMap, PortalEngine, UniversalLoginConfig
 from .utils import (
     canonicalize_course_title,
@@ -40,6 +43,9 @@ class Aeries(PortalEngine):
 
     async def _is_logged_in(self) -> bool:
         url = self.page.url or ""
+        page_name = urlsplit(url).path.rsplit("/", 1)[-1].lower()
+        if page_name.startswith("login") or page_name == "changepassword.aspx":
+            return False
 
         success_selectors = [
             "#StudentNameDropDown",
@@ -56,15 +62,18 @@ class Aeries(PortalEngine):
             except Exception:
                 pass
 
-        return any(x in url.lower() for x in ("dashboard", "grades", "student"))
+        return False
 
     async def _has_login_error(self) -> bool:
+        if urlsplit(self.page.url).path.lower().endswith("/changepassword.aspx"):
+            self.logger.warning("portal.login.password_change_required")
+            return True
         error_targets = [
             self.page.get_by_role("alert"),
             self.page.locator(".alert"),
             self.page.locator(".validation-summary-errors"),
             self.page.locator("#divError"),
-            self.page.locator("text=/invalid|incorrect|failed|try again|username|password/i"),
+            self.page.locator("text=/invalid credentials|incorrect|login failed|try again/i"),
         ]
 
         for target in error_targets:
@@ -113,6 +122,20 @@ class Aeries(PortalEngine):
 
     @override
     async def alternate_sso_login(self) -> None:
+        if is_iusd_portal(self.login_url):
+            # PortalEngine.login also retries timeouts in post-login hooks.
+            # Keep this guard on the engine so those retries cannot resubmit.
+            if getattr(self, "_iusd_okta_attempted", False):
+                raise IusdOktaError("iusd_okta_already_attempted")
+            self._iusd_okta_attempted = True
+            self.logger.info("portal.login.iusd_okta.started")
+            await complete_iusd_okta_login(
+                self.page, username=self.sid, password=self.pw,
+                login_url=self.login_url,
+            )
+            self.logger.info("portal.login.iusd_okta.completed")
+            return
+
         username_selector = "#input28"
         pw_selector = "#input62"
         await universal_login_flow(
@@ -143,6 +166,10 @@ class Aeries(PortalEngine):
     )
     async def fetch_grades(self) -> GradeMap:
         self.logger.info("portal.fetch.started")
+        if is_tustin_url(self.login_url):
+            grades = await collect_tustin_grades(self.page, login_url=self.login_url)
+            self.logger.info("portal.fetch.completed", extra={"course_count": len(grades)})
+            return grades
         try:
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000)
