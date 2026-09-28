@@ -616,7 +616,7 @@ class CanvasEngine(PortalEngine):
             self._raise_canvas_route_error()
             route.observe(self.page.url)
             route.require_microsoft_credentials()
-            await self.page.fill("input#i0116", self.sid, timeout=1000)
+            await self.page.fill("input#i0116", self.sid, timeout=5000)
             self._raise_canvas_route_error()
             route.observe(self.page.url)
             route.require_microsoft_credentials()
