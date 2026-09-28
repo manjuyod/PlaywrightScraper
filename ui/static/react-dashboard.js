@@ -936,7 +936,7 @@
                                 columnKey: "name",
                                 sortConfig,
                                 onSort,
-                                className: headingClass,
+                                className: cn(headingClass, "tc-student-column"),
                             }),
                             h("th", { className: headingClass }, "Primary Portal"),
                             h("th", { className: headingClass }, "Recent Grades"),
@@ -962,10 +962,10 @@
                                 { key: student.id },
                                 h(
                                     "td",
-                                    { className: cellClass },
+                                    { className: cn(cellClass, "tc-student-column") },
                                     h(
                                         "div",
-                                        { className: "flex items-center gap-2" },
+                                        { className: "tc-student-identity flex items-center gap-2" },
                                         h(
                                             "a",
                                             {

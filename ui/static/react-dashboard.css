@@ -575,6 +575,29 @@ summary:focus-visible {
     flex: 0 0 auto;
 }
 
+.tc-student-column {
+    width: 22rem;
+    min-width: 22rem;
+}
+
+.tc-student-identity {
+    position: relative;
+    min-width: 0;
+}
+
+.tc-student-identity .tc-sync-warning {
+    position: static;
+}
+
+.tc-student-identity .tc-sync-warning__content {
+    right: auto;
+    left: 0;
+    box-sizing: border-box;
+    width: 20rem;
+    max-width: 100%;
+    text-align: left;
+}
+
 .tc-sync-warning > summary,
 .tc-sync-issue > summary {
     cursor: pointer;
