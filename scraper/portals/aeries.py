@@ -4,7 +4,7 @@ from time import monotonic
 from typing import ClassVar
 from urllib.parse import urlsplit
 
-from bs4 import Tag
+from bs4 import BeautifulSoup, Tag
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from typing_extensions import override
 
@@ -40,6 +40,13 @@ class Aeries(PortalEngine):
         google_sso=True,
         alternate_sso=True,
     )
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # The retired SVUSD host now serves a public directory instead of a
+        # login form. Use the Family Portal linked by that district directory.
+        if self.login_url == "https://familyportal.svusd.org/ParentPortal/LoginParent.aspx":
+            self.login_url = "https://saddlebackvalleyusd.aeries.net/student/LoginParent.aspx"
 
     async def _is_logged_in(self) -> bool:
         url = self.page.url or ""
@@ -158,6 +165,27 @@ class Aeries(PortalEngine):
             return True
         return False
 
+    async def _dashboard_snapshot(self) -> BeautifulSoup:
+        """Wait for asynchronous grades before preserving the fallback DOM."""
+        deadline = monotonic() + 10
+        previous = None
+        while True:
+            soup = await self.get_soup()
+            classes = soup.find("div", id="divClass")
+            if not isinstance(classes, Tag):
+                return soup  # The existing student-selection flow owns this case.
+            signature = []
+            for card in classes.select("div.Card"):
+                title = card.select_one("a.TextHeading")
+                grade = card.select_one("div.Grade span")
+                if title is not None and grade is not None:
+                    signature.append((title.get_text(" ", strip=True), grade.get_text(" ", strip=True)))
+            ready = any(title and canonicalize_grade(grade) is not None for title, grade in signature)
+            if (ready and signature == previous) or monotonic() >= deadline:
+                return soup
+            previous = signature
+            await self.page.wait_for_timeout(250)
+
     @override
     @retry(
         stop=stop_after_attempt(3),
@@ -174,13 +202,15 @@ class Aeries(PortalEngine):
             await self.raise_login_error_if("Dashboard" not in self.page.url)
             await self.page.wait_for_timeout(3000)
 
-            soup = await self.get_soup()
+            soup = await self._dashboard_snapshot()
             class_table = soup.find("div", id="divClass")
             if class_table is None:
                 await self.page.click("#StudentNameDropDown")
                 await self.page.click("#StudentNameDropDownMenu")
                 await self.page.wait_for_load_state()
                 await self.page.wait_for_timeout(3000)
+                soup = await self._dashboard_snapshot()
+                class_table = soup.find("div", id="divClass")
 
             grades_page_exists = await self.nav_to_grades()
             if grades_page_exists:
@@ -195,13 +225,15 @@ class Aeries(PortalEngine):
                     grade_selector,
                     decompose_labels=True,
                 )
-                self.logger.info(
-                    "portal.fetch.completed", extra={"course_count": len(courses_dict)}
-                )
-                return courses_dict
-            else:
+                if courses_dict:
+                    self.logger.info(
+                        "portal.fetch.completed", extra={"course_count": len(courses_dict)}
+                    )
+                    return courses_dict
+            # Report cards can exist before any grades are published. Keep the
+            # dashboard snapshot taken before navigation as the fallback.
+            if not grades_page_exists or not courses_dict:
                 self.logger.info("portal.fetch.dashboard_fallback")
-                _ = await self.page.reload()
                 courses_dict: GradeMap = {}
 
                 if isinstance(class_table, Tag) and len(class_table.select("div.Card")) > 0:

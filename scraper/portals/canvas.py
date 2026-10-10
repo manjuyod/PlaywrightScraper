@@ -16,7 +16,12 @@ from scraper.agenda_contract import AgendaRecord
 
 from .base import GradeMap, LoginError, PortalEngine, PlaywrightTimeout
 from .canvas_agenda import collect_canvas_agenda
-from .canvas_entry import is_ccsd_clever_entry
+from .canvas_entry import (
+    CAPISTRANO_CANVAS_ORIGIN,
+    CAPISTRANO_MICROSOFT_PATH,
+    is_capistrano_saml_entry,
+    is_ccsd_clever_entry,
+)
 from .utils import exists, canonicalize_course_title, canonicalize_grade, wait_after_nav, universal_login_flow
 
 
@@ -60,7 +65,7 @@ _CLEVER_LOGIN_PATH = "/oauth/ldap/login"
 _CLEVER_SAML_HOST = "samlidp.clever.com"
 
 
-class CanvasTrustError(LoginError):
+class CanvasTrustError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("canvas_auth_route_untrusted")
 
@@ -198,6 +203,74 @@ class _CanvasAuthRoute:
         ):
             raise CanvasTrustError()
         return origin
+
+_CAPISTRANO_CANVAS_HOST = "capousd.instructure.com"
+
+
+class _CapistranoCanvasAuthRoute(_CanvasAuthRoute):
+    """Capistrano redirects directly to its district Microsoft SAML tenant."""
+
+    def __init__(self, entry_url: str) -> None:
+        self.entry_origin, entry_host = _normalized_https_origin(entry_url)
+        if entry_host != _CAPISTRANO_CANVAS_HOST:
+            raise CanvasTrustError()
+        self.native = urlparse(entry_url).path.rstrip("/") == "/login/canvas"
+        self.reset()
+
+    def reset(self) -> None:
+        self._phase = "entry"
+        self._current_host = _CAPISTRANO_CANVAS_HOST
+        self._password_submitted = False
+
+    def observe(self, url: str) -> None:
+        origin, host = _normalized_https_origin(url)
+        if self._phase == "entry":
+            if origin == self.entry_origin:
+                if self._password_submitted:
+                    self._phase = "canvas_return"
+                self._current_host = host
+                return
+            if (not self.native and host == _MICROSOFT_LOGIN_HOST
+                    and urlparse(url).path.lower() == CAPISTRANO_MICROSOFT_PATH):
+                self._phase = "microsoft"
+                self._current_host = host
+                return
+        elif self._phase == "microsoft":
+            if host == _MICROSOFT_LOGIN_HOST:
+                self._current_host = host
+                return
+            if self._password_submitted and origin == self.entry_origin:
+                self._phase = "canvas_return"
+                self._current_host = host
+                return
+        elif self._phase in {"canvas_return", "postauth_relay"}:
+            if origin == self.entry_origin:
+                self._phase = "canvas_return"
+                self._current_host = host
+                return
+            if (host == _CANVAS_TRANSIT_HOST
+                    and urlparse(url).path == "/delegated_auth_pass_through"):
+                self._phase = "postauth_relay"
+                self._current_host = host
+                return
+        raise CanvasTrustError()
+
+    def require_canvas_credentials(self) -> None:
+        if (not self.native or self._phase != "entry"
+                or self._current_host != _CAPISTRANO_CANVAS_HOST
+                or self._password_submitted):
+            raise CanvasTrustError()
+
+    def mark_canvas_password_submitted(self) -> None:
+        self.require_canvas_credentials()
+        self._password_submitted = True
+
+    def verified_canvas_origin(self, url: str) -> str:
+        self.observe(url)
+        if self._phase != "canvas_return" or not self._password_submitted:
+            raise CanvasTrustError()
+        return self.entry_origin
+
 
 class _CcsdCanvasAuthRoute:
     """CCSD's published Students link uses Clever, independently of HUSD SSO."""
@@ -538,8 +611,10 @@ class CanvasEngine(PortalEngine):
     )
     async def _prepare_login(self, route: _CanvasAuthRoute) -> None:
         route.reset()
+        entry_url = (route.entry_origin if isinstance(route, _CapistranoCanvasAuthRoute)
+                     else self.login_url)
         await self._run_canvas_auth_action(
-            self.page.goto(self.login_url, wait_until="domcontentloaded")
+            self.page.goto(entry_url, wait_until="domcontentloaded")
         )
         self._raise_canvas_route_error()
         route.observe(self.page.url)
@@ -713,6 +788,39 @@ class CanvasEngine(PortalEngine):
         await self._run_canvas_auth_action(self.page.wait_for_load_state("domcontentloaded"))
         route.require_login_not_rejected()
 
+    async def _submit_capistrano_native_once(self, route: _CapistranoCanvasAuthRoute) -> None:
+        await self._run_canvas_auth_action(
+            self.page.goto(self.login_url, wait_until="domcontentloaded")
+        )
+        form = self.page.locator('form:has(input[name="pseudonym_session[password]"])')
+        await self._run_canvas_auth_action(form.wait_for(state="visible"))
+
+        async def check_target() -> None:
+            self._raise_canvas_route_error()
+            route.observe(self.page.url)
+            route.require_canvas_credentials()
+            target = await self._run_canvas_auth_action(form.evaluate(
+                "form => ({action: form.action, method: form.method})"
+            ))
+            origin, _ = _normalized_https_origin(target["action"])
+            if (origin != route.entry_origin
+                    or urlparse(target["action"]).path != "/login/canvas"
+                    or target["method"].lower() != "post"):
+                raise CanvasTrustError()
+            route.observe(self.page.url)
+            route.require_canvas_credentials()
+
+        for field, value in (("unique_id", self.sid), ("password", self.pw)):
+            await check_target()
+            await self._run_canvas_auth_action(
+                form.locator(f'input[name="pseudonym_session[{field}]"]').fill(value)
+            )
+        await check_target()
+        route.mark_canvas_password_submitted()
+        await self._run_canvas_auth_action(
+            form.locator('input[name="pseudonym_session[password]"]').press("Enter")
+        )
+
     async def login(self, first_name: Optional[str] = None):
         """
         Fill creds, submit, and land in a valid post-login Canvas state.
@@ -727,14 +835,22 @@ class CanvasEngine(PortalEngine):
         entry_url = self.login_url
         if is_ccsd_clever_entry(entry_url):
             entry_url = f"https://{_CCSD_CANVAS_HOST}{_CCSD_STUDENT_LOGIN_PATH}"
+        elif is_capistrano_saml_entry(entry_url):
+            entry_url = CAPISTRANO_CANVAS_ORIGIN
         _, entry_host = _normalized_https_origin(entry_url)
-        route = (_CcsdCanvasAuthRoute(entry_url) if entry_host == _CCSD_CANVAS_HOST
-                 else _CanvasAuthRoute(entry_url))
+        if entry_host == _CCSD_CANVAS_HOST:
+            route = _CcsdCanvasAuthRoute(entry_url)
+        elif entry_host == _CAPISTRANO_CANVAS_HOST:
+            route = _CapistranoCanvasAuthRoute(entry_url)
+        else:
+            route = _CanvasAuthRoute(entry_url)
         self._install_canvas_route_guard(route)
         try:
             if isinstance(route, _CcsdCanvasAuthRoute):
                 await self._prepare_ccsd_login(route)
                 await self._submit_ccsd_credentials_once(route)
+            elif isinstance(route, _CapistranoCanvasAuthRoute) and route.native:
+                await self._submit_capistrano_native_once(route)
             else:
                 await self._prepare_login(route)
                 await self._submit_microsoft_credentials_once(route)
