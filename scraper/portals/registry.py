@@ -5,7 +5,7 @@ import pkgutil
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from .canvas_entry import is_ccsd_clever_entry
+from .canvas_entry import is_capistrano_saml_entry, is_ccsd_clever_entry
 from .clever_entry import is_clever_entry
 
 if TYPE_CHECKING:
@@ -69,7 +69,9 @@ def get_portal(key: object) -> type[PortalEngine]:
 def get_portal_key_from_url(url: str) -> str | None:
     if not url:
         return None
-    if "canvas" in managed_portals and is_ccsd_clever_entry(url):
+    if "canvas" in managed_portals and (
+        is_ccsd_clever_entry(url) or is_capistrano_saml_entry(url)
+    ):
         return "canvas"
     if "clever" in managed_portals and is_clever_entry(url):
         return "clever"
